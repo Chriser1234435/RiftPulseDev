@@ -40,3 +40,5 @@ This integration is unofficial, reverse-engineered, and best-effort; TikTok can 
 ### Railway runtime
 
 The Railway development service runs the compiled bridge entry point with `node dist/index.js`. Keep it in test mode unless a TikTok LIVE connection has been explicitly approved.
+
+The development connector should be paused when the target account is not live, to avoid repeated connection attempts while waiting for a stream.
