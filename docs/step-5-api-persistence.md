@@ -28,7 +28,7 @@ Provider access and refresh token columns are placeholders for ciphertext only. 
 
 ## Validation results
 
-- `npm test` passed: strict TypeScript check, 7 unit tests, isolated SQLite schema/constraint test, and Worker build.
+- `npm test` passed: strict TypeScript check, 12 unit tests, isolated SQLite schema/constraint test, and Worker build.
 - Local Wrangler D1 migration `0001_initial.sql` applied successfully; a subsequent migration listing reported no pending migrations.
 - Local schema inventory showed all nine application tables plus Wrangler migration metadata; `PRAGMA foreign_key_check` returned no violations.
 - Local API smoke test verified health/version, challenge creation without echoing the code, and challenge status. Claim remains blocked until website authentication exists.
