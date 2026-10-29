@@ -1,0 +1,2 @@
+# Local-only template. Generate your own random secret; never use a sample key.
+# Add PAIRING_HMAC_KEY=<your-random-secret-at-least-32-characters> to .dev.vars after generating it.

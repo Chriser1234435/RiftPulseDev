@@ -7,7 +7,13 @@
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
-    "check:toolchain": "wrangler --version && vite --version && tsc --version"
+    "check:toolchain": "wrangler --version && vite --version && tsc --version",
+    "test:contracts": "node --experimental-strip-types --test tests/unit/contracts.test.ts tests/unit/pairing.test.ts tests/unit/api.test.ts",
+    "test:db-schema": "node --test tests/integration/migration.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run typecheck && npm run test:contracts && npm run test:db-schema && npm run build",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local --config wrangler.jsonc",
+    "db:migrations:local": "wrangler d1 migrations list DB --local --config wrangler.jsonc"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.66.0",

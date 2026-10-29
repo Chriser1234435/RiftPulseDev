@@ -1,6 +1,6 @@
 # RiftPulseDev — Proposed Roadmap
 
-Status: planning only. Each step is reported before proceeding; no step is authorized automatically.
+Status: Step 5 complete. Step 6 has not started and requires explicit authorization.
 
 ## Step 3 — Architecture and design
 - [x] Define V1 scope: Chat + BSR Song Request only.
@@ -10,20 +10,26 @@ Status: planning only. Each step is reported before proceeding; no step is autho
 - [x] Define mod-generated five-digit, short-lived, one-time pairing.
 - [x] Define Twitch, YouTube, Kick, and isolated unofficial TikTok connector behavior.
 - [x] Define security, UI, reliability, and test requirements.
-- [ ] User approves or revises architecture.
+- [x] User approved the architecture.
 
-## Step 4 — Toolchain and clean repository foundation (after architecture approval)
-- Clone the empty RiftPulseDev repository into the new workspace.
-- Verify Git, Node, Cloudflare toolchain, and CI gates.
-- Verify PCVR loader, framework, and UI dependencies for Beat Saber 1.40.8.
-- Verify Quest loader and Android SDK/ADB requirements.
-- Prove Better Auth + D1 compatibility before selecting final auth dependencies.
-- Do not deploy or create production resources.
+## Step 4 — Toolchain and clean repository foundation
+- [x] Establish the clean local RiftPulseDev workspace without importing legacy source, migrations, secrets, or deployment config.
+- [x] Verify Git, Node, Cloudflare toolchain, and local Worker build.
+- [x] Verify PCVR loader/framework and compile a minimal .NET Framework 4.7.2 smoke project.
+- [x] Install QPM/NDK/CMake/Ninja/ADB and compile a minimal Scotland2/QPM-based Quest ARM64 smoke project.
+- [x] Record user-confirmed PCVR and Quest target version `1.40.8_7379`.
+- [x] Keep local commits unpushed and production resources unchanged.
+- [ ] Runtime-test mod loading inside Beat Saber when a prepared mod and the relevant game/device are available.
 
 ## Step 5 — API contracts and persistence
-Lock shared schemas, migrations, health/version endpoints, device authorization, and pairing expiry/replay protections.
+- [x] Add shared V1 API contracts for the two modules, providers, pairing, commands, and song requests.
+- [x] Add the initial D1 schema and local-only migration workflow.
+- [x] Add health/version and pairing challenge/status endpoints.
+- [x] Add HMAC-based code digest storage, five-minute expiry, active collision checks, and per-device challenge limits.
+- [x] Add a one-time claim helper and keep the public claim route gated until verified website authentication exists.
+- [x] Validate TypeScript, unit tests, isolated schema constraints, local migration, and Worker build.
 
-## Step 6 — Website and authentication
+## Step 6 — Website and authentication (not started; requires authorization)
 Build the animated dashboard, module cards, secure auth, device management, provider connection UI, and settings.
 
 ## Step 7 — Chat and providers
