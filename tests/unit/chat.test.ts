@@ -96,6 +96,14 @@ test("normalizes TikTok chat and platform events without inventing cash values",
   assert.equal(message?.text, "Hello chat");
   assert.equal(message?.badges.verified, true);
 
+  // Actual tiktok-live-connector WebcastChatMessage shape: ID lives in common.msgId and text in content.
+  const actualConnectorMessage = normalizeTikTokChatMessage({
+    common: { msgId: "actual-connector-msg-1" }, content: "Hello from a real connector-shaped payload",
+    user: { userId: "viewer-2", uniqueId: "actualviewer", nickname: "Actual Viewer" },
+  }, "room-1", "Streamer", now);
+  assert.equal(actualConnectorMessage?.externalMessageId, "actual-connector-msg-1");
+  assert.equal(actualConnectorMessage?.text, "Hello from a real connector-shaped payload");
+
   const gift = normalizeTikTokProviderEvent("gift", {
     eventId: "gift-event-1", giftName: "Rose", repeatCount: 3,
     user: { userId: "viewer-1", nickname: "Viewer" }, createTime: 1793275140,

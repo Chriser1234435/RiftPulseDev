@@ -74,7 +74,7 @@ export function normalizeTikTokChatMessage(payload: unknown, channelId = "", cha
   const room = child(root, "room");
   return normalize({
     provider: "tiktok",
-    externalMessageId: root.msgId ?? root.messageId ?? root.commentId ?? root.id,
+    externalMessageId: root.msgId ?? root.messageId ?? root.commentId ?? root.id ?? child(root, "common")?.msgId ?? child(root, "common")?.messageId,
     channelId: channelId || root.roomId || root.room_id || room?.id,
     channelName: channelName || text(root.roomName ?? room?.title, 80),
     senderId: user.userId ?? user.user_id ?? user.id,
