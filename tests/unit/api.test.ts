@@ -141,7 +141,7 @@ test("rejects an active code collision and caps active challenges per device", a
   assert.equal(limited.status, 429);
 });
 
-test("rejects invalid pairing code and unauthenticated claim", async () => {
+test("rejects invalid pairing code and fails closed when auth is not configured", async () => {
   const invalid = await call("/api/v1/pairing/challenges", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -156,10 +156,10 @@ test("rejects invalid pairing code and unauthenticated claim", async () => {
   assert.equal(invalid.status, 400);
   const claim = await call("/api/v1/pairing/claim", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", origin: "https://riftpulse.test" },
     body: JSON.stringify({ code: "04271" }),
-  });
-  assert.equal(claim.status, 401);
+  }, { ...env(), APP_BASE_URL: "https://riftpulse.test", TRUSTED_ORIGINS: "https://riftpulse.test" });
+  assert.equal(claim.status, 503);
 });
 
 test("requires pairing configuration and rejects unknown API routes", async () => {

@@ -20,7 +20,20 @@ A clean-room RiftPulse project for Beat Saber PCVR and standalone Quest.
 
 ## Current status
 
-Architecture approved. Step 4 established a clean local repository foundation and identified outstanding toolchain validation. No production cloud resources have been changed.
+Steps 3–6 have a documented architecture, local API/persistence foundation, and local website/authentication implementation. The current website and API run locally through Vite + the Cloudflare Worker runtime. Provider OAuth, email verification delivery, full chat/BSR execution, actual mod runtime integration, and deployment are still outstanding. No production Cloudflare resources have been changed.
+
+## Local development
+
+1. Install dependencies with `npm install`.
+2. Copy `.dev.vars.example` to `.dev.vars`.
+3. Generate two **different** random secrets for `PAIRING_HMAC_KEY` and `BETTER_AUTH_SECRET`; never use a password or key from another service.
+4. Keep `APP_BASE_URL=http://127.0.0.1:5173` and `TRUSTED_ORIGINS=http://127.0.0.1:5173` for the local setup.
+5. Apply migrations to local D1 only: `npm run db:migrate:local`.
+6. Start the website/API: `npm run dev`, then open `http://127.0.0.1:5173`.
+7. Run the full type/unit/schema/build checks with `npm test`.
+8. With the dev server running, `npm run test:auth:local` exercises sign-up, sessions, settings, device pairing/revocation, and sign-out against local D1.
+
+Local email/password auth is deliberately restricted to localhost. Do not use the local-only auth configuration as production authentication. Do not run Wrangler with `--remote` or deploy unless separately authorized.
 
 ## Security and contribution rules
 

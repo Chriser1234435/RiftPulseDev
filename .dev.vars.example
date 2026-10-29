@@ -1,2 +1,6 @@
-# Local-only template. Generate your own random secret; never use a sample key.
-# Add PAIRING_HMAC_KEY=<your-random-secret-at-least-32-characters> to .dev.vars after generating it.
+# Copy to .dev.vars for local development only. Never commit .dev.vars.
+# Generate two independent random secrets, each at least 32 characters.
+PAIRING_HMAC_KEY=<generate-a-unique-random-secret>
+BETTER_AUTH_SECRET=<generate-a-different-random-secret>
+APP_BASE_URL=http://127.0.0.1:5173
+TRUSTED_ORIGINS=http://127.0.0.1:5173

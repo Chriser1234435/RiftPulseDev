@@ -1,6 +1,6 @@
 # RiftPulseDev - Proposed Roadmap
 
-Status: Step 5 complete for the local API contract and persistence foundation. Step 6 has not started and requires explicit authorization.
+Status: Step 6 complete for the local website/authentication foundation. Step 7 has not started and requires explicit authorization.
 
 ## Step 3 - Architecture and design
 - [x] Define V1 scope: Chat + BSR Song Request only.
@@ -29,17 +29,23 @@ Status: Step 5 complete for the local API contract and persistence foundation. S
 - [x] Add a one-time claim helper and keep the public claim route gated until verified website authentication exists.
 - [x] Validate TypeScript, unit tests, isolated schema constraints, local migration, and Worker build.
 
-## Step 6 - Website and authentication (not started; requires authorization)
-Build the animated dashboard, module cards, secure auth, device management, provider connection UI, and settings.
+## Step 6 - Website and authentication
+- [x] Build the responsive RiftPulse dashboard, module cards, integration UI, settings/help dialogs, and pairing form.
+- [x] Add local-only Better Auth sign-up/sign-in/session/sign-out backed by D1.
+- [x] Add authenticated per-account module settings persistence and BSR command preference storage.
+- [x] Add authenticated device listing, claim, and revocation.
+- [x] Add trusted-Origin checks for cookie-authenticated mutation routes.
+- [x] Verify cookie flags, local auth/device/settings smoke tests, migration schema, TypeScript, and Worker/client build.
+- [x] Keep remote auth and Cloudflare deployment disabled until email delivery and production security configuration are approved.
 
-## Step 7 - Chat and providers
+## Step 7 - Chat and providers (not started; requires authorization)
 Implement normalized events, deduplication, reconnect handling, provider health, viewer aggregation, and chat display. Validate each provider's current OAuth/API requirements. Prove TikTok runtime feasibility in isolation.
 
 ## Step 8 - BSR Song Request
 Implement command parsing, BeatSaver metadata validation, cooldowns, queue rules, and explicit error states.
 
 ## Step 9 - PCVR and Quest integration
-Build the pairing flow and in-game UI for each target; test them separately on actual devices.
+Build the in-game pairing flow and UI for each target; test them separately on actual devices.
 
 ## Step 10 - End-to-end validation and deployment
 Run security, API, provider-mock, PCVR, and Quest tests. Deploy only to isolated Cloudflare development resources and a development hostname after explicit authorization. Test the actual development domain, not only previews.

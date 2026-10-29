@@ -15,6 +15,13 @@ export interface D1Database {
 }
 export interface Env {
   DB?: D1Database;
+  ASSETS?: { fetch(request: Request): Promise<Response> };
   /** Set with a local-only .dev.vars file or Wrangler secret; never commit the value. */
   PAIRING_HMAC_KEY?: string;
+  /** Separate Better Auth signing key. Never reuse the pairing key. */
+  BETTER_AUTH_SECRET?: string;
+  /** Canonical base URL for auth redirects and cookies. Local development only in Step 6. */
+  APP_BASE_URL?: string;
+  /** Comma-separated exact trusted browser origins. */
+  TRUSTED_ORIGINS?: string;
 }

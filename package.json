@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "vite build && node scripts/clean-build-secrets.mjs",
     "preview": "vite preview",
     "check:toolchain": "wrangler --version && vite --version && tsc --version",
     "test:contracts": "node --experimental-strip-types --test tests/unit/contracts.test.ts tests/unit/pairing.test.ts tests/unit/pairing-claim.test.ts tests/unit/api.test.ts",
     "test:db-schema": "node --test tests/integration/migration.test.mjs",
+    "test:auth:local": "node tests/integration/auth-smoke.mjs",
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && npm run test:contracts && npm run test:db-schema && npm run build",
     "db:migrate:local": "wrangler d1 migrations apply DB --local --config wrangler.jsonc",
@@ -17,8 +18,19 @@
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.66.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
     "typescript": "7.0.2",
     "vite": "8.3.5",
     "wrangler": "4.155.0"
+  },
+  "dependencies": {
+    "better-auth": "1.7.14",
+    "kysely": "^0.29.7",
+    "kysely-d1": "^0.4.0",
+    "lucide-react": "1.64.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   }
 }

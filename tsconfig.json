@@ -8,7 +8,8 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": []
+    "types": [],
+    "jsx": "react-jsx"
   },
-  "include": ["src/**/*.ts", "packages/**/*.ts"]
+  "include": ["src/**/*.ts", "packages/**/*.ts", "apps/web/src/**/*.ts", "apps/web/src/**/*.tsx"]
 }
