@@ -3,6 +3,7 @@ import { createHmac, generateKeyPairSync, sign } from "node:crypto";
 import test from "node:test";
 import { extractKickPublicKey, verifyKickWebhookSignature } from "../../packages/shared/src/kick-webhook.ts";
 import { verifyTwitchEventSubSignature } from "../../packages/shared/src/twitch-eventsub.ts";
+import { createOAuthState, digestOAuthState } from "../../packages/shared/src/oauth-state.ts";
 import {
   ChatMessageDeduplicator, aggregateViewerCounts, emptyProviderHealth, normalizeKickChatMessage,
   normalizeTwitchChatMessage, normalizeYouTubeChatMessage, reconnectDelayMs,
@@ -102,4 +103,15 @@ test("verifies Kick webhook signatures and rejects stale or modified payloads", 
   assert.equal(await verifyKickWebhookSignature({ ...input, rawBody: rawBody + " " }, publicKeyPem, now), false);
   assert.equal(await verifyKickWebhookSignature(input, publicKeyPem, new Date(now.getTime() + 10 * 60_000)), false);
   assert.equal(await verifyKickWebhookSignature({ ...input, signature: "not-base64" }, publicKeyPem, now), false);
+});
+
+test("OAuth state is high entropy, digest-only, and rejects malformed values", async () => {
+  const state = createOAuthState();
+  assert.match(state, /^[a-f0-9]{64}$/);
+  assert.notEqual(state, createOAuthState());
+  const digest = await digestOAuthState(state);
+  assert.match(digest, /^[a-f0-9]{64}$/);
+  assert.notEqual(digest, state);
+  assert.equal(await digestOAuthState(state), digest);
+  await assert.rejects(() => digestOAuthState("12345"), /invalid_oauth_state/);
 });

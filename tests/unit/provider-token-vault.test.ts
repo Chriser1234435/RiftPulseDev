@@ -19,7 +19,7 @@ test("token vault rejects malformed envelopes, wrong keys, and tampering", async
   const encrypted = await encryptProviderToken("sensitive-token", key);
   await assert.rejects(() => decryptProviderToken(encrypted, otherKey), /token_decryption_failed/);
   const parts = encrypted.split(".");
-  parts[2] = parts[2].slice(0, -1) + (parts[2].endsWith("A") ? "B" : "A");
+  parts[2] = (parts[2].startsWith("A") ? "B" : "A") + parts[2].slice(1);
   await assert.rejects(() => decryptProviderToken(parts.join("."), key));
   await assert.rejects(() => decryptProviderToken("not-an-envelope", key), /invalid_token_envelope/);
   await assert.rejects(() => encryptProviderToken("token", "short"), /invalid_token_encryption_key/);

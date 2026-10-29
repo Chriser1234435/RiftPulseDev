@@ -47,6 +47,19 @@ assert.equal(providerHealth.providers.length, 4);
 assert.equal(providerHealth.viewers.total, null, "unknown viewer counts must not be represented as zero");
 assert.equal(providerHealth.providers.find(provider => provider.provider === "tiktok").state, "unsupported");
 
+const providerConnectionsResponse = await fetch(`${base}/api/v1/providers/connections`, { headers: { cookie, origin } });
+assert.equal(providerConnectionsResponse.status, 200, await providerConnectionsResponse.clone().text());
+const providerConnections = await providerConnectionsResponse.json();
+assert.equal(providerConnections.connections.length, 4);
+assert.equal(providerConnections.connections.find(provider => provider.provider === "tiktok").status, "unsupported");
+assert.equal(providerConnections.connections.find(provider => provider.provider === "twitch").configured, false);
+assert.equal(JSON.stringify(providerConnections).includes("accessToken"), false);
+
+const connectTwitchWithoutOrigin = await fetch(`${base}/api/v1/providers/twitch/connect`, { method: "POST", headers: { cookie } });
+assert.equal(connectTwitchWithoutOrigin.status, 403, "provider authorization start must enforce trusted Origin");
+const connectTwitchUnconfigured = await fetch(`${base}/api/v1/providers/twitch/connect`, { method: "POST", headers: { cookie, origin } });
+assert.equal(connectTwitchUnconfigured.status, 503, "provider OAuth must fail closed without app credentials");
+
 const realtimeUnauthenticated = await fetch(`${base}/api/v1/realtime`, { headers: { origin } });
 assert.equal(realtimeUnauthenticated.status, 401, "realtime must require an account session");
 const realtimeWithoutUpgrade = await fetch(`${base}/api/v1/realtime`, { headers: { cookie, origin } });

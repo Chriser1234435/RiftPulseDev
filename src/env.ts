@@ -21,6 +21,12 @@ export interface Env {
   PAIRING_HMAC_KEY?: string;
   /** Separate Better Auth signing key. Never reuse the pairing key. */
   BETTER_AUTH_SECRET?: string;
+  /** Twitch OAuth application client ID. */
+  TWITCH_CLIENT_ID?: string;
+  /** Twitch OAuth application client secret; never commit the value. */
+  TWITCH_CLIENT_SECRET?: string;
+  /** Exact registered Twitch OAuth callback URI. */
+  TWITCH_REDIRECT_URI?: string;
   /** Twitch EventSub webhook HMAC secret (10–100 chars); never commit the value. */
   TWITCH_EVENTSUB_SECRET?: string;
   /** Base64-encoded 32-byte AES-256-GCM key for provider tokens; never commit the value. */

@@ -8,7 +8,7 @@
     "build": "vite build && node scripts/clean-build-secrets.mjs",
     "preview": "vite preview",
     "check:toolchain": "wrangler --version && vite --version && tsc --version",
-    "test:contracts": "node --experimental-strip-types --test tests/unit/contracts.test.ts tests/unit/pairing.test.ts tests/unit/pairing-claim.test.ts tests/unit/api.test.ts tests/unit/chat.test.ts tests/unit/chat-room.test.ts tests/unit/provider-token-vault.test.ts",
+    "test:contracts": "node --experimental-strip-types --test tests/unit/contracts.test.ts tests/unit/pairing.test.ts tests/unit/pairing-claim.test.ts tests/unit/api.test.ts tests/unit/chat.test.ts tests/unit/chat-room.test.ts tests/unit/provider-token-vault.test.ts tests/unit/provider-connections.test.ts",
     "test:db-schema": "node --test tests/integration/migration.test.mjs",
     "test:auth:local": "node tests/integration/auth-smoke.mjs",
     "typecheck": "tsc --noEmit",

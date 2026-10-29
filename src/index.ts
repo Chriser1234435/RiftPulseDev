@@ -5,6 +5,8 @@ import { aggregateViewerCounts, emptyProviderHealth, normalizeKickChatMessage, n
 import { persistNormalizedChatMessage } from "../packages/shared/src/chat-persistence.ts";
 import { extractKickPublicKey, verifyKickWebhookSignature } from "../packages/shared/src/kick-webhook.ts";
 import { verifyTwitchEventSubSignature } from "../packages/shared/src/twitch-eventsub.ts";
+import { createOAuthState, digestOAuthState } from "../packages/shared/src/oauth-state.ts";
+import { disconnectProvider, persistProviderTokens } from "../packages/shared/src/provider-connections.ts";
 import { claimPairingChallenge, createPairingChallenge } from "../packages/shared/src/pairing.ts";
 import { createAuth } from "./auth.ts";
 export { ChatRoom } from "./chat-room.ts";
@@ -86,6 +88,33 @@ function isTrustedMutationOrigin(request: Request, env: Env): boolean {
     try { return [new URL(value).origin]; } catch { return []; }
   });
   return allowed.includes(origin);
+}
+
+function readCookie(request: Request, name: string): string | null {
+  const header = request.headers.get("cookie") ?? "";
+  for (const part of header.split(";")) {
+    const index = part.indexOf("=");
+    if (index < 0 || part.slice(0, index).trim() !== name) continue;
+    return part.slice(index + 1).trim() || null;
+  }
+  return null;
+}
+
+function twitchStateCookie(state: string | null, secure: boolean): string {
+  const base = "rp_twitch_oauth_state=" + (state ?? "") + "; Path=/api/v1/providers/twitch/callback; HttpOnly; SameSite=Lax; Max-Age=" + (state ? "600" : "0");
+  return secure ? base + "; Secure" : base;
+}
+
+function providerRedirect(env: Env, status: string): Response {
+  let target: URL;
+  try { target = new URL(env.APP_BASE_URL ?? "http://127.0.0.1:5173"); }
+  catch { target = new URL("http://127.0.0.1:5173"); }
+  target.pathname = "/";
+  target.search = "";
+  target.hash = "";
+  target.searchParams.set("provider", "twitch");
+  target.searchParams.set("status", status);
+  return new Response(null, { status: 302, headers: { location: target.toString(), "cache-control": "no-store" } });
 }
 
 export default {
@@ -178,6 +207,173 @@ export default {
       let settings: unknown = {};
       try { settings = JSON.parse(nextSettings); } catch { settings = {}; }
       return Response.json({ moduleKey, enabled: enabled === 1, settings, updatedAt: now }, { headers: JSON_HEADERS });
+    }
+
+    if (url.pathname === "/api/v1/providers/connections" && request.method === "GET") {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Provider storage is not configured.", requestId);
+      const result = await env.DB.prepare(
+        "SELECT provider, display_name AS displayName, status, connected_at AS connectedAt FROM provider_connections WHERE account_id = ?",
+      ).bind(authContext.userId).all<{ provider: string; displayName: string | null; status: string; connectedAt: string | null }>();
+      if (!result.success) return jsonError(503, "provider_store_unavailable", "Could not load provider connections.", requestId);
+      const rows = new Map((result.results ?? []).map(row => [row.provider, row]));
+      const configured = !!(env.TWITCH_CLIENT_ID && env.TWITCH_CLIENT_SECRET && env.TOKEN_ENCRYPTION_KEY && env.APP_BASE_URL);
+      const connections = PROVIDERS.map(provider => {
+        const row = rows.get(provider);
+        return {
+          provider,
+          status: provider === "tiktok" ? "unsupported" : row?.status ?? "disconnected",
+          displayName: row?.displayName ?? null,
+          connectedAt: row?.connectedAt ?? null,
+          configured: provider === "twitch" ? configured : false,
+          detailCode: provider === "tiktok" ? "unofficial_connector_unavailable"
+            : provider === "twitch" && !configured ? "oauth_credentials_not_configured"
+            : provider === "twitch" && row?.status === "connected" ? "eventsub_subscription_pending" : null,
+        };
+      });
+      return Response.json({ connections }, { headers: JSON_HEADERS });
+    }
+
+    if (url.pathname === "/api/v1/providers/twitch/connect" && request.method === "POST") {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!isTrustedMutationOrigin(request, env)) return jsonError(403, "untrusted_origin", "Request origin is not trusted.", requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Provider storage is not configured.", requestId);
+      if (!env.TWITCH_CLIENT_ID || !env.TWITCH_CLIENT_SECRET || !env.TOKEN_ENCRYPTION_KEY || !env.APP_BASE_URL) {
+        return jsonError(503, "twitch_oauth_not_configured", "Twitch OAuth credentials, app URL, and token encryption key must be configured locally first.", requestId);
+      }
+      let appUrl: URL, redirectUri: URL;
+      try {
+        appUrl = new URL(env.APP_BASE_URL);
+        redirectUri = new URL(env.TWITCH_REDIRECT_URI ?? "/api/v1/providers/twitch/callback", appUrl);
+      } catch {
+        return jsonError(503, "twitch_oauth_not_configured", "The Twitch OAuth callback URL is invalid.", requestId);
+      }
+      if (redirectUri.origin !== appUrl.origin || redirectUri.pathname !== "/api/v1/providers/twitch/callback"
+        || redirectUri.username || redirectUri.password || redirectUri.search || redirectUri.hash
+        || (redirectUri.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(redirectUri.hostname))) {
+        return jsonError(503, "twitch_oauth_not_configured", "The callback must be the exact same-origin registered Twitch callback URL.", requestId);
+      }
+
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const expiresAt = new Date(now.getTime() + 10 * 60_000).toISOString();
+      const cleanup = await env.DB.prepare(
+        "DELETE FROM provider_oauth_states WHERE expires_at <= ? OR (account_id = ? AND provider = 'twitch' AND consumed_at IS NULL)",
+      ).bind(nowIso, authContext.userId).run();
+      if (!cleanup.success) return jsonError(503, "oauth_state_store_unavailable", "Could not prepare a secure authorization attempt.", requestId);
+      const state = createOAuthState();
+      const digest = await digestOAuthState(state);
+      const inserted = await env.DB.prepare(
+        "INSERT INTO provider_oauth_states (state_digest, account_id, provider, created_at, expires_at, consumed_at) VALUES (?, ?, 'twitch', ?, ?, NULL)",
+      ).bind(digest, authContext.userId, nowIso, expiresAt).run();
+      if (!inserted.success) return jsonError(503, "oauth_state_store_unavailable", "Could not start a secure authorization attempt.", requestId);
+
+      const authorizationUrl = new URL("https://id.twitch.tv/oauth2/authorize");
+      authorizationUrl.searchParams.set("client_id", env.TWITCH_CLIENT_ID);
+      authorizationUrl.searchParams.set("redirect_uri", redirectUri.toString());
+      authorizationUrl.searchParams.set("response_type", "code");
+      authorizationUrl.searchParams.set("scope", "user:read:chat");
+      authorizationUrl.searchParams.set("state", state);
+      return Response.json({ authorizationUrl: authorizationUrl.toString() }, {
+        headers: { ...JSON_HEADERS, "set-cookie": twitchStateCookie(state, redirectUri.protocol === "https:") },
+      });
+    }
+
+    if (url.pathname === "/api/v1/providers/twitch/callback" && request.method === "GET") {
+      const state = url.searchParams.get("state");
+      const cookieState = readCookie(request, "rp_twitch_oauth_state");
+      const secureCookie = url.protocol === "https:";
+      const finish = (status: string) => {
+        const response = providerRedirect(env, status);
+        response.headers.append("set-cookie", twitchStateCookie(null, secureCookie));
+        response.headers.set("cache-control", "no-store");
+        response.headers.set("referrer-policy", "no-referrer");
+        return response;
+      };
+      if (!env.DB || !env.TWITCH_CLIENT_ID || !env.TWITCH_CLIENT_SECRET || !env.TOKEN_ENCRYPTION_KEY || !env.APP_BASE_URL
+        || !state || state !== cookieState || !/^[a-f0-9]{64}$/i.test(state)) return finish("failed");
+      const digest = await digestOAuthState(state);
+      const now = new Date();
+      const claimedState = await env.DB.prepare(
+        "UPDATE provider_oauth_states SET consumed_at = ? WHERE state_digest = ? AND provider = 'twitch' AND consumed_at IS NULL AND expires_at > ? RETURNING account_id",
+      ).bind(now.toISOString(), digest, now.toISOString()).first<{ account_id: string }>();
+      if (!claimedState?.account_id) return finish("failed");
+      if (url.searchParams.has("error")) return finish("denied");
+      const code = url.searchParams.get("code");
+      if (!code || code.length > 2048) return finish("failed");
+
+      let appUrl: URL, redirectUri: URL;
+      try {
+        appUrl = new URL(env.APP_BASE_URL);
+        redirectUri = new URL(env.TWITCH_REDIRECT_URI ?? "/api/v1/providers/twitch/callback", appUrl);
+      } catch { return finish("failed"); }
+      if (redirectUri.origin !== appUrl.origin || redirectUri.pathname !== "/api/v1/providers/twitch/callback") return finish("failed");
+
+      try {
+        const tokenResponse = await fetch("https://id.twitch.tv/oauth2/token", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+          body: new URLSearchParams({
+            client_id: env.TWITCH_CLIENT_ID,
+            client_secret: env.TWITCH_CLIENT_SECRET,
+            code,
+            grant_type: "authorization_code",
+            redirect_uri: redirectUri.toString(),
+          }),
+        });
+        if (!tokenResponse.ok) return finish("failed");
+        const tokenPayload: unknown = await tokenResponse.json();
+        if (!tokenPayload || typeof tokenPayload !== "object" || Array.isArray(tokenPayload)) return finish("failed");
+        const token = tokenPayload as Record<string, unknown>;
+        if (typeof token.access_token !== "string" || typeof token.refresh_token !== "string"
+          || typeof token.expires_in !== "number" || !Number.isFinite(token.expires_in) || token.expires_in <= 0) return finish("failed");
+
+        const validateResponse = await fetch("https://id.twitch.tv/oauth2/validate", {
+          headers: { authorization: "OAuth " + token.access_token, accept: "application/json" },
+        });
+        if (!validateResponse.ok) return finish("failed");
+        const validationPayload: unknown = await validateResponse.json();
+        if (!validationPayload || typeof validationPayload !== "object" || Array.isArray(validationPayload)) return finish("failed");
+        const validation = validationPayload as Record<string, unknown>;
+        if (validation.client_id !== env.TWITCH_CLIENT_ID || typeof validation.user_id !== "string"
+          || !validation.user_id || typeof validation.login !== "string" || !validation.login
+          || !Array.isArray(validation.scopes) || validation.scopes.some(scope => typeof scope !== "string")
+          || !validation.scopes.includes("user:read:chat")) return finish("failed");
+
+        const saved = await persistProviderTokens(env.DB, {
+          accountId: claimedState.account_id, provider: "twitch", externalAccountId: validation.user_id,
+          displayName: validation.login, accessToken: token.access_token, refreshToken: token.refresh_token,
+          tokenExpiresAt: new Date(Date.now() + token.expires_in * 1000).toISOString(),
+          scopes: validation.scopes as string[],
+        }, env.TOKEN_ENCRYPTION_KEY);
+        if (!saved.ok) return finish("failed");
+
+        const health = await env.DB.prepare(
+          "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'twitch', 'degraded', NULL, ?, 'eventsub_subscription_pending', NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'degraded', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = 'eventsub_subscription_pending', viewer_count_observed_at = NULL",
+        ).bind(crypto.randomUUID(), claimedState.account_id, new Date().toISOString()).run();
+        if (!health.success) return finish("failed");
+        return finish("connected");
+      } catch {
+        return finish("failed");
+      }
+    }
+
+    const disconnectProviderMatch = url.pathname.match(/^\/api\/v1\/providers\/(twitch|youtube|kick|tiktok)$/);
+    if (disconnectProviderMatch && request.method === "DELETE") {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!isTrustedMutationOrigin(request, env)) return jsonError(403, "untrusted_origin", "Request origin is not trusted.", requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Provider storage is not configured.", requestId);
+      const provider = disconnectProviderMatch[1] as typeof PROVIDERS[number];
+      if (provider === "tiktok") return jsonError(409, "provider_unsupported", "TikTok LIVE is not available in this build.", requestId);
+      if (!await disconnectProvider(env.DB, authContext.userId, provider)) return jsonError(503, "provider_store_unavailable", "Could not disconnect provider.", requestId);
+      const health = await env.DB.prepare(
+        "UPDATE integration_health SET status = 'disconnected', viewer_count = NULL, viewer_count_observed_at = NULL, observed_at = ?, detail_code = 'user_disconnected' WHERE account_id = ? AND provider = ?",
+      ).bind(new Date().toISOString(), authContext.userId, provider).run();
+      if (!health.success) return jsonError(503, "provider_health_update_failed", "Provider was disconnected but health status could not be updated.", requestId);
+      return Response.json({ status: "disconnected", provider }, { headers: JSON_HEADERS });
     }
 
     if (url.pathname === "/api/v1/providers/twitch/webhook" && request.method === "POST") {

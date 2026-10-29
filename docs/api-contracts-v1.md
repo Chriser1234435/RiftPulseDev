@@ -73,12 +73,30 @@ Implementation references: [Kick webhook security](https://github.com/KickEngine
 
 Requires an authenticated session, a trusted browser `Origin`, and a WebSocket upgrade. The Worker selects a per-account Durable Object, which sends new normalized `chat.message` events to connected clients. Realtime delivery is best-effort; clients can recover missed messages through `GET /api/v1/chat/messages`.
 
+## Provider connection endpoints
+
+### `GET /api/v1/providers/connections`
+
+Requires an authenticated session. Returns safe provider connection status, display name, connection timestamp, configuration availability, and a non-secret status code. It never returns OAuth tokens or client secrets.
+
+### `POST /api/v1/providers/twitch/connect`
+
+Requires an authenticated session and trusted `Origin`. Creates a high-entropy, ten-minute, single-use OAuth state whose digest is stored in D1, sets a short-lived HttpOnly/SameSite state cookie, and returns the official Twitch authorization URL. It fails closed unless Twitch client credentials, the canonical app URL, and the token-encryption key are configured. The callback URI must be same-origin and registered exactly with Twitch.
+
+### `GET /api/v1/providers/twitch/callback`
+
+Consumes state once and requires a matching same-browser cookie. Exchanges the authorization code, validates the resulting token with Twitch, requires the `user:read:chat` scope, and stores access/refresh tokens using AES-256-GCM encryption. It redirects to the local dashboard with a non-sensitive status. EventSub subscription creation and token refresh remain unfinished.
+
+### `DELETE /api/v1/providers/{provider}`
+
+Requires an authenticated session and trusted `Origin`. Clears locally stored token ciphertext and marks health disconnected. TikTok disconnection is rejected because that connector is unavailable in this build.
+
 ## Database entities
 
 - `accounts`: stable internal account ID and lifecycle status; no auth vendor-specific columns.
 - `devices`: platform, game/mod versions, ownership, last-seen, and revocation.
 - `pairing_challenges`: HMAC digest, expiry, state, attempt counter, and claim metadata.
-- `provider_connections`: one record per account/provider; token fields are ciphertext-only placeholders for a later encryption design.
+- `provider_connections`: one record per account/provider; access and refresh tokens are stored only as AES-256-GCM ciphertext.
 - `module_settings`: persisted enabled flag and JSON configuration for each V1 module.
 - `chat_commands`: configurable commands, actions, cooldowns, and JSON configuration.
 - `song_requests`: normalized request input, BeatSaver key/metadata, requester, provider, and queue state.

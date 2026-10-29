@@ -4,3 +4,11 @@ PAIRING_HMAC_KEY=<generate-a-unique-random-secret>
 BETTER_AUTH_SECRET=<generate-a-different-random-secret>
 APP_BASE_URL=http://127.0.0.1:5173
 TRUSTED_ORIGINS=http://127.0.0.1:5173
+# Optional until you register a Twitch developer application.
+TWITCH_CLIENT_ID=<twitch-client-id>
+TWITCH_CLIENT_SECRET=<twitch-client-secret>
+TWITCH_REDIRECT_URI=http://127.0.0.1:5173/api/v1/providers/twitch/callback
+# Generate a separate random 32-byte key and Base64-encode it.
+TOKEN_ENCRYPTION_KEY=<base64-encoded-32-byte-key>
+# Generate a separate 32–64 character ASCII secret for EventSub webhook verification.
+TWITCH_EVENTSUB_SECRET=<random-eventsub-secret>

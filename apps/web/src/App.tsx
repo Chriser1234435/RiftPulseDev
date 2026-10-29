@@ -13,6 +13,7 @@ type Device = { id: string; platform: "pcvr" | "quest"; gameVersion: string; mod
 type ChatMessage = { id: string; provider: ProviderKey; senderName: string; text: string; receivedAt: string; badges: { moderator: boolean; subscriber: boolean; verified: boolean } };
 type ProviderState = "connected" | "disconnected" | "degraded" | "error" | "unsupported";
 type ProviderHealth = { provider: ProviderKey; state: ProviderState; viewerCount: number | null; detailCode: string | null; unofficial: boolean };
+type ProviderConnection = { status: string; displayName: string | null; connectedAt: string | null; configured: boolean; detailCode: string | null };
 type ViewerAggregate = { total: number | null; includedProviders: ProviderKey[]; missingProviders: ProviderKey[]; partial: boolean };
 type ModuleKey = "chat" | "bsr-song-request";
 type ProviderKey = "twitch" | "youtube" | "kick" | "tiktok";
@@ -28,7 +29,12 @@ const initialEnabled: Record<ModuleKey, boolean> = { chat: true, "bsr-song-reque
 function App() {
   const [activeTab, setActiveTab] = useState("Overview");
   const [enabled, setEnabled] = useState(initialEnabled);
-  const [connected, setConnected] = useState<Record<ProviderKey, boolean>>({ twitch: false, youtube: false, kick: false, tiktok: false });
+  const [providerConnections, setProviderConnections] = useState<Record<ProviderKey, ProviderConnection>>({
+    twitch: { status: "disconnected", displayName: null, connectedAt: null, configured: false, detailCode: "oauth_credentials_not_configured" },
+    youtube: { status: "disconnected", displayName: null, connectedAt: null, configured: false, detailCode: null },
+    kick: { status: "disconnected", displayName: null, connectedAt: null, configured: false, detailCode: null },
+    tiktok: { status: "unsupported", displayName: null, connectedAt: null, configured: false, detailCode: "unofficial_connector_unavailable" },
+  });
   const [modal, setModal] = useState<"pair" | "provider" | "settings" | "help" | "auth" | null>(null);
   const [pairCode, setPairCode] = useState("");
   const [pairStatus, setPairStatus] = useState<"idle" | "checking" | "success" | "error">("idle");
@@ -65,6 +71,32 @@ function App() {
       setChatError(true);
     } finally {
       setChatLoading(false);
+    }
+  }, []);
+
+  const refreshProviderConnections = useCallback(async () => {
+    try {
+      const response = await fetch("/api/v1/providers/connections", { credentials: "include" });
+      if (!response.ok) throw new Error("Could not load provider connections");
+      const data = await response.json();
+      if (!Array.isArray(data.connections)) throw new Error("Invalid provider connection response");
+      setProviderConnections(current => {
+        const next = { ...current };
+        for (const row of data.connections) {
+          if (row && typeof row.provider === "string" && Object.hasOwn(next, row.provider)) {
+            next[row.provider as ProviderKey] = {
+              status: typeof row.status === "string" ? row.status : "error",
+              displayName: typeof row.displayName === "string" ? row.displayName : null,
+              connectedAt: typeof row.connectedAt === "string" ? row.connectedAt : null,
+              configured: row.configured === true,
+              detailCode: typeof row.detailCode === "string" ? row.detailCode : null,
+            };
+          }
+        }
+        return next;
+      });
+    } catch {
+      // Keep the last confirmed connection state; never invent a connected state.
     }
   }, []);
 
@@ -116,7 +148,8 @@ function App() {
     refreshDevices().catch(() => {});
     void refreshChat();
     void refreshProviderHealth();
-  }, [user?.id, refreshDevices, refreshChat, refreshProviderHealth]);
+    void refreshProviderConnections();
+  }, [user?.id, refreshDevices, refreshChat, refreshProviderHealth, refreshProviderConnections]);
 
   useEffect(() => {
     if (!user?.id || !enabled.chat) return;
@@ -173,6 +206,22 @@ function App() {
     window.setTimeout(() => setNotice(""), 3000);
   };
 
+  useEffect(() => {
+    if (!authLoaded) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("provider") !== "twitch" || !params.get("status")) return;
+    const status = params.get("status");
+    if (status === "connected") flash("Twitch account authorized. EventSub subscription setup is still pending.");
+    else if (status === "denied") flash("Twitch authorization was canceled.");
+    else flash("Twitch connection could not be completed. No token details were shown.");
+    window.history.replaceState({}, "", window.location.pathname);
+    if (user?.id) {
+      void refreshProviderConnections();
+      void refreshProviderHealth();
+      void refreshChat();
+    }
+  }, [authLoaded, user?.id, refreshProviderConnections, refreshProviderHealth, refreshChat]);
+
   const toggleModule = async (key: ModuleKey) => {
     const previous = enabled[key];
     const next = !previous;
@@ -197,11 +246,41 @@ function App() {
     setModal("provider");
   };
 
-  const simulateProviderConnect = () => {
-    setConnected(current => ({ ...current, [selectedProvider]: !current[selectedProvider] }));
-    const provider = providers.find(p => p.key === selectedProvider)!;
-    flash(connected[selectedProvider] ? `${provider.name} disconnected in this preview` : `${provider.name} preview state updated`);
-    setModal(null);
+  const handleProviderAction = async () => {
+    const provider = providers.find(item => item.key === selectedProvider)!;
+    const current = providerConnections[selectedProvider];
+    if (current.status === "connected") {
+      try {
+        const response = await fetch("/api/v1/providers/" + selectedProvider, { method: "DELETE", credentials: "include" });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error?.message ?? "Could not disconnect " + provider.name + ".");
+        await refreshProviderConnections();
+        await refreshProviderHealth();
+        setModal(null);
+        flash(provider.name + " disconnected and saved.");
+      } catch (error) {
+        flash(error instanceof Error ? error.message : "Could not disconnect " + provider.name + ".");
+      }
+      return;
+    }
+    if (selectedProvider !== "twitch") {
+      flash(selectedProvider === "tiktok" ? "TikTok LIVE is unavailable in this build." : provider.name + " authorization is not implemented yet.");
+      return;
+    }
+    if (!current.configured) {
+      flash("Twitch OAuth is not configured in this local workspace yet.");
+      return;
+    }
+    try {
+      const response = await fetch("/api/v1/providers/twitch/connect", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: "{}" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error?.message ?? "Could not start Twitch authorization.");
+      const authorizationUrl = new URL(data.authorizationUrl);
+      if (authorizationUrl.origin !== "https://id.twitch.tv" || authorizationUrl.pathname !== "/oauth2/authorize") throw new Error("The authorization URL was not trusted.");
+      window.location.assign(authorizationUrl.toString());
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Could not start Twitch authorization.");
+    }
   };
 
   const startPairing = () => {
@@ -404,7 +483,7 @@ function App() {
           </section>
 
           <section className="metrics-grid">
-            <MetricCard icon={<Radio size={17} />} label="PLATFORMS CONNECTED" value={String(Object.values(connected).filter(Boolean).length).padStart(2, "0")} detail="of 4 available platforms" />
+            <MetricCard icon={<Radio size={17} />} label="PLATFORMS CONNECTED" value={String(Object.values(providerConnections).filter(connection => connection.status === "connected").length).padStart(2, "0")} detail="confirmed provider authorizations" />
             <MetricCard icon={<Gamepad2 size={17} />} label="DEVICES PAIRED" value={String(devices.length).padStart(2, "0")} detail={devices.length ? "Active paired devices" : "Connect Beat Saber to begin"} />
             <MetricCard icon={<WandSparkles size={17} />} label="ACTIVE MODULES" value={String(Object.values(enabled).filter(Boolean).length).padStart(2, "0")} detail="Chat + BSR Song Request" />
             <MetricCard icon={<Users size={17} />} label="LIVE VIEWERS" value={viewerAggregate?.total == null ? "—" : String(viewerAggregate.total)} detail={viewerAggregate?.total == null ? (healthLoading ? "Checking provider counts" : "No fresh counts available") : viewerAggregate.partial ? "Partial · some providers unavailable" : "Fresh counts across providers"} muted={viewerAggregate?.total == null} />
@@ -423,12 +502,12 @@ function App() {
             <div className="provider-list">
               {providers.map(provider => <div className="provider-row" key={provider.key}>
                 <div className={`provider-icon ${provider.className}`}>{provider.short}</div>
-                <div className="provider-main"><b>{provider.name}{provider.key === "tiktok" && <span className="unofficial-label">UNOFFICIAL</span>}</b><small>{connected[provider.key] ? "Preview connected · live authorization not configured" : provider.note}</small></div>
-                <div className={`connection-state ${connected[provider.key] ? "is-connected" : ""}`}><span className="status-dot" />{connected[provider.key] ? "Connected (preview)" : "Not connected"}</div>
-                <button className={connected[provider.key] ? "disconnect-button" : "connect-button"} onClick={() => openProvider(provider.key)}>{connected[provider.key] ? "Manage" : "Connect"}{connected[provider.key] ? <ChevronDown size={14} /> : <ExternalLink size={13} />}</button>
+                <div className="provider-main"><b>{provider.name}{provider.key === "tiktok" && <span className="unofficial-label">UNOFFICIAL</span>}</b><small>{providerConnections[provider.key].status === "connected" ? "Connected as " + (providerConnections[provider.key].displayName ?? "account") : providerConnections[provider.key].status === "unsupported" ? "Unavailable in this build" : providerConnections[provider.key].configured ? provider.note : providerConnections[provider.key].detailCode === "oauth_credentials_not_configured" ? "Local OAuth credentials not configured" : provider.note}</small></div>
+                <div className={"connection-state " + (providerConnections[provider.key].status === "connected" ? "is-connected" : "")}><span className="status-dot" />{providerConnections[provider.key].status === "connected" ? "Connected" : providerConnections[provider.key].status === "unsupported" ? "Unavailable" : providerConnections[provider.key].status === "degraded" ? "Needs attention" : providerConnections[provider.key].status === "error" ? "Error" : "Not connected"}</div>
+                <button className={providerConnections[provider.key].status === "connected" ? "disconnect-button" : "connect-button"} onClick={() => openProvider(provider.key)}>{providerConnections[provider.key].status === "connected" ? "Manage" : providerConnections[provider.key].status === "unsupported" ? "Details" : "Connect"}{providerConnections[provider.key].status === "connected" ? <ChevronDown size={14} /> : <ExternalLink size={13} />}</button>
               </div>)}
             </div>
-            <div className="integration-footnote"><ShieldCheck size={15} /><span>Your credentials stay private. OAuth connections will be enabled once authentication and provider credentials are configured.</span></div>
+            <div className="integration-footnote"><ShieldCheck size={15} /><span>Connection status comes from the local API. Twitch OAuth is implemented but requires your own registered app credentials; YouTube and Kick OAuth are still in development. TikTok LIVE remains unavailable.</span></div>
           </section>
 
           <section className="section-block chat-feed-block" id="chat-feed">
@@ -491,10 +570,10 @@ function App() {
             <button className="primary-button modal-submit" disabled={pairCode.length !== 5 || pairStatus === "checking"} onClick={verifyPairing}>{pairStatus === "checking" ? <><RefreshCw size={16} className="spin" /> Verifying…</> : <>Verify code <ArrowUpRight size={15} /></>}</button>
             <p className="modal-footnote">This form never generates pairing codes. Enter only the current code displayed by your own Beat Saber installation.</p>
           </>}
-          {modal === "provider" && <><div className={`modal-icon provider-icon ${providers.find(p => p.key === selectedProvider)?.className}`}>{providers.find(p => p.key === selectedProvider)?.short}</div><div className="modal-eyebrow">PLATFORM INTEGRATION</div><h2 id="modal-title">{connected[selectedProvider] ? "Manage" : "Connect"} {providers.find(p => p.key === selectedProvider)?.name}</h2><p className="modal-copy">{providers.find(p => p.key === selectedProvider)?.note}. Real OAuth authorization will be added after account authentication and provider app credentials are configured.</p>
+          {modal === "provider" && <><div className={`modal-icon provider-icon ${providers.find(p => p.key === selectedProvider)?.className}`}>{providers.find(p => p.key === selectedProvider)?.short}</div><div className="modal-eyebrow">PLATFORM INTEGRATION</div><h2 id="modal-title">{providerConnections[selectedProvider].status === "connected" ? "Manage" : "Connect"} {providers.find(p => p.key === selectedProvider)?.name}</h2><p className="modal-copy">{selectedProvider === "twitch" ? (providerConnections.twitch.configured ? "Authorize your Twitch account securely. After authorization, EventSub subscription setup is still required before live messages arrive." : "The Twitch OAuth flow is implemented locally, but app credentials and a token encryption key have not been configured in this workspace.") : selectedProvider === "tiktok" ? "TikTok LIVE is unavailable in this build; no unofficial endpoint is being contacted." : (providers.find(p => p.key === selectedProvider)?.name + " authorization is not implemented yet. The account will remain disconnected until its secure OAuth flow is ready.")}</p>
             {selectedProvider === "tiktok" && <div className="warning-note"><ShieldCheck size={16} /><span><b>Unofficial connector</b><br />TikTok LIVE support is best effort and may be unavailable or change without notice.</span></div>}
             <div className="provider-permissions"><div><Check size={15} /> Chat event capability</div><div><Users size={15} /> Viewer count where supported</div><div><LockKeyhole size={15} /> Secure account authorization</div></div>
-            <button className="primary-button modal-submit" onClick={simulateProviderConnect}>{connected[selectedProvider] ? <><Unplug size={16} /> Disconnect preview</> : <><Link2 size={16} /> Toggle preview state</>}</button><p className="modal-footnote">Preview state only; no external account is authorized or contacted.</p>
+            <button className="primary-button modal-submit" disabled={providerConnections[selectedProvider].status !== "connected" && (selectedProvider !== "twitch" || !providerConnections.twitch.configured)} onClick={() => void handleProviderAction()}>{providerConnections[selectedProvider].status === "connected" ? <><Unplug size={16} /> Disconnect account</> : selectedProvider === "twitch" && providerConnections.twitch.configured ? <><Link2 size={16} /> Connect with Twitch</> : <>Not configured yet <LockKeyhole size={15} /></>}</button><p className="modal-footnote">{providerConnections[selectedProvider].status === "connected" ? "Disconnecting clears stored token ciphertext." : "No external account is contacted until you choose an enabled connection action."}</p>
           </>}
           {modal === "settings" && <><div className="modal-icon purple-modal"><Settings2 size={22} /></div><div className="modal-eyebrow">PREFERENCES</div><h2 id="modal-title">Tune your setup.</h2><p className="modal-copy">Module switches and the BSR command save to your account. Provider OAuth and device preferences remain gated until their integrations are complete.</p>
             <div className="settings-option"><div><b>Automatically save toggles</b><small>Apply module changes immediately.</small></div><button className={`toggle ${autoSave ? "on" : ""}`} role="switch" aria-checked={autoSave} onClick={() => setAutoSave(!autoSave)}><span /></button></div>

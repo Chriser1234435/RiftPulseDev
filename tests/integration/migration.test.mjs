@@ -7,11 +7,11 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const migrations = ["0001_initial.sql", "0002_auth.sql", "0003_chat_foundation.sql"].map(name =>
+const migrations = ["0001_initial.sql", "0002_auth.sql", "0003_chat_foundation.sql", "0004_provider_oauth_states.sql"].map(name =>
   readFileSync(join(root, "migrations", name), "utf8")
 );
 
-test("application, authentication, and chat migrations apply cleanly to isolated SQLite", () => {
+test("application, authentication, chat, and OAuth-state migrations apply cleanly to isolated SQLite", () => {
   const temp = mkdtempSync(join(tmpdir(), "riftpulse-schema-"));
   const dbPath = join(temp, "schema-test.sqlite");
   const db = new DatabaseSync(dbPath);
@@ -22,7 +22,7 @@ test("application, authentication, and chat migrations apply cleanly to isolated
     const expected = [
       "accounts", "devices", "pairing_challenges", "provider_connections", "module_settings",
       "chat_commands", "song_requests", "integration_health", "idempotency_keys", "chat_messages",
-      "user", "session", "account", "verification",
+      "user", "session", "account", "verification", "provider_oauth_states",
     ];
     for (const table of expected) assert.equal(tables.has(table), true, `missing table: ${table}`);
     const healthColumns = new Set(db.prepare("PRAGMA table_info(integration_health)").all().map(row => row.name));
