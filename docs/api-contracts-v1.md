@@ -1,6 +1,6 @@
 # RiftPulse API contracts — V1
 
-Status: Step 5 implementation draft. All endpoints are versioned under `/api/v1`.
+Status: Local Step 5–7 implementation. Real provider transports and remote deployment remain gated. All endpoints are versioned under `/api/v1`.
 
 ## Scope
 
@@ -43,11 +43,21 @@ Statuses: 201 created; 400 invalid request; 409 active code collision; 429 activ
 
 ### `POST /api/v1/pairing/claim`
 
-Accepts `{ "code": "04271" }`. It currently returns 401 until Step 6 connects the website's verified authentication session. The account ID must be derived from that verified session and must never be trusted from request JSON. The shared persistence helper performs a one-time pending-to-claimed transition and inserts the device in a D1 batch; the raw code digest is cleared on claim. Claim integration tests require an authenticated test context and are deferred to the auth integration step.
+Accepts `{ "code": "04271" }`. A valid Better Auth session and an exact trusted `Origin` are required. The account ID is derived from the verified session, never request JSON. The shared persistence helper performs a one-time pending-to-claimed transition and inserts the device in a D1 batch; the raw code digest is cleared on claim. Local integration tests cover authenticated claim, listing, revocation, and sign-out.
 
 ### `GET /api/v1/pairing/challenges/:id`
 
-The mod polls this endpoint using the unguessable challenge UUID returned at creation. It returns only the challenge ID, status, expiry, and optional claim timestamp; it never returns the code or its digest. Unknown IDs return 404. The authenticated website claim endpoint remains gated until Step 6 adds the verified account session.
+The mod polls this endpoint using the unguessable challenge UUID returned at creation. It returns only the challenge ID, status, expiry, and optional claim timestamp; it never returns the code or its digest. Unknown IDs return 404. The website claim endpoint requires the verified account session and trusted Origin described above.
+
+## Chat and provider endpoints (local foundation)
+
+### `GET /api/v1/chat/messages`
+
+Requires an authenticated account session. Returns up to 100 recent normalized messages for that account, oldest-to-newest within the returned window. Raw provider payloads are not returned.
+
+### `GET /api/v1/integrations/health`
+
+Requires an authenticated account session. Returns health snapshots for the four provider keys and a viewer aggregate. Only fresh counts from connected/degraded providers contribute. `total: null` means unknown, not zero; `partial: true` means at least one count is fresh while other providers are missing or stale. The API is a read model; provider ingestion and viewer-count updates are still being implemented.
 
 ## Database entities
 

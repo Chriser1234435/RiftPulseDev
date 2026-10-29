@@ -1,5 +1,7 @@
 import type { Env } from "./env.ts";
-import { API_VERSION, SUPPORTED_MODULES, validateCreatePairingChallenge, validateClaimPairing } from "../packages/contracts/src/v1.ts";
+import { API_VERSION, PROVIDERS, SUPPORTED_MODULES, validateCreatePairingChallenge, validateClaimPairing } from "../packages/contracts/src/v1.ts";
+import type { ProviderHealthSnapshot } from "../packages/contracts/src/chat-v1.ts";
+import { aggregateViewerCounts, emptyProviderHealth } from "../packages/shared/src/chat.ts";
 import { claimPairingChallenge, createPairingChallenge } from "../packages/shared/src/pairing.ts";
 import { createAuth } from "./auth.ts";
 
@@ -135,6 +137,59 @@ export default {
       let settings: unknown = {};
       try { settings = JSON.parse(nextSettings); } catch { settings = {}; }
       return Response.json({ moduleKey, enabled: enabled === 1, settings, updatedAt: now }, { headers: JSON_HEADERS });
+    }
+
+    if (url.pathname === "/api/v1/chat/messages" && request.method === "GET") {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Database binding is not configured.", requestId);
+      const result = await env.DB.prepare(
+        "SELECT id, provider, external_message_id AS externalMessageId, channel_id AS channelId, channel_name AS channelName, sender_id AS senderId, sender_name AS senderName, text, sent_at AS sentAt, received_at AS receivedAt, badges_json AS badgesJson FROM chat_messages WHERE account_id = ? ORDER BY received_at DESC LIMIT 100",
+      ).bind(authContext.userId).all<{
+        id: string; provider: string; externalMessageId: string; channelId: string; channelName: string;
+        senderId: string; senderName: string; text: string; sentAt: string; receivedAt: string; badgesJson: string;
+      }>();
+      if (!result.success) return jsonError(503, "chat_store_unavailable", "Could not load chat messages.", requestId);
+      const messages = (result.results ?? []).map(row => {
+        let parsed: unknown = {};
+        try { parsed = JSON.parse(row.badgesJson); } catch { parsed = {}; }
+        const flags = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+        return {
+          id: row.id, provider: row.provider, externalMessageId: row.externalMessageId,
+          channelId: row.channelId, channelName: row.channelName, senderId: row.senderId,
+          senderName: row.senderName, text: row.text, sentAt: row.sentAt, receivedAt: row.receivedAt,
+          badges: { moderator: flags.moderator === true, subscriber: flags.subscriber === true, verified: flags.verified === true },
+        };
+      }).reverse();
+      return Response.json({ messages }, { headers: JSON_HEADERS });
+    }
+
+    if (url.pathname === "/api/v1/integrations/health" && request.method === "GET") {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Database binding is not configured.", requestId);
+      const result = await env.DB.prepare(
+        "SELECT provider, status, viewer_count AS viewerCount, observed_at AS observedAt, viewer_count_observed_at AS viewerCountObservedAt, detail_code AS detailCode, (SELECT MAX(received_at) FROM chat_messages cm WHERE cm.account_id = integration_health.account_id AND cm.provider = integration_health.provider) AS lastMessageAt FROM integration_health WHERE account_id = ?",
+      ).bind(authContext.userId).all<{
+        provider: string; status: string; viewerCount: number | null; observedAt: string;
+        viewerCountObservedAt: string | null; detailCode: string | null; lastMessageAt: string | null;
+      }>();
+      if (!result.success) return jsonError(503, "integration_health_unavailable", "Could not load provider health.", requestId);
+      const byProvider = new Map((result.results ?? []).map(row => [row.provider, row]));
+      const now = new Date();
+      const providerHealth: ProviderHealthSnapshot[] = PROVIDERS.map(provider => {
+        const row = byProvider.get(provider);
+        if (!row) return emptyProviderHealth(provider, now);
+        const state = row.status === "healthy" ? "connected"
+          : row.status === "degraded" ? "degraded"
+          : row.status === "disconnected" ? "disconnected" : "error";
+        return {
+          provider, state, observedAt: row.observedAt, lastMessageAt: row.lastMessageAt,
+          viewerCount: row.viewerCount, viewerCountObservedAt: row.viewerCountObservedAt,
+          detailCode: row.detailCode, unofficial: provider === "tiktok",
+        };
+      });
+      return Response.json({ providers: providerHealth, viewers: aggregateViewerCounts(providerHealth, now) }, { headers: JSON_HEADERS });
     }
 
     if (url.pathname === "/api/v1/devices" && request.method === "GET") {

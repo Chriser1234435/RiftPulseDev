@@ -10,6 +10,10 @@ import {
 
 type User = { id: string; name: string; email: string };
 type Device = { id: string; platform: "pcvr" | "quest"; gameVersion: string; modVersion: string; label: string | null; createdAt: string; lastSeenAt: string | null };
+type ChatMessage = { id: string; provider: ProviderKey; senderName: string; text: string; receivedAt: string; badges: { moderator: boolean; subscriber: boolean; verified: boolean } };
+type ProviderState = "connected" | "disconnected" | "degraded" | "error" | "unsupported";
+type ProviderHealth = { provider: ProviderKey; state: ProviderState; viewerCount: number | null; detailCode: string | null; unofficial: boolean };
+type ViewerAggregate = { total: number | null; includedProviders: ProviderKey[]; missingProviders: ProviderKey[]; partial: boolean };
 type ModuleKey = "chat" | "bsr-song-request";
 type ProviderKey = "twitch" | "youtube" | "kick" | "tiktok";
 type Provider = { key: ProviderKey; name: string; short: string; className: string; note: string };
@@ -43,6 +47,41 @@ function App() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
   const [devices, setDevices] = useState<Device[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatLoading, setChatLoading] = useState(true);
+  const [chatError, setChatError] = useState(false);
+  const [providerHealth, setProviderHealth] = useState<ProviderHealth[]>([]);
+  const [viewerAggregate, setViewerAggregate] = useState<ViewerAggregate | null>(null);
+  const [healthLoading, setHealthLoading] = useState(true);
+
+  const refreshChat = useCallback(async () => {
+    try {
+      const response = await fetch("/api/v1/chat/messages", { credentials: "include" });
+      if (!response.ok) throw new Error("Could not load chat messages");
+      const data = await response.json();
+      setChatMessages(Array.isArray(data.messages) ? data.messages : []);
+      setChatError(false);
+    } catch {
+      setChatError(true);
+    } finally {
+      setChatLoading(false);
+    }
+  }, []);
+
+  const refreshProviderHealth = useCallback(async () => {
+    try {
+      const response = await fetch("/api/v1/integrations/health", { credentials: "include" });
+      if (!response.ok) throw new Error("Could not load provider health");
+      const data = await response.json();
+      setProviderHealth(Array.isArray(data.providers) ? data.providers : []);
+      setViewerAggregate(data.viewers ?? null);
+    } catch {
+      setProviderHealth([]);
+      setViewerAggregate(null);
+    } finally {
+      setHealthLoading(false);
+    }
+  }, []);
 
   const refreshDevices = useCallback(async () => {
     const response = await fetch("/api/v1/devices", { credentials: "include" });
@@ -75,7 +114,9 @@ function App() {
         }
       }).catch(() => {});
     refreshDevices().catch(() => {});
-  }, [user?.id, refreshDevices]);
+    void refreshChat();
+    void refreshProviderHealth();
+  }, [user?.id, refreshDevices, refreshChat, refreshProviderHealth]);
 
   useEffect(() => {
     let alive = true;
@@ -324,7 +365,7 @@ function App() {
             <MetricCard icon={<Radio size={17} />} label="PLATFORMS CONNECTED" value={String(Object.values(connected).filter(Boolean).length).padStart(2, "0")} detail="of 4 available platforms" />
             <MetricCard icon={<Gamepad2 size={17} />} label="DEVICES PAIRED" value={String(devices.length).padStart(2, "0")} detail={devices.length ? "Active paired devices" : "Connect Beat Saber to begin"} />
             <MetricCard icon={<WandSparkles size={17} />} label="ACTIVE MODULES" value={String(Object.values(enabled).filter(Boolean).length).padStart(2, "0")} detail="Chat + BSR Song Request" />
-            <MetricCard icon={<Users size={17} />} label="LIVE VIEWERS" value="—" detail="Connect a platform to sync" muted />
+            <MetricCard icon={<Users size={17} />} label="LIVE VIEWERS" value={viewerAggregate?.total == null ? "—" : String(viewerAggregate.total)} detail={viewerAggregate?.total == null ? (healthLoading ? "Checking provider counts" : "No fresh counts available") : viewerAggregate.partial ? "Partial · some providers unavailable" : "Fresh counts across providers"} muted={viewerAggregate?.total == null} />
           </section>
 
           <section className="section-block" id="modules">
@@ -346,6 +387,36 @@ function App() {
               </div>)}
             </div>
             <div className="integration-footnote"><ShieldCheck size={15} /><span>Your credentials stay private. OAuth connections will be enabled once authentication and provider credentials are configured.</span></div>
+          </section>
+
+          <section className="section-block chat-feed-block" id="chat-feed">
+            <div className="section-heading">
+              <div><div className="section-overline">COMMUNITY PULSE</div><h3>Recent chat <span className="subtle-count">{chatMessages.length.toString().padStart(2, "0")}</span></h3><p>Normalized messages from your connected platforms.</p></div>
+              <button className="outline-button" onClick={() => { void refreshChat(); void refreshProviderHealth(); }} disabled={chatLoading && healthLoading}><RefreshCw size={14} /> Refresh status</button>
+            </div>
+            <div className="chat-feed-panel">
+              <div className="chat-feed-main">
+                {chatLoading ? <div className="chat-empty"><RefreshCw size={18} className="spin" /><span>Loading recent chat…</span></div>
+                  : chatError ? <div className="chat-empty"><CircleHelp size={20} /><div><b>Chat history unavailable</b><p>Check the local API and try again.</p></div></div>
+                  : chatMessages.length === 0 ? <div className="chat-empty"><div className="chat-empty-icon"><MessageCircle size={21} /></div><div><b>No live messages yet</b><p>Provider connectors are not authorized yet, so no real messages are being received.</p></div></div>
+                  : <div className="chat-message-list">{chatMessages.slice(-8).map(message => {
+                    const provider = providers.find(item => item.key === message.provider);
+                    return <article className="chat-message-row" key={message.id}>
+                      <div className={`provider-icon ${provider?.className ?? "tiktok"} chat-provider-icon`}>{provider?.short ?? "?"}</div>
+                      <div className="chat-message-copy"><div className="chat-message-meta"><b>{message.senderName}</b><span className="chat-provider-label">{provider?.name ?? message.provider}</span><time>{new Date(message.receivedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></div><p>{message.text}</p></div>
+                    </article>;
+                  })}</div>}
+              </div>
+              <aside className="chat-feed-status">
+                <div className="chat-status-heading"><span>PROVIDER HEALTH</span><small>{healthLoading ? "Checking…" : `${providerHealth.filter(item => item.state === "connected" || item.state === "degraded").length}/4 active`}</small></div>
+                {(providerHealth.length ? providerHealth : providers.map(item => ({ provider: item.key, state: item.key === "tiktok" ? "unsupported" as const : "disconnected" as const, viewerCount: null, detailCode: null, unofficial: item.key === "tiktok" }))).map(health => {
+                  const provider = providers.find(item => item.key === health.provider);
+                  const label = health.state === "connected" ? "Connected" : health.state === "degraded" ? "Degraded" : health.state === "unsupported" ? "Unavailable" : health.state === "error" ? "Error" : "Not connected";
+                  return <div className={`chat-provider-status ${health.state}`} key={health.provider}><span className="status-dot" /><div><b>{provider?.name ?? health.provider}</b><small>{label}{health.detailCode ? ` · ${health.detailCode.replace(/_/g, " ")}` : ""}</small></div><strong>{health.viewerCount == null ? "—" : health.viewerCount}</strong></div>;
+                })}
+              </aside>
+            </div>
+            <div className="integration-footnote"><ShieldCheck size={15} /><span>Viewer totals only include fresh counts. “—” means unknown, not zero. TikTok LIVE remains unofficial/best-effort until a compliant connector is validated.</span></div>
           </section>
 
           <section className="bottom-grid" id="devices">

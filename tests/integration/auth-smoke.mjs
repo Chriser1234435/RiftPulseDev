@@ -36,6 +36,17 @@ const initialSettings = await settingsResponse.json();
 assert.equal(initialSettings.modules.chat.enabled, true);
 assert.equal(initialSettings.modules["bsr-song-request"].enabled, true);
 
+const chatMessagesResponse = await fetch(`${base}/api/v1/chat/messages`, { headers: { cookie, origin } });
+assert.equal(chatMessagesResponse.status, 200, await chatMessagesResponse.clone().text());
+assert.deepEqual((await chatMessagesResponse.json()).messages, []);
+
+const providerHealthResponse = await fetch(`${base}/api/v1/integrations/health`, { headers: { cookie, origin } });
+assert.equal(providerHealthResponse.status, 200, await providerHealthResponse.clone().text());
+const providerHealth = await providerHealthResponse.json();
+assert.equal(providerHealth.providers.length, 4);
+assert.equal(providerHealth.viewers.total, null, "unknown viewer counts must not be represented as zero");
+assert.equal(providerHealth.providers.find(provider => provider.provider === "tiktok").state, "unsupported");
+
 const noOriginPatch = await fetch(`${base}/api/v1/settings/modules/chat`, {
   method: "PATCH", headers: { cookie, "content-type": "application/json" },
   body: JSON.stringify({ enabled: false }),

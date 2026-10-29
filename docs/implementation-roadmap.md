@@ -43,12 +43,12 @@ Status: Step 6 local website/auth foundation complete. Step 7 chat/provider foun
 
 ## Step 7 - Chat and providers (in progress)
 - [x] Add shared normalized chat message and provider health contracts.
-- [x] Normalize Twitch EventSub, YouTube Live Chat, and official Kick chat webhook payloads.
+- [x] Normalize Twitch EventSub, YouTube Live Chat, and Kick-shaped chat payloads; live transports are not yet wired.
 - [x] Add bounded TTL deduplication and full-jitter reconnect backoff helpers.
 - [x] Aggregate only fresh provider viewer counts; unknown stays null and partial data is explicit.
 - [x] Add D1 chat message persistence with per-account/provider/message uniqueness and viewer-count freshness.
 - [x] Add authenticated chat-history and provider-health APIs plus dashboard chat/provider-health display.
-- [x] Add Kick webhook signature/timestamp verification using the current public key and idempotent message persistence.
+- [ ] Implement signed Kick webhook verification, subscription setup, and idempotent event ingestion.
 - [x] Apply the chat foundation migration to the local D1 database and extend schema/unit tests.
 - [ ] Implement Twitch EventSub OAuth, connection lifecycle, and recovery.
 - [ ] Implement YouTube live-chat streaming and fallback handling.
