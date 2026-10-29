@@ -35,3 +35,8 @@ The bridge signs the exact JSON request body with HMAC-SHA256 and a Unix-seconds
 ## Reliability and licensing
 
 This integration is unofficial, reverse-engineered, and best-effort; TikTok can change its protocol or block the connector. It should report degraded/disconnected health rather than imply guaranteed delivery. The pinned `tiktok-live-connector` package declares `AGPL-3.0-only`; review the license obligations before redistributing or combining the bridge with a distributed product. Gift quantities/diamonds are not represented as cash donations.
+
+
+### Railway runtime
+
+The Railway development service runs the compiled bridge entry point with `node dist/index.js`. Keep it in test mode unless a TikTok LIVE connection has been explicitly approved.
