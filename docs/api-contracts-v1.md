@@ -89,5 +89,5 @@ Requires an authenticated session, a trusted browser `Origin`, and a WebSocket u
 
 - Five-digit codes have low entropy. HMAC is required rather than an ordinary unsalted hash, but it does not replace rate limiting. Production must add edge-level rate limits, per-account/IP attempt limits, and monitoring before public deployment.
 - Pairing challenges must only be claimed by an authenticated account, must be single-use, and must expire.
-- OAuth token encryption/key management and provider OAuth scopes are not implemented by this schema alone.
+- A local AES-256-GCM provider-token vault helper is unit-tested, but OAuth token persistence, refresh flows, key rotation, and provider scopes are not yet wired.
 - No remote D1 database, production binding, secret, or deployment is created in Step 5.

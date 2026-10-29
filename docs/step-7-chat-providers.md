@@ -10,6 +10,7 @@ Status: **in progress**. The local chat data model, message normalizers, dedupe/
 - Viewer aggregation includes only fresh counts from connected/degraded providers. Unknown remains `null`, not zero; partial availability is explicit.
 - D1 migration `0003_chat_foundation.sql` adds `chat_messages`, per-account/provider/external-message uniqueness, a recent-message index, and a separate `viewer_count_observed_at` timestamp.
 - A D1 persistence helper stores normalized messages without retaining raw provider payloads.
+- A tested AES-256-GCM provider-token vault helper uses random nonces and authenticated ciphertext envelopes; OAuth/token storage does not use it yet because provider OAuth setup is still gated.
 - Twitch EventSub webhook verification using the configured HMAC-SHA256 secret, exact raw body, and freshness window; handles signed challenge verification, chat notifications, and revocation status updates.
 - Kick webhook verification using the current official public-key endpoint, RSA-SHA256 signature over the message ID, timestamp, and exact raw body; rejects stale signatures, caps body size, and does not log payloads or signatures.
 - Signed `POST /api/v1/providers/twitch/webhook` and `POST /api/v1/providers/kick/webhook` receivers. Twitch handles EventSub challenge/notification/revocation messages; Kick handles version 1 `chat.message.sent`. Both route only to mapped connected channels, persist idempotently, and do not falsely refresh viewer counts.

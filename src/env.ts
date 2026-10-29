@@ -23,6 +23,8 @@ export interface Env {
   BETTER_AUTH_SECRET?: string;
   /** Twitch EventSub webhook HMAC secret (10–100 chars); never commit the value. */
   TWITCH_EVENTSUB_SECRET?: string;
+  /** Base64-encoded 32-byte AES-256-GCM key for provider tokens; never commit the value. */
+  TOKEN_ENCRYPTION_KEY?: string;
   /** Canonical base URL for auth redirects and cookies. Local development only in Step 6. */
   APP_BASE_URL?: string;
   /** Comma-separated exact trusted browser origins. */

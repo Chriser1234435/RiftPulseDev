@@ -48,6 +48,7 @@ Status: Step 6 local website/auth foundation complete. Step 7 chat/provider foun
 - [x] Add bounded TTL deduplication and full-jitter reconnect backoff helpers.
 - [x] Aggregate only fresh provider viewer counts; unknown stays null and partial data is explicit.
 - [x] Add D1 chat message persistence with per-account/provider/message uniqueness and viewer-count freshness.
+- [x] Add tested AES-256-GCM provider-token vault helper; wiring it into OAuth persistence and key rotation remains open.
 - [x] Add authenticated chat-history and provider-health APIs plus dashboard chat/provider-health display.
 - [x] Implement signed Kick webhook verification and idempotent ingestion for version 1 chat.message.sent events.
 - [x] Apply the chat foundation migration to the local D1 database and extend schema/unit tests.
