@@ -2,7 +2,7 @@
   "name": "@riftpulse/tiktok-bridge",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": { "node": ">=22" },
   "scripts": {
     "build": "npm run typecheck && tsc --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck --outDir dist src/index.ts",
     "start": "node dist/index.js",
