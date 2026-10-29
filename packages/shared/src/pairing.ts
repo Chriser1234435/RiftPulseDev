@@ -25,21 +25,30 @@ export async function createPairingChallenge(
   const expiresAt = new Date(input.now.getTime() + CHALLENGE_TTL_MS).toISOString();
   const codeDigest = await digestPairingCode(input.code, secret);
   try {
-    await db.prepare("UPDATE pairing_challenges SET status = 'expired', code_digest = NULL WHERE status = 'pending' AND expires_at <= ?")
+    const expired = await db.prepare("UPDATE pairing_challenges SET status = 'expired', code_digest = NULL WHERE status = 'pending' AND expires_at <= ?")
       .bind(nowIso).run();
+    if (!expired.success) return { ok: false, reason: "database_error" };
+
     const active = await db.prepare(
       "SELECT COUNT(*) AS count FROM pairing_challenges WHERE device_id = ? AND status = 'pending' AND expires_at > ?",
     ).bind(input.deviceId, nowIso).first<{ count: number }>();
-    if ((active?.count ?? 0) >= MAX_ACTIVE_CHALLENGES_PER_DEVICE) return { ok: false, reason: "too_many_active" };
+    if (!active || typeof active.count !== "number") return { ok: false, reason: "database_error" };
+    if (active.count >= MAX_ACTIVE_CHALLENGES_PER_DEVICE) return { ok: false, reason: "too_many_active" };
     const collision = await db.prepare(
       "SELECT id FROM pairing_challenges WHERE code_digest = ? AND status = 'pending' AND expires_at > ? LIMIT 1",
     ).bind(codeDigest, nowIso).first<{ id: string }>();
     if (collision) return { ok: false, reason: "code_conflict" };
-    await db.prepare(
+    const inserted = await db.prepare(
       `INSERT INTO pairing_challenges
        (id, device_id, platform, game_version, mod_version, code_digest, status, attempts, created_at, expires_at)
        VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
     ).bind(input.challengeId, input.deviceId, input.platform, input.gameVersion, input.modVersion, codeDigest, nowIso, expiresAt).run();
+    if (!inserted.success) {
+      if (inserted.error?.includes("pairing_challenges.code_digest")) {
+        return { ok: false, reason: "code_conflict" };
+      }
+      return { ok: false, reason: "database_error" };
+    }
     return { ok: true, challengeId: input.challengeId, expiresAt };
   } catch {
     return { ok: false, reason: "database_error" };
@@ -66,8 +75,9 @@ export async function claimPairingChallenge(
         `UPDATE pairing_challenges
          SET status = 'claimed', claimed_at = ?, claimed_account_id = ?, code_digest = NULL
          WHERE id = ? AND status = 'pending' AND expires_at > ?
-           AND EXISTS (SELECT 1 FROM accounts WHERE id = ? AND status = 'active')`,
-      ).bind(claimTime, accountId, candidate.id, nowIso, accountId),
+           AND EXISTS (SELECT 1 FROM accounts WHERE id = ? AND status = 'active')
+           AND NOT EXISTS (SELECT 1 FROM devices WHERE id = pairing_challenges.device_id AND account_id <> ?)`,
+      ).bind(claimTime, accountId, candidate.id, nowIso, accountId, accountId),
       db.prepare(
         `INSERT INTO devices (id, account_id, platform, game_version, mod_version, created_at, last_seen_at)
          SELECT device_id, claimed_account_id, platform, game_version, mod_version, ?, ?
