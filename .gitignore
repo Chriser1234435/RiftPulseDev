@@ -1,0 +1,32 @@
+﻿# Node / web build outputs
+node_modules/
+dist/
+build/
+coverage/
+.vite/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.local
+.dev.vars
+.wrangler/
+
+# .NET build outputs
+bin/
+obj/
+artifacts/
+*.user
+*.suo
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
