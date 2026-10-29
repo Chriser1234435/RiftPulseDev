@@ -21,7 +21,7 @@ const statusUrl = new URL(accountsUrl);
 statusUrl.pathname = statusUrl.pathname.replace("/accounts", "/status");
 const secret = process.env.TIKTOK_CONNECTOR_INGEST_SECRET!;
 if (secret.length < 32) throw new Error("TIKTOK_CONNECTOR_INGEST_SECRET must be at least 32 characters.");
-const pollMs = Math.max(15_000, Number(process.env.TIKTOK_ACCOUNT_POLL_MS) || 30_000);
+const pollMs = Math.max(10_000, Number(process.env.TIKTOK_ACCOUNT_POLL_MS) || 10_000);
 const maxAccounts = Math.max(1, Math.min(50, Number(process.env.TIKTOK_MAX_ACTIVE_ACCOUNTS) || 10));
 
 type AccountConfig = { accountId: string; username: string };
