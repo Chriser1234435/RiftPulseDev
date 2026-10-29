@@ -45,14 +45,24 @@ assert.equal(providerHealthResponse.status, 200, await providerHealthResponse.cl
 const providerHealth = await providerHealthResponse.json();
 assert.equal(providerHealth.providers.length, 4);
 assert.equal(providerHealth.viewers.total, null, "unknown viewer counts must not be represented as zero");
-assert.equal(providerHealth.providers.find(provider => provider.provider === "tiktok").state, "unsupported");
+assert.equal(providerHealth.providers.find(provider => provider.provider === "tiktok").state, "disconnected", "TikTok has no active provider connection for this account");
 
 const providerConnectionsResponse = await fetch(`${base}/api/v1/providers/connections`, { headers: { cookie, origin } });
 assert.equal(providerConnectionsResponse.status, 200, await providerConnectionsResponse.clone().text());
 const providerConnections = await providerConnectionsResponse.json();
 assert.equal(providerConnections.connections.length, 4);
-assert.equal(providerConnections.connections.find(provider => provider.provider === "tiktok").status, "unsupported");
+assert.equal(providerConnections.connections.find(provider => provider.provider === "tiktok").status, "disconnected", "TikTok bridge is available but not connected for this account");
 assert.equal(providerConnections.connections.find(provider => provider.provider === "twitch").configured, false);
+assert.equal(providerConnections.connections.find(provider => provider.provider === "youtube").configured, false);
+assert.equal(providerConnections.connections.find(provider => provider.provider === "kick").configured, false);
+const connectKickWithoutOrigin = await fetch(`${base}/api/v1/providers/kick/connect`, { method: "POST", headers: { cookie } });
+assert.equal(connectKickWithoutOrigin.status, 403, "Kick authorization start must enforce trusted Origin");
+const connectKickUnconfigured = await fetch(`${base}/api/v1/providers/kick/connect`, { method: "POST", headers: { cookie, origin } });
+assert.equal(connectKickUnconfigured.status, 503, "Kick OAuth must fail closed without app credentials");
+const connectYouTubeWithoutOrigin = await fetch(`${base}/api/v1/providers/youtube/connect`, { method: "POST", headers: { cookie } });
+assert.equal(connectYouTubeWithoutOrigin.status, 403, "YouTube authorization start must enforce trusted Origin");
+const connectYouTubeUnconfigured = await fetch(`${base}/api/v1/providers/youtube/connect`, { method: "POST", headers: { cookie, origin } });
+assert.equal(connectYouTubeUnconfigured.status, 503, "YouTube OAuth must fail closed without app credentials");
 assert.equal(JSON.stringify(providerConnections).includes("accessToken"), false);
 
 const connectTwitchWithoutOrigin = await fetch(`${base}/api/v1/providers/twitch/connect`, { method: "POST", headers: { cookie } });

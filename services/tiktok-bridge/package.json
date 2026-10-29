@@ -1,0 +1,9 @@
+{
+  "name": "@riftpulse/tiktok-bridge",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": { "start": "node --experimental-strip-types src/index.ts", "typecheck": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck src/index.ts" },
+  "dependencies": { "tiktok-live-connector": "2.5.0" },
+  "devDependencies": { "@types/node": "^22.15.0", "typescript": "^5.8.3" }
+}

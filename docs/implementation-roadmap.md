@@ -35,7 +35,7 @@ Status: Step 6 local website/auth foundation complete. Step 7 chat/provider foun
 - [x] Add sign-up/sign-in using Better Auth, local-only D1 schema, session lookup and sign-out.
 - [x] Persist module toggles and BSR command settings per account.
 - [x] Add device pairing, device listing and revocation UI/API.
-- [x] Add provider connection UI with explicit preview-only states.
+- [x] Add provider connection UI with API-backed status and credential-gated Twitch/YouTube OAuth actions.
 - [x] Test session cookie flags, origin checks, settings persistence, pairing claim, device list/revoke, and sign-out.
 - [x] Visually review the entry screen at desktop and narrow layout sizes; adjust mobile breakpoint.
 - [x] Ensure build output removes .dev.vars copies after bundling.
@@ -43,8 +43,8 @@ Status: Step 6 local website/auth foundation complete. Step 7 chat/provider foun
 
 ## Step 7 - Chat and providers (in progress)
 - [x] Add shared normalized chat message and provider health contracts.
-- [x] Add signed Twitch EventSub callback handling for challenge verification, chat notifications, and revocation; OAuth/subscription lifecycle remains gated.
-- [x] Add normalizers for Twitch EventSub, YouTube Live Chat, and Kick chat payloads.
+- [x] Add signed Twitch EventSub callback handling for challenge verification, chat notifications, and revocation, plus OAuth/subscription setup routes; live verification still requires credentials and HTTPS.
+- [x] Add normalizers for Twitch EventSub, YouTube Live Chat, Kick, and TikTok chat payloads plus a shared provider-event contract.
 - [x] Add bounded TTL deduplication and full-jitter reconnect backoff helpers.
 - [x] Aggregate only fresh provider viewer counts; unknown stays null and partial data is explicit.
 - [x] Add D1 chat message persistence with per-account/provider/message uniqueness and viewer-count freshness.
@@ -56,13 +56,15 @@ Status: Step 6 local website/auth foundation complete. Step 7 chat/provider foun
 - [x] Add guarded Twitch EventSub subscription creation with app access tokens and signed HTTPS webhook verification; health only becomes healthy after an enabled subscription or signed callback challenge.
 - [x] Add on-demand Twitch access-token validation and refresh with encrypted rotated-token persistence.
 - [ ] Add scheduled refresh/recovery and pagination-aware subscription reconciliation.
-- [ ] Implement YouTube live-chat streaming and fallback handling.
-- [ ] Finish Kick OAuth, subscription setup, channel mapping validation, and live end-to-end testing.
+- [x] Add Google OAuth authorization-code start/callback, offline refresh-token request, YouTube channel identification, and encrypted token storage.
+- [ ] Implement YouTube Live Chat discovery, streaming/list fallback, quota-aware polling, token refresh, and viewer counts.
+- [x] Add Kick OAuth 2.1 authorization-code start/callback with PKCE S256, encrypted verifier state, token introspection, required scope validation, and encrypted token storage.
+- [ ] Implement Kick webhook subscription creation, channel mapping validation, token refresh/recovery, and real end-to-end tests.
 - [x] Add per-account Durable Object WebSocket fan-out for the website and future PCVR/Quest clients.
 - [ ] Add realtime connection to PCVR/Quest mod clients in the mod integration step.
-- [ ] Prove a compliant TikTok LIVE connector in isolation; do not scrape undocumented/private endpoints.
+- [x] Add an isolated Node.js TikTok LIVE bridge with HMAC-signed, timestamp-bounded ingest, normalized chat/event persistence, and realtime provider-event fan-out; live-stream verification remains outstanding.
 - [ ] Run provider mock/integration tests and verify fresh viewer counts end to end.
-- [x] Replace fake provider preview toggles with API-backed status and a credential-gated Twitch OAuth action.
+- [x] Replace fake provider preview toggles with API-backed status and credential-gated Twitch/YouTube/Kick OAuth actions.
 
 ## Step 8 - BSR Song Request (not started)
 Implement command parsing, BeatSaver metadata validation, cooldowns, queue rules, and explicit error states.

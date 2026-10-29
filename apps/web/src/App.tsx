@@ -24,6 +24,42 @@ const providers: Provider[] = [
   { key: "kick", name: "Kick", short: "K", className: "kick", note: "Live chat + viewers" },
   { key: "tiktok", name: "TikTok LIVE", short: "♪", className: "tiktok", note: "Unofficial · best effort" },
 ];
+type ProviderEventPayload = {
+  id: string; provider: ProviderKey; kind: string; actorName: string | null;
+  itemName: string | null; quantity: number | null; amount: number | null;
+  currency: string | null; message: string | null; receivedAt: string;
+};
+
+function providerEventAsChatMessage(value: unknown): ChatMessage | null {
+  if (!value || typeof value !== "object") return null;
+  const event = value as Partial<ProviderEventPayload>;
+  if (typeof event.id !== "string" || typeof event.provider !== "string"
+    || !providers.some(provider => provider.key === event.provider)
+    || typeof event.kind !== "string" || typeof event.receivedAt !== "string") return null;
+  const actor = typeof event.actorName === "string" && event.actorName ? event.actorName : "Stream event";
+  let description: string;
+  switch (event.kind) {
+    case "follow": description = "followed the channel"; break;
+    case "subscription": description = "subscribed"; break;
+    case "gift": description = "sent " + (typeof event.quantity === "number" && event.quantity > 1 ? event.quantity + " × " : "") + (event.itemName || "a gift"); break;
+    case "bits": description = "cheered " + (event.amount ?? event.quantity ?? "") + " Bits"; break;
+    case "super_chat": description = "sent a Super Chat" + (event.amount !== null && event.amount !== undefined ? " (" + (event.currency ? event.currency + " " : "") + event.amount + ")" : ""); break;
+    case "donation": description = "donated " + (event.currency ? event.currency + " " : "") + (event.amount ?? "an amount not provided"); break;
+    case "like": description = "liked the stream"; break;
+    case "share": description = "shared the stream"; break;
+    case "raid": description = "raided the channel"; break;
+    case "member_join": description = "joined the stream"; break;
+    case "viewer_count": description = "viewer count updated to " + (event.quantity ?? "unknown"); break;
+    default: description = "triggered " + event.kind;
+  }
+  if (event.message) description += ": " + event.message;
+  return {
+    id: event.id, provider: event.provider as ProviderKey, senderName: actor,
+    text: description.slice(0, 500), receivedAt: event.receivedAt,
+    badges: { moderator: false, subscriber: event.kind === "subscription", verified: false },
+  };
+}
+
 const initialEnabled: Record<ModuleKey, boolean> = { chat: true, "bsr-song-request": true };
 
 function App() {
@@ -33,7 +69,7 @@ function App() {
     twitch: { status: "disconnected", displayName: null, connectedAt: null, configured: false, detailCode: "oauth_credentials_not_configured" },
     youtube: { status: "disconnected", displayName: null, connectedAt: null, configured: false, detailCode: null },
     kick: { status: "disconnected", displayName: null, connectedAt: null, configured: false, detailCode: null },
-    tiktok: { status: "unsupported", displayName: null, connectedAt: null, configured: false, detailCode: "unofficial_connector_unavailable" },
+    tiktok: { status: "disconnected", displayName: null, connectedAt: null, configured: false, detailCode: "unofficial_connector_not_configured" },
   });
   const [modal, setModal] = useState<"pair" | "provider" | "settings" | "help" | "auth" | null>(null);
   const [pairCode, setPairCode] = useState("");
@@ -167,7 +203,9 @@ function App() {
       socket.onmessage = event => {
         try {
           const payload = JSON.parse(String(event.data));
-          const message = payload?.type === "chat.message" ? payload.message as ChatMessage : null;
+          const message: ChatMessage | null = payload?.type === "chat.message"
+            ? payload.message as ChatMessage
+            : payload?.type === "provider.event" ? providerEventAsChatMessage(payload.event) : null;
           if (!message || typeof message.id !== "string" || typeof message.text !== "string"
             || typeof message.senderName !== "string" || !providers.some(provider => provider.key === message.provider)) return;
           setChatMessages(current => [...current.filter(item => item.id !== message.id), message].slice(-100));
@@ -209,11 +247,12 @@ function App() {
   useEffect(() => {
     if (!authLoaded) return;
     const params = new URLSearchParams(window.location.search);
-    if (params.get("provider") !== "twitch" || !params.get("status")) return;
+    const provider = params.get("provider");
+    if ((provider !== "twitch" && provider !== "youtube" && provider !== "kick") || !params.get("status")) return;
     const status = params.get("status");
-    if (status === "connected") flash("Twitch account authorized. EventSub subscription setup is still pending.");
-    else if (status === "denied") flash("Twitch authorization was canceled.");
-    else flash("Twitch connection could not be completed. No token details were shown.");
+    if (status === "connected") flash(provider === "twitch" ? "Twitch account authorized. EventSub subscription setup is still pending." : provider === "youtube" ? "YouTube account authorized. Live-chat polling is still pending." : "Kick account authorized. Webhook subscription setup is still pending.");
+    else if (status === "denied") flash(provider + " authorization was canceled.");
+    else flash(provider + " connection could not be completed. No token details were shown.");
     window.history.replaceState({}, "", window.location.pathname);
     if (user?.id) {
       void refreshProviderConnections();
@@ -282,8 +321,42 @@ function App() {
       }
       return;
     }
+    if (selectedProvider === "youtube") {
+      if (!current.configured) {
+        flash("YouTube OAuth is not configured in this local workspace yet.");
+        return;
+      }
+      try {
+        const response = await fetch("/api/v1/providers/youtube/connect", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: "{}" });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error?.message ?? "Could not start YouTube authorization.");
+        const authorizationUrl = new URL(data.authorizationUrl);
+        if (authorizationUrl.origin !== "https://accounts.google.com" || authorizationUrl.pathname !== "/o/oauth2/v2/auth") throw new Error("The authorization URL was not trusted.");
+        window.location.assign(authorizationUrl.toString());
+      } catch (error) {
+        flash(error instanceof Error ? error.message : "Could not start YouTube authorization.");
+      }
+      return;
+    }
+    if (selectedProvider === "kick") {
+      if (!current.configured) {
+        flash("Kick OAuth is not configured in this local workspace yet.");
+        return;
+      }
+      try {
+        const response = await fetch("/api/v1/providers/kick/connect", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: "{}" });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error?.message ?? "Could not start Kick authorization.");
+        const authorizationUrl = new URL(data.authorizationUrl);
+        if (authorizationUrl.origin !== "https://id.kick.com" || authorizationUrl.pathname !== "/oauth/authorize") throw new Error("The authorization URL was not trusted.");
+        window.location.assign(authorizationUrl.toString());
+      } catch (error) {
+        flash(error instanceof Error ? error.message : "Could not start Kick authorization.");
+      }
+      return;
+    }
     if (selectedProvider !== "twitch") {
-      flash(selectedProvider === "tiktok" ? "TikTok LIVE is unavailable in this build." : provider.name + " authorization is not implemented yet.");
+      flash("TikTok LIVE is unavailable in this build.");
       return;
     }
     if (!current.configured) {
@@ -526,7 +599,7 @@ function App() {
                 <button className={providerConnections[provider.key].status === "connected" ? "disconnect-button" : "connect-button"} onClick={() => openProvider(provider.key)}>{providerConnections[provider.key].status === "connected" ? "Manage" : providerConnections[provider.key].status === "unsupported" ? "Details" : "Connect"}{providerConnections[provider.key].status === "connected" ? <ChevronDown size={14} /> : <ExternalLink size={13} />}</button>
               </div>)}
             </div>
-            <div className="integration-footnote"><ShieldCheck size={15} /><span>Connection status comes from the local API. Twitch OAuth is implemented but requires your own registered app credentials; YouTube and Kick OAuth are still in development. TikTok LIVE remains unavailable.</span></div>
+            <div className="integration-footnote"><ShieldCheck size={15} /><span>Connection status comes from the local API. Twitch and YouTube OAuth are implemented but require your own registered app credentials; live-chat ingestion is still being completed. Kick OAuth remains in development. TikTok LIVE remains unavailable.</span></div>
           </section>
 
           <section className="section-block chat-feed-block" id="chat-feed">
@@ -589,10 +662,10 @@ function App() {
             <button className="primary-button modal-submit" disabled={pairCode.length !== 5 || pairStatus === "checking"} onClick={verifyPairing}>{pairStatus === "checking" ? <><RefreshCw size={16} className="spin" /> Verifying…</> : <>Verify code <ArrowUpRight size={15} /></>}</button>
             <p className="modal-footnote">This form never generates pairing codes. Enter only the current code displayed by your own Beat Saber installation.</p>
           </>}
-          {modal === "provider" && <><div className={`modal-icon provider-icon ${providers.find(p => p.key === selectedProvider)?.className}`}>{providers.find(p => p.key === selectedProvider)?.short}</div><div className="modal-eyebrow">PLATFORM INTEGRATION</div><h2 id="modal-title">{providerConnections[selectedProvider].status === "connected" ? "Manage" : "Connect"} {providers.find(p => p.key === selectedProvider)?.name}</h2><p className="modal-copy">{selectedProvider === "twitch" ? (providerConnections.twitch.configured ? "Authorize your Twitch account securely. After authorization, EventSub subscription setup is still required before live messages arrive." : "The Twitch OAuth flow is implemented locally, but app credentials and a token encryption key have not been configured in this workspace.") : selectedProvider === "tiktok" ? "TikTok LIVE is unavailable in this build; no unofficial endpoint is being contacted." : (providers.find(p => p.key === selectedProvider)?.name + " authorization is not implemented yet. The account will remain disconnected until its secure OAuth flow is ready.")}</p>
+          {modal === "provider" && <><div className={`modal-icon provider-icon ${providers.find(p => p.key === selectedProvider)?.className}`}>{providers.find(p => p.key === selectedProvider)?.short}</div><div className="modal-eyebrow">PLATFORM INTEGRATION</div><h2 id="modal-title">{providerConnections[selectedProvider].status === "connected" ? "Manage" : "Connect"} {providers.find(p => p.key === selectedProvider)?.name}</h2><p className="modal-copy">{selectedProvider === "twitch" ? (providerConnections.twitch.configured ? "Authorize your Twitch account securely. After authorization, EventSub subscription setup is still required before live messages arrive." : "The Twitch OAuth flow is implemented locally, but app credentials and a token encryption key have not been configured in this workspace.") : selectedProvider === "youtube" ? (providerConnections.youtube.configured ? "Authorize YouTube read-only access for your channel. OAuth is implemented locally; live-chat polling and viewer counts are still in development." : "Google OAuth and YouTube Data API credentials have not been configured in this workspace.") : selectedProvider === "kick" ? (providerConnections.kick.configured ? "Authorize your Kick account using OAuth 2.1 with PKCE. Webhook subscription setup remains in development and will be reported as pending." : "Kick OAuth credentials and a token encryption key have not been configured in this workspace.") : selectedProvider === "tiktok" ? "RiftPulse is being wired to the unofficial TikTok LIVE connector for chat, gifts, follows, likes, shares, and viewer counts. It will run as an isolated Node.js bridge and is best-effort; this local build does not receive live TikTok events until the bridge and signed ingest route are configured." : (providers.find(p => p.key === selectedProvider)?.name + " authorization is not implemented yet. The account will remain disconnected until its secure OAuth flow is ready.")}</p>
             {selectedProvider === "tiktok" && <div className="warning-note"><ShieldCheck size={16} /><span><b>Unofficial connector</b><br />TikTok LIVE support is best effort and may be unavailable or change without notice.</span></div>}
             <div className="provider-permissions"><div><Check size={15} /> Chat event capability</div><div><Users size={15} /> Viewer count where supported</div><div><LockKeyhole size={15} /> Secure account authorization</div></div>
-            <button className="primary-button modal-submit" disabled={(providerConnections[selectedProvider].status !== "connected" && (selectedProvider !== "twitch" || !providerConnections.twitch.configured)) || providerConnections[selectedProvider].detailCode === "eventsub_verification_pending"} onClick={() => void handleProviderAction()}>{providerConnections[selectedProvider].status === "connected" ? providerConnections[selectedProvider].detailCode === "eventsub_subscription_pending" || providerConnections[selectedProvider].detailCode === "eventsub_subscription_failed" ? <><Radio size={16} /> Enable chat events</> : providerConnections[selectedProvider].detailCode === "eventsub_verification_pending" ? <><RefreshCw size={16} className="spin" /> Waiting for verification</> : <><Unplug size={16} /> Disconnect account</> : selectedProvider === "twitch" && providerConnections.twitch.configured ? <><Link2 size={16} /> Connect with Twitch</> : <>Not configured yet <LockKeyhole size={15} /></>}</button><p className="modal-footnote">{providerConnections[selectedProvider].status === "connected" && providerConnections[selectedProvider].detailCode === "eventsub_subscription_pending" ? "Twitch is authorized. Enable the signed webhook subscription to receive live chat." : providerConnections[selectedProvider].status === "connected" && providerConnections[selectedProvider].detailCode === "eventsub_verification_pending" ? "Twitch is validating the webhook endpoint. The status will update after its signed challenge arrives." : providerConnections[selectedProvider].status === "connected" ? "Disconnecting clears stored token ciphertext." : "No external account is contacted until you choose an enabled connection action."}</p>
+            <button className="primary-button modal-submit" disabled={selectedProvider === "tiktok" || (providerConnections[selectedProvider].status !== "connected" && ((selectedProvider === "twitch" && !providerConnections.twitch.configured) || (selectedProvider === "youtube" && !providerConnections.youtube.configured) || (selectedProvider === "kick" && !providerConnections.kick.configured))) || providerConnections[selectedProvider].detailCode === "eventsub_verification_pending"} onClick={() => void handleProviderAction()}>{selectedProvider === "tiktok" ? <>Bridge managed separately <LockKeyhole size={15} /></> : providerConnections[selectedProvider].status === "connected" ? providerConnections[selectedProvider].detailCode === "eventsub_subscription_pending" || providerConnections[selectedProvider].detailCode === "eventsub_subscription_failed" ? <><Radio size={16} /> Enable chat events</> : providerConnections[selectedProvider].detailCode === "eventsub_verification_pending" ? <><RefreshCw size={16} className="spin" /> Waiting for verification</> : <><Unplug size={16} /> Disconnect account</> : selectedProvider === "twitch" && providerConnections.twitch.configured ? <><Link2 size={16} /> Connect with Twitch</> : selectedProvider === "youtube" && providerConnections.youtube.configured ? <><Link2 size={16} /> Connect with YouTube</> : selectedProvider === "kick" && providerConnections.kick.configured ? <><Link2 size={16} /> Connect with Kick</> : <>Not configured yet <LockKeyhole size={15} /></>}</button><p className="modal-footnote">{providerConnections[selectedProvider].status === "connected" && providerConnections[selectedProvider].detailCode === "eventsub_subscription_pending" ? "Twitch is authorized. Enable the signed webhook subscription to receive live chat." : providerConnections[selectedProvider].status === "connected" && providerConnections[selectedProvider].detailCode === "eventsub_verification_pending" ? "Twitch is validating the webhook endpoint. The status will update after its signed challenge arrives." : providerConnections[selectedProvider].status === "connected" ? "Disconnecting clears stored token ciphertext." : "No external account is contacted until you choose an enabled connection action."}</p>
           </>}
           {modal === "settings" && <><div className="modal-icon purple-modal"><Settings2 size={22} /></div><div className="modal-eyebrow">PREFERENCES</div><h2 id="modal-title">Tune your setup.</h2><p className="modal-copy">Module switches and the BSR command save to your account. Provider OAuth and device preferences remain gated until their integrations are complete.</p>
             <div className="settings-option"><div><b>Automatically save toggles</b><small>Apply module changes immediately.</small></div><button className={`toggle ${autoSave ? "on" : ""}`} role="switch" aria-checked={autoSave} onClick={() => setAutoSave(!autoSave)}><span /></button></div>

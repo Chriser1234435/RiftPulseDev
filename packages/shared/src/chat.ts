@@ -1,5 +1,5 @@
 import { PROVIDERS, type ProviderKey } from "../../contracts/src/v1.ts";
-import type { NormalizedChatMessage, ProviderHealthSnapshot, ViewerAggregate } from "../../contracts/src/chat-v1.ts";
+import type { NormalizedChatMessage, NormalizedProviderEvent, ProviderEventKind, ProviderHealthSnapshot, ViewerAggregate } from "../../contracts/src/chat-v1.ts";
 
 type Rec = Record<string, unknown>;
 const rec = (v: unknown): Rec | null => typeof v === "object" && v !== null && !Array.isArray(v) ? v as Rec : null;
@@ -7,7 +7,11 @@ const child = (v: Rec | null, k: string): Rec | null => rec(v?.[k]);
 const id = (v: unknown): string => typeof v === "string" ? v.trim().slice(0, 128) : typeof v === "number" && Number.isFinite(v) ? String(v) : "";
 const text = (v: unknown, max: number): string => typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max) : "";
 const date = (v: unknown, fallback: Date): string => {
-  if (typeof v === "string" || typeof v === "number") { const parsed = new Date(v); if (Number.isFinite(parsed.getTime())) return parsed.toISOString(); }
+  if (typeof v === "string" || typeof v === "number") {
+    const normalized = typeof v === "number" && Math.abs(v) < 1_000_000_000_000 ? v * 1000 : v;
+    const parsed = new Date(normalized);
+    if (Number.isFinite(parsed.getTime())) return parsed.toISOString();
+  }
   return fallback.toISOString();
 };
 function normalize(input: {
@@ -64,6 +68,61 @@ export function normalizeKickChatMessage(payload: unknown, receivedAt = new Date
   });
 }
 
+export function normalizeTikTokChatMessage(payload: unknown, channelId = "", channelName = "", receivedAt = new Date()): NormalizedChatMessage | null {
+  const root = rec(payload), user = child(root, "user") ?? child(root, "userInfo");
+  if (!root || !user) return null;
+  const room = child(root, "room");
+  return normalize({
+    provider: "tiktok",
+    externalMessageId: root.msgId ?? root.messageId ?? root.commentId ?? root.id,
+    channelId: channelId || root.roomId || root.room_id || room?.id,
+    channelName: channelName || text(root.roomName ?? room?.title, 80),
+    senderId: user.userId ?? user.user_id ?? user.id,
+    senderName: user.uniqueId ?? user.nickname ?? user.displayId ?? user.username,
+    body: root.comment ?? root.text ?? root.content,
+    sentAt: root.createTime ?? root.create_time ?? root.timestamp,
+    receivedAt, moderator: root.isModerator ?? user.isModerator,
+    subscriber: root.isSubscriber ?? user.isSubscriber, verified: user.isVerified,
+  });
+}
+
+const TIKTOK_EVENT_KIND: Record<string, ProviderEventKind> = {
+  follow: "follow", follow_event: "follow", subscribe: "subscription", subscription: "subscription",
+  gift: "gift", gift_event: "gift", like: "like", like_event: "like", share: "share",
+  share_event: "share", member: "member_join", member_join: "member_join", roomuser: "viewer_count",
+  room_user: "viewer_count", viewer_count: "viewer_count",
+};
+
+/** Normalize the unofficial TikTok LIVE connector's event callbacks without treating gifts as cash donations. */
+export function normalizeTikTokProviderEvent(
+  eventName: string, payload: unknown, channelId: string, channelName = "", receivedAt = new Date(),
+): NormalizedProviderEvent | null {
+  const root = rec(payload);
+  const user = child(root, "user") ?? child(root, "gifter") ?? child(root, "userInfo");
+  const kind = TIKTOK_EVENT_KIND[eventName.toLowerCase()];
+  if (!root || !kind || !id(channelId)) return null;
+  const eventId = id(root.eventId ?? root.event_id ?? root.msgId ?? root.messageId ?? root.id
+    ?? (root.createTime !== undefined ? eventName + ":" + id(root.createTime) + ":" + id(user?.userId ?? user?.id)
+      : kind === "viewer_count" ? eventName + ":" + id(root.totalUserCount ?? root.viewerCount) + ":" + receivedAt.getTime() : ""));
+  if (!eventId) return null;
+  const gift = child(root, "gift") ?? child(root, "giftDetails") ?? child(root, "extendedGiftInfo");
+  const amountValue = root.amount ?? root.superChatAmount ?? root.bits;
+  const amount = typeof amountValue === "number" && Number.isFinite(amountValue) && amountValue >= 0 ? amountValue : null;
+  const quantityValue = root.repeatCount ?? root.repeat_count ?? root.count ?? root.likeCount ?? root.totalUserCount ?? root.viewerCount;
+  const quantity = typeof quantityValue === "number" && Number.isSafeInteger(quantityValue) && quantityValue >= 0 ? quantityValue : null;
+  return {
+    id: "tiktok:" + eventId, provider: "tiktok", externalEventId: eventId, kind,
+    channelId: id(channelId), channelName: text(channelName, 80) || id(channelId),
+    actorId: id(user?.userId ?? user?.user_id ?? user?.id) || null,
+    actorName: text(user?.uniqueId ?? user?.nickname ?? user?.displayId ?? user?.username, 80) || null,
+    message: text(root.comment ?? root.message ?? root.text, 500) || null,
+    itemName: text(gift?.name ?? root.giftName ?? root.gift_name, 100) || null,
+    quantity, amount, currency: text(root.currency, 8) || null,
+    occurredAt: date(root.createTime ?? root.create_time ?? root.timestamp, receivedAt),
+    receivedAt: receivedAt.toISOString(),
+  };
+}
+
 export class ChatMessageDeduplicator {
   private readonly seen = new Map<string, number>();
   constructor(privateTtlMs = 600_000, privateMaxEntries = 5000) {
@@ -89,9 +148,9 @@ export function reconnectDelayMs(attempt: number, random = Math.random, baseMs =
 }
 
 export function emptyProviderHealth(provider: ProviderKey, observedAt = new Date()): ProviderHealthSnapshot {
-  return { provider, state: provider === "tiktok" ? "unsupported" : "disconnected", observedAt: observedAt.toISOString(),
+  return { provider, state: "disconnected", observedAt: observedAt.toISOString(),
     lastMessageAt: null, viewerCount: null, viewerCountObservedAt: null,
-    detailCode: provider === "tiktok" ? "official_live_chat_api_unavailable" : "not_connected", unofficial: provider === "tiktok" };
+    detailCode: provider === "tiktok" ? "unofficial_connector_not_configured" : "not_connected", unofficial: provider === "tiktok" };
 }
 
 export function aggregateViewerCounts(snapshots: readonly ProviderHealthSnapshot[], now = new Date(), maxAgeMs = 90_000): ViewerAggregate {

@@ -40,6 +40,25 @@ test("Durable Object publish validates chat events and fans out to connected soc
   assert.deepEqual(JSON.parse(first.sent[0]), { type: "chat.message", message });
 });
 
+test("Durable Object fans out normalized provider events", async () => {
+  const state = new FakeState();
+  const room = new ChatRoom(state);
+  const socket = new FakeSocket();
+  state.sockets.push(socket);
+  const providerEvent = {
+    id: "tiktok:gift-1", provider: "tiktok", externalEventId: "gift-1", kind: "gift",
+    channelId: "room-1", channelName: "Streamer", actorId: "viewer-1", actorName: "Viewer",
+    message: null, itemName: "Rose", quantity: 3, amount: null, currency: null,
+    occurredAt: "2026-10-29T12:00:00.000Z", receivedAt: "2026-10-29T12:00:01.000Z",
+  };
+  const response = await room.fetch(new Request("https://chat-room/publish", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type: "provider.event", event: providerEvent }),
+  }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(JSON.parse(socket.sent[0]), { type: "provider.event", event: providerEvent });
+});
+
 test("Durable Object rejects malformed or oversized chat event fields", async () => {
   const room = new ChatRoom(new FakeState());
   const invalid = await room.fetch(new Request("https://chat-room/publish", {

@@ -3,10 +3,11 @@ import { createHmac, generateKeyPairSync, sign } from "node:crypto";
 import test from "node:test";
 import { extractKickPublicKey, verifyKickWebhookSignature } from "../../packages/shared/src/kick-webhook.ts";
 import { verifyTwitchEventSubSignature } from "../../packages/shared/src/twitch-eventsub.ts";
-import { createOAuthState, digestOAuthState } from "../../packages/shared/src/oauth-state.ts";
+import { createOAuthState, createPkceChallenge, createPkceVerifier, digestOAuthState } from "../../packages/shared/src/oauth-state.ts";
+import { verifyTikTokConnectorSignature } from "../../packages/shared/src/tiktok-connector-signature.ts";
 import {
   ChatMessageDeduplicator, aggregateViewerCounts, emptyProviderHealth, normalizeKickChatMessage,
-  normalizeTwitchChatMessage, normalizeYouTubeChatMessage, reconnectDelayMs,
+  normalizeTikTokChatMessage, normalizeTikTokProviderEvent, normalizeTwitchChatMessage, normalizeYouTubeChatMessage, reconnectDelayMs,
 } from "../../packages/shared/src/chat.ts";
 import type { ProviderHealthSnapshot } from "../../packages/contracts/src/chat-v1.ts";
 
@@ -41,6 +42,27 @@ test("normalizes YouTube and Kick messages", () => {
   assert.equal(normalizeTwitchChatMessage(null, now), null);
 });
 
+test("normalizes TikTok chat and platform events without inventing cash values", () => {
+  const message = normalizeTikTokChatMessage({
+    msgId: "tt-msg-1", roomId: "room-1", comment: "Hello chat", createTime: 1793275140,
+    user: { userId: "viewer-1", uniqueId: "viewer", nickname: "Viewer", isVerified: true },
+  }, "room-1", "Streamer", now);
+  assert.equal(message?.provider, "tiktok");
+  assert.equal(message?.text, "Hello chat");
+  assert.equal(message?.badges.verified, true);
+
+  const gift = normalizeTikTokProviderEvent("gift", {
+    eventId: "gift-event-1", giftName: "Rose", repeatCount: 3,
+    user: { userId: "viewer-1", nickname: "Viewer" }, createTime: 1793275140,
+  }, "room-1", "Streamer", now);
+  assert.equal(gift?.kind, "gift");
+  assert.equal(gift?.itemName, "Rose");
+  assert.equal(gift?.quantity, 3);
+  assert.equal(gift?.amount, null);
+  assert.equal(normalizeTikTokProviderEvent("unknown", { id: "x" }, "room-1", "Streamer", now), null);
+  assert.equal(emptyProviderHealth("tiktok", now).state, "disconnected");
+  assert.equal(emptyProviderHealth("tiktok", now).unofficial, true);
+});
 test("deduplicates provider message IDs, expires entries, and stays bounded", () => {
   const dedupe = new ChatMessageDeduplicator(100, 2);
   const twitch = { provider: "twitch" as const, externalMessageId: "same" };
@@ -103,6 +125,25 @@ test("verifies Kick webhook signatures and rejects stale or modified payloads", 
   assert.equal(await verifyKickWebhookSignature({ ...input, rawBody: rawBody + " " }, publicKeyPem, now), false);
   assert.equal(await verifyKickWebhookSignature(input, publicKeyPem, new Date(now.getTime() + 10 * 60_000)), false);
   assert.equal(await verifyKickWebhookSignature({ ...input, signature: "not-base64" }, publicKeyPem, now), false);
+});
+
+test("verifies signed TikTok bridge requests and rejects stale or tampered payloads", async () => {
+  const secret = "unit-test-tiktok-bridge-secret-32-chars";
+  const timestamp = Math.floor(now.getTime() / 1000).toString();
+  const rawBody = JSON.stringify({ kind: "event", eventName: "gift" });
+  const signature = "sha256=" + createHmac("sha256", secret).update(timestamp + "." + rawBody).digest("hex");
+  assert.equal(await verifyTikTokConnectorSignature(timestamp, signature, rawBody, secret, now), true);
+  assert.equal(await verifyTikTokConnectorSignature(timestamp, signature, rawBody + " ", secret, now), false);
+  assert.equal(await verifyTikTokConnectorSignature(timestamp, signature, rawBody, "short", now), false);
+  assert.equal(await verifyTikTokConnectorSignature(timestamp, signature, rawBody, secret, new Date(now.getTime() + 6 * 60_000)), false);
+});
+test("Kick PKCE verifier and S256 challenge match RFC 7636", async () => {
+  const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+  assert.equal(await createPkceChallenge(verifier), "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+  const generated = createPkceVerifier();
+  assert.equal(generated.length, 43);
+  assert.match(await createPkceChallenge(generated), /^[A-Za-z0-9_-]{43}$/);
+  await assert.rejects(() => createPkceChallenge("short"), /invalid_pkce_verifier/);
 });
 
 test("OAuth state is high entropy, digest-only, and rejects malformed values", async () => {

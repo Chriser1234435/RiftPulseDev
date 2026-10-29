@@ -1,11 +1,14 @@
 import type { Env } from "./env.ts";
 import { API_VERSION, PROVIDERS, SUPPORTED_MODULES, validateCreatePairingChallenge, validateClaimPairing } from "../packages/contracts/src/v1.ts";
-import type { ProviderHealthSnapshot } from "../packages/contracts/src/chat-v1.ts";
-import { aggregateViewerCounts, emptyProviderHealth, normalizeKickChatMessage, normalizeTwitchChatMessage } from "../packages/shared/src/chat.ts";
+import type { NormalizedProviderEvent, ProviderHealthSnapshot } from "../packages/contracts/src/chat-v1.ts";
+import { aggregateViewerCounts, emptyProviderHealth, normalizeKickChatMessage, normalizeTikTokChatMessage, normalizeTikTokProviderEvent, normalizeTwitchChatMessage } from "../packages/shared/src/chat.ts";
 import { persistNormalizedChatMessage } from "../packages/shared/src/chat-persistence.ts";
+import { persistNormalizedProviderEvent } from "../packages/shared/src/provider-event-persistence.ts";
+import { verifyTikTokConnectorSignature } from "../packages/shared/src/tiktok-connector-signature.ts";
 import { extractKickPublicKey, verifyKickWebhookSignature } from "../packages/shared/src/kick-webhook.ts";
 import { verifyTwitchEventSubSignature } from "../packages/shared/src/twitch-eventsub.ts";
-import { createOAuthState, digestOAuthState } from "../packages/shared/src/oauth-state.ts";
+import { createOAuthState, createPkceChallenge, createPkceVerifier, digestOAuthState } from "../packages/shared/src/oauth-state.ts";
+import { decryptProviderToken, encryptProviderToken } from "../packages/shared/src/provider-token-vault.ts";
 import { disconnectProvider, ensureFreshTwitchProviderTokens, persistProviderTokens } from "../packages/shared/src/provider-connections.ts";
 import { claimPairingChallenge, createPairingChallenge } from "../packages/shared/src/pairing.ts";
 import { createAuth } from "./auth.ts";
@@ -71,13 +74,22 @@ async function publishChatMessage(env: Env, accountId: string, message: {
     const roomId = env.CHAT_ROOM.idFromName(accountId);
     const room = env.CHAT_ROOM.get(roomId);
     await room.fetch(new Request("https://chat-room/publish", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
+      method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ type: "chat.message", message }),
     }));
-  } catch {
-    // Chat history remains durable; realtime delivery is best-effort.
-  }
+  } catch { /* Chat history remains durable; realtime delivery is best-effort. */ }
+}
+
+async function publishProviderEvent(env: Env, accountId: string, event: NormalizedProviderEvent): Promise<void> {
+  if (!env.CHAT_ROOM) return;
+  try {
+    const roomId = env.CHAT_ROOM.idFromName(accountId);
+    const room = env.CHAT_ROOM.get(roomId);
+    await room.fetch(new Request("https://chat-room/publish", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "provider.event", event }),
+    }));
+  } catch { /* Event history remains durable; realtime delivery is best-effort. */ }
 }
 
 function isTrustedMutationOrigin(request: Request, env: Env): boolean {
@@ -105,14 +117,24 @@ function twitchStateCookie(state: string | null, secure: boolean): string {
   return secure ? base + "; Secure" : base;
 }
 
-function providerRedirect(env: Env, status: string): Response {
+function youtubeStateCookie(state: string | null, secure: boolean): string {
+  const base = "rp_youtube_oauth_state=" + (state ?? "") + "; Path=/api/v1/providers/youtube/callback; HttpOnly; SameSite=Lax; Max-Age=" + (state ? "600" : "0");
+  return secure ? base + "; Secure" : base;
+}
+
+function kickStateCookie(state: string | null, secure: boolean): string {
+  const base = "rp_kick_oauth_state=" + (state ?? "") + "; Path=/api/v1/providers/kick/callback; HttpOnly; SameSite=Lax; Max-Age=" + (state ? "600" : "0");
+  return secure ? base + "; Secure" : base;
+}
+
+function providerRedirect(env: Env, provider: "twitch" | "youtube" | "kick", status: string): Response {
   let target: URL;
   try { target = new URL(env.APP_BASE_URL ?? "http://127.0.0.1:5173"); }
   catch { target = new URL("http://127.0.0.1:5173"); }
   target.pathname = "/";
   target.search = "";
   target.hash = "";
-  target.searchParams.set("provider", "twitch");
+  target.searchParams.set("provider", provider);
   target.searchParams.set("status", status);
   return new Response(null, { status: 302, headers: { location: target.toString(), "cache-control": "no-store" } });
 }
@@ -209,6 +231,64 @@ export default {
       return Response.json({ moduleKey, enabled: enabled === 1, settings, updatedAt: now }, { headers: JSON_HEADERS });
     }
 
+    if (url.pathname === "/api/v1/providers/tiktok/ingest" && request.method === "POST") {
+      if (!env.DB || !env.TIKTOK_CONNECTOR_INGEST_SECRET || !env.CHAT_ROOM) {
+        return jsonError(503, "tiktok_connector_not_configured", "The isolated TikTok connector bridge is not configured.", requestId);
+      }
+      const timestamp = request.headers.get("x-riftpulse-timestamp") ?? "";
+      const signature = request.headers.get("x-riftpulse-signature") ?? "";
+      const rawBody = await request.text();
+      if (new TextEncoder().encode(rawBody).byteLength > 16_384) return jsonError(413, "body_too_large", "Connector payload exceeds the size limit.", requestId);
+      if (!await verifyTikTokConnectorSignature(timestamp, signature, rawBody, env.TIKTOK_CONNECTOR_INGEST_SECRET)) {
+        return jsonError(401, "invalid_connector_signature", "Connector signature or timestamp is invalid.", requestId);
+      }
+      let parsed: unknown;
+      try { parsed = JSON.parse(rawBody) as unknown; } catch { return jsonError(400, "invalid_connector_json", "Connector payload is not valid JSON.", requestId); }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return jsonError(400, "invalid_connector_payload", "Connector payload must be an object.", requestId);
+      const body = parsed as Record<string, unknown>;
+      if (typeof body.accountId !== "string" || !body.accountId || body.accountId.length > 128
+        || typeof body.channelId !== "string" || !body.channelId || body.channelId.length > 128
+        || typeof body.channelName !== "string" || body.channelName.length > 80
+        || (body.kind !== "chat" && body.kind !== "event") || !body.payload || typeof body.payload !== "object" || Array.isArray(body.payload)) {
+        return jsonError(400, "invalid_connector_payload", "Account, channel, kind, and event payload are required.", requestId);
+      }
+      const account = await env.DB.prepare("SELECT id FROM accounts WHERE id = ? LIMIT 1").bind(body.accountId).first<{ id: string }>();
+      if (!account) return jsonError(404, "connector_account_not_found", "The target RiftPulse account does not exist.", requestId);
+      const now = new Date();
+      let inserted = false;
+      let eventKind: string | null = null;
+      if (body.kind === "chat") {
+        const message = normalizeTikTokChatMessage(body.payload, body.channelId, body.channelName, now);
+        if (!message) return jsonError(400, "invalid_tiktok_chat", "TikTok chat payload is missing required fields.", requestId);
+        const stored = await persistNormalizedChatMessage(env.DB, body.accountId, message);
+        if (!stored.ok) return jsonError(503, "chat_store_unavailable", "Could not store TikTok chat.", requestId);
+        inserted = stored.inserted;
+        if (inserted) await publishChatMessage(env, body.accountId, message);
+      } else {
+        if (typeof body.eventName !== "string" || body.eventName.length > 80) return jsonError(400, "invalid_tiktok_event", "TikTok event name is required.", requestId);
+        const event = normalizeTikTokProviderEvent(body.eventName, body.payload, body.channelId, body.channelName, now);
+        if (!event) return jsonError(400, "invalid_tiktok_event", "TikTok event type or payload is not supported.", requestId);
+        const stored = await persistNormalizedProviderEvent(env.DB, body.accountId, event);
+        if (!stored.ok) return jsonError(503, "provider_event_store_unavailable", "Could not store TikTok stream event.", requestId);
+        inserted = stored.inserted;
+        eventKind = event.kind;
+        if (inserted) await publishProviderEvent(env, body.accountId, event);
+      }
+      const connection = await env.DB.prepare(
+        "INSERT INTO provider_connections (id, account_id, provider, external_account_id, display_name, status, connected_at, updated_at) VALUES (?, ?, 'tiktok', ?, ?, 'connected', ?, ?) ON CONFLICT(account_id, provider) DO UPDATE SET external_account_id = excluded.external_account_id, display_name = excluded.display_name, status = 'connected', connected_at = COALESCE(provider_connections.connected_at, excluded.connected_at), updated_at = excluded.updated_at"
+      ).bind(crypto.randomUUID(), body.accountId, body.channelId, body.channelName, now.toISOString(), now.toISOString()).run();
+      if (!connection.success) return jsonError(503, "provider_connection_store_unavailable", "Could not update TikTok connector status.", requestId);
+      const payloadRecord = body.payload as Record<string, unknown>;
+      const rawViewerCount = payloadRecord.totalUserCount ?? payloadRecord.viewerCount;
+      const viewerCount = body.kind === "event" && eventKind === "viewer_count" && typeof rawViewerCount === "number"
+        && Number.isSafeInteger(rawViewerCount) && rawViewerCount >= 0 ? rawViewerCount : null;
+      const health = await env.DB.prepare(
+        "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'tiktok', 'healthy', ?, ?, NULL, ?) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'healthy', viewer_count = COALESCE(excluded.viewer_count, integration_health.viewer_count), observed_at = excluded.observed_at, detail_code = NULL, viewer_count_observed_at = COALESCE(excluded.viewer_count_observed_at, integration_health.viewer_count_observed_at)"
+      ).bind(crypto.randomUUID(), body.accountId, viewerCount, now.toISOString(), viewerCount === null ? null : now.toISOString()).run();
+      if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not update TikTok connector health.", requestId);
+      return Response.json({ status: inserted ? "accepted" : "duplicate", kind: body.kind, eventKind }, { headers: JSON_HEADERS });
+    }
+
     if (url.pathname === "/api/v1/providers/connections" && request.method === "GET") {
       const authContext = await getAuthContext(request, env);
       if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
@@ -218,22 +298,130 @@ export default {
       ).bind(authContext.userId).all<{ provider: string; displayName: string | null; status: string; connectedAt: string | null; healthStatus: string | null; healthDetailCode: string | null }>();
       if (!result.success) return jsonError(503, "provider_store_unavailable", "Could not load provider connections.", requestId);
       const rows = new Map((result.results ?? []).map(row => [row.provider, row]));
-      const configured = !!(env.TWITCH_CLIENT_ID && env.TWITCH_CLIENT_SECRET && env.TOKEN_ENCRYPTION_KEY && env.APP_BASE_URL);
+      const twitchConfigured = !!(env.TWITCH_CLIENT_ID && env.TWITCH_CLIENT_SECRET && env.TOKEN_ENCRYPTION_KEY && env.APP_BASE_URL);
+      const youtubeConfigured = !!(env.YOUTUBE_CLIENT_ID && env.YOUTUBE_CLIENT_SECRET && env.TOKEN_ENCRYPTION_KEY && env.APP_BASE_URL);
+      const kickConfigured = !!(env.KICK_CLIENT_ID && env.KICK_CLIENT_SECRET && env.TOKEN_ENCRYPTION_KEY && env.APP_BASE_URL);
+      const tiktokConfigured = !!(env.TIKTOK_CONNECTOR_INGEST_SECRET && env.APP_BASE_URL);
       const connections = PROVIDERS.map(provider => {
         const row = rows.get(provider);
         return {
           provider,
-          status: provider === "tiktok" ? "unsupported" : row?.status ?? "disconnected",
+          status: row?.status ?? "disconnected",
           displayName: row?.displayName ?? null,
           connectedAt: row?.connectedAt ?? null,
-          configured: provider === "twitch" ? configured : false,
-          detailCode: provider === "tiktok" ? "unofficial_connector_unavailable"
-            : provider === "twitch" && !configured ? "oauth_credentials_not_configured"
+          configured: provider === "twitch" ? twitchConfigured : provider === "youtube" ? youtubeConfigured : provider === "kick" ? kickConfigured : provider === "tiktok" ? tiktokConfigured : false,
+          detailCode: provider === "tiktok" && !tiktokConfigured ? "unofficial_connector_not_configured"
+            : provider === "twitch" && !twitchConfigured ? "oauth_credentials_not_configured"
+            : provider === "youtube" && !youtubeConfigured ? "oauth_credentials_not_configured"
+            : provider === "kick" && !kickConfigured ? "oauth_credentials_not_configured"
             : provider === "twitch" && row?.status === "connected" && row.healthStatus !== "healthy" ? row?.healthDetailCode ?? "eventsub_subscription_pending"
+            : provider === "youtube" && row?.status === "connected" && row.healthStatus !== "healthy" ? row?.healthDetailCode ?? "live_chat_polling_pending"
+            : provider === "kick" && row?.status === "connected" && row.healthStatus !== "healthy" ? row?.healthDetailCode ?? "webhook_subscription_pending"
             : row?.healthDetailCode ?? null,
         };
       });
       return Response.json({ connections }, { headers: JSON_HEADERS });
+    }
+
+    if (url.pathname === "/api/v1/providers/youtube/connect" && request.method === "POST") {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!isTrustedMutationOrigin(request, env)) return jsonError(403, "untrusted_origin", "Request origin is not trusted.", requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Provider storage is not configured.", requestId);
+      if (!env.YOUTUBE_CLIENT_ID || !env.YOUTUBE_CLIENT_SECRET || !env.TOKEN_ENCRYPTION_KEY || !env.APP_BASE_URL) {
+        return jsonError(503, "youtube_oauth_not_configured", "Google OAuth credentials, app URL, and token encryption key must be configured locally first.", requestId);
+      }
+      let appUrl: URL, redirectUri: URL;
+      try {
+        appUrl = new URL(env.APP_BASE_URL);
+        redirectUri = new URL(env.YOUTUBE_REDIRECT_URI ?? "/api/v1/providers/youtube/callback", appUrl);
+      } catch {
+        return jsonError(503, "youtube_oauth_not_configured", "The YouTube OAuth callback URL is invalid.", requestId);
+      }
+      if (redirectUri.origin !== appUrl.origin || redirectUri.pathname !== "/api/v1/providers/youtube/callback"
+        || redirectUri.username || redirectUri.password || redirectUri.search || redirectUri.hash
+        || (redirectUri.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(redirectUri.hostname))) {
+        return jsonError(503, "youtube_oauth_not_configured", "The callback must be the exact same-origin registered Google OAuth callback URL.", requestId);
+      }
+
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const expiresAt = new Date(now.getTime() + 10 * 60_000).toISOString();
+      const cleanup = await env.DB.prepare(
+        "DELETE FROM provider_oauth_states WHERE expires_at <= ? OR (account_id = ? AND provider = 'youtube' AND consumed_at IS NULL)",
+      ).bind(nowIso, authContext.userId).run();
+      if (!cleanup.success) return jsonError(503, "oauth_state_store_unavailable", "Could not prepare a secure authorization attempt.", requestId);
+      const state = createOAuthState();
+      const digest = await digestOAuthState(state);
+      const inserted = await env.DB.prepare(
+        "INSERT INTO provider_oauth_states (state_digest, account_id, provider, created_at, expires_at, consumed_at) VALUES (?, ?, 'youtube', ?, ?, NULL)",
+      ).bind(digest, authContext.userId, nowIso, expiresAt).run();
+      if (!inserted.success) return jsonError(503, "oauth_state_store_unavailable", "Could not start a secure authorization attempt.", requestId);
+
+      const authorizationUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+      authorizationUrl.searchParams.set("client_id", env.YOUTUBE_CLIENT_ID);
+      authorizationUrl.searchParams.set("redirect_uri", redirectUri.toString());
+      authorizationUrl.searchParams.set("response_type", "code");
+      authorizationUrl.searchParams.set("scope", "https://www.googleapis.com/auth/youtube.readonly");
+      authorizationUrl.searchParams.set("access_type", "offline");
+      authorizationUrl.searchParams.set("include_granted_scopes", "true");
+      authorizationUrl.searchParams.set("prompt", "consent");
+      authorizationUrl.searchParams.set("state", state);
+      return Response.json({ authorizationUrl: authorizationUrl.toString() }, {
+        headers: { ...JSON_HEADERS, "set-cookie": youtubeStateCookie(state, redirectUri.protocol === "https:") },
+      });
+    }
+
+    if (url.pathname === "/api/v1/providers/kick/connect" && request.method === "POST") {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!isTrustedMutationOrigin(request, env)) return jsonError(403, "untrusted_origin", "Request origin is not trusted.", requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Provider storage is not configured.", requestId);
+      if (!env.KICK_CLIENT_ID || !env.KICK_CLIENT_SECRET || !env.TOKEN_ENCRYPTION_KEY || !env.APP_BASE_URL) {
+        return jsonError(503, "kick_oauth_not_configured", "Kick OAuth credentials, app URL, and token encryption key must be configured locally first.", requestId);
+      }
+      let appUrl: URL, redirectUri: URL;
+      try {
+        appUrl = new URL(env.APP_BASE_URL);
+        redirectUri = new URL(env.KICK_REDIRECT_URI ?? "/api/v1/providers/kick/callback", appUrl);
+      } catch {
+        return jsonError(503, "kick_oauth_not_configured", "The Kick OAuth callback URL is invalid.", requestId);
+      }
+      if (redirectUri.origin !== appUrl.origin || redirectUri.pathname !== "/api/v1/providers/kick/callback"
+        || redirectUri.username || redirectUri.password || redirectUri.search || redirectUri.hash
+        || (redirectUri.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(redirectUri.hostname))) {
+        return jsonError(503, "kick_oauth_not_configured", "The callback must be the exact same-origin registered Kick OAuth callback URL.", requestId);
+      }
+
+      const state = createOAuthState();
+      const verifier = createPkceVerifier();
+      const challenge = await createPkceChallenge(verifier);
+      const encryptedVerifier = await encryptProviderToken(verifier, env.TOKEN_ENCRYPTION_KEY);
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const expiresAt = new Date(now.getTime() + 10 * 60_000).toISOString();
+      const cleanup = await env.DB.prepare(
+        "DELETE FROM provider_oauth_states WHERE expires_at <= ? OR (account_id = ? AND provider = 'kick' AND consumed_at IS NULL)",
+      ).bind(nowIso, authContext.userId).run();
+      if (!cleanup.success) return jsonError(503, "oauth_state_store_unavailable", "Could not prepare a secure authorization attempt.", requestId);
+      const digest = await digestOAuthState(state);
+      const inserted = await env.DB.prepare(
+        "INSERT INTO provider_oauth_states (state_digest, account_id, provider, created_at, expires_at, consumed_at, code_verifier_ciphertext) VALUES (?, ?, 'kick', ?, ?, NULL, ?)",
+      ).bind(digest, authContext.userId, nowIso, expiresAt, encryptedVerifier).run();
+      if (!inserted.success) return jsonError(503, "oauth_state_store_unavailable", "Could not start a secure authorization attempt.", requestId);
+
+      const authorizationUrl = new URL("https://id.kick.com/oauth/authorize");
+      authorizationUrl.searchParams.set("client_id", env.KICK_CLIENT_ID);
+      authorizationUrl.searchParams.set("response_type", "code");
+      if (redirectUri.hostname === "127.0.0.1") authorizationUrl.searchParams.set("redirect", "127.0.0.1");
+      authorizationUrl.searchParams.set("redirect_uri", redirectUri.toString());
+      authorizationUrl.searchParams.set("scope", "user:read channel:read events:subscribe");
+      authorizationUrl.searchParams.set("code_challenge", challenge);
+      authorizationUrl.searchParams.set("code_challenge_method", "S256");
+      authorizationUrl.searchParams.set("state", state);
+      return Response.json({ authorizationUrl: authorizationUrl.toString() }, {
+        headers: { ...JSON_HEADERS, "set-cookie": kickStateCookie(state, redirectUri.protocol === "https:") },
+      });
     }
 
     if (url.pathname === "/api/v1/providers/twitch/connect" && request.method === "POST") {
@@ -287,7 +475,7 @@ export default {
       const cookieState = readCookie(request, "rp_twitch_oauth_state");
       const secureCookie = url.protocol === "https:";
       const finish = (status: string) => {
-        const response = providerRedirect(env, status);
+        const response = providerRedirect(env, "twitch", status);
         response.headers.append("set-cookie", twitchStateCookie(null, secureCookie));
         response.headers.set("cache-control", "no-store");
         response.headers.set("referrer-policy", "no-referrer");
@@ -355,6 +543,190 @@ export default {
 
         const health = await env.DB.prepare(
           "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'twitch', 'degraded', NULL, ?, 'eventsub_subscription_pending', NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'degraded', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = 'eventsub_subscription_pending', viewer_count_observed_at = NULL",
+        ).bind(crypto.randomUUID(), claimedState.account_id, new Date().toISOString()).run();
+        if (!health.success) return finish("failed");
+        return finish("connected");
+      } catch {
+        return finish("failed");
+      }
+    }
+
+    if (url.pathname === "/api/v1/providers/youtube/callback" && request.method === "GET") {
+      const state = url.searchParams.get("state");
+      const cookieState = readCookie(request, "rp_youtube_oauth_state");
+      const secureCookie = url.protocol === "https:";
+      const finish = (status: string) => {
+        const response = providerRedirect(env, "youtube", status);
+        response.headers.append("set-cookie", youtubeStateCookie(null, secureCookie));
+        response.headers.set("cache-control", "no-store");
+        response.headers.set("referrer-policy", "no-referrer");
+        return response;
+      };
+      if (!env.DB || !env.YOUTUBE_CLIENT_ID || !env.YOUTUBE_CLIENT_SECRET || !env.TOKEN_ENCRYPTION_KEY || !env.APP_BASE_URL
+        || !state || state !== cookieState || !/^[a-f0-9]{64}$/i.test(state)) return finish("failed");
+      const digest = await digestOAuthState(state);
+      const now = new Date();
+      const claimedState = await env.DB.prepare(
+        "UPDATE provider_oauth_states SET consumed_at = ? WHERE state_digest = ? AND provider = 'youtube' AND consumed_at IS NULL AND expires_at > ? RETURNING account_id",
+      ).bind(now.toISOString(), digest, now.toISOString()).first<{ account_id: string }>();
+      if (!claimedState?.account_id) return finish("failed");
+      if (url.searchParams.has("error")) return finish("denied");
+      const code = url.searchParams.get("code");
+      if (!code || code.length > 2048) return finish("failed");
+
+      let appUrl: URL, redirectUri: URL;
+      try {
+        appUrl = new URL(env.APP_BASE_URL);
+        redirectUri = new URL(env.YOUTUBE_REDIRECT_URI ?? "/api/v1/providers/youtube/callback", appUrl);
+      } catch { return finish("failed"); }
+      if (redirectUri.origin !== appUrl.origin || redirectUri.pathname !== "/api/v1/providers/youtube/callback"
+        || redirectUri.username || redirectUri.password || redirectUri.search || redirectUri.hash) return finish("failed");
+
+      try {
+        const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+          body: new URLSearchParams({
+            client_id: env.YOUTUBE_CLIENT_ID,
+            client_secret: env.YOUTUBE_CLIENT_SECRET,
+            code,
+            grant_type: "authorization_code",
+            redirect_uri: redirectUri.toString(),
+          }),
+        });
+        if (!tokenResponse.ok) return finish("failed");
+        const tokenPayload: unknown = await tokenResponse.json();
+        if (!tokenPayload || typeof tokenPayload !== "object" || Array.isArray(tokenPayload)) return finish("failed");
+        const token = tokenPayload as Record<string, unknown>;
+        if (typeof token.access_token !== "string" || !token.access_token
+          || typeof token.refresh_token !== "string" || !token.refresh_token
+          || typeof token.expires_in !== "number" || !Number.isFinite(token.expires_in) || token.expires_in <= 0
+          || typeof token.scope !== "string") return finish("failed");
+        const scopes = token.scope.split(/\s+/).filter(Boolean);
+        if (!scopes.includes("https://www.googleapis.com/auth/youtube.readonly")) return finish("failed");
+
+        const channelResponse = await fetch("https://www.googleapis.com/youtube/v3/channels?part=id%2Csnippet&mine=true", {
+          headers: { authorization: "Bearer " + token.access_token, accept: "application/json" },
+        });
+        if (!channelResponse.ok) return finish("failed");
+        const channelPayload: unknown = await channelResponse.json();
+        if (!channelPayload || typeof channelPayload !== "object" || Array.isArray(channelPayload)) return finish("failed");
+        const items = (channelPayload as Record<string, unknown>).items;
+        if (!Array.isArray(items) || !items.length || !items[0] || typeof items[0] !== "object" || Array.isArray(items[0])) return finish("failed");
+        const channel = items[0] as Record<string, unknown>;
+        const snippet = typeof channel.snippet === "object" && channel.snippet !== null && !Array.isArray(channel.snippet)
+          ? channel.snippet as Record<string, unknown> : {};
+        if (typeof channel.id !== "string" || !channel.id) return finish("failed");
+
+        const saved = await persistProviderTokens(env.DB, {
+          accountId: claimedState.account_id, provider: "youtube", externalAccountId: channel.id,
+          displayName: typeof snippet.title === "string" ? snippet.title : null,
+          accessToken: token.access_token, refreshToken: token.refresh_token,
+          tokenExpiresAt: new Date(Date.now() + token.expires_in * 1000).toISOString(), scopes,
+        }, env.TOKEN_ENCRYPTION_KEY);
+        if (!saved.ok) return finish("failed");
+
+        const health = await env.DB.prepare(
+          "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'youtube', 'degraded', NULL, ?, 'live_chat_polling_pending', NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'degraded', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = 'live_chat_polling_pending', viewer_count_observed_at = NULL",
+        ).bind(crypto.randomUUID(), claimedState.account_id, new Date().toISOString()).run();
+        if (!health.success) return finish("failed");
+        return finish("connected");
+      } catch {
+        return finish("failed");
+      }
+    }
+
+    if (url.pathname === "/api/v1/providers/kick/callback" && request.method === "GET") {
+      const state = url.searchParams.get("state");
+      const cookieState = readCookie(request, "rp_kick_oauth_state");
+      const secureCookie = url.protocol === "https:";
+      const finish = (status: string) => {
+        const response = providerRedirect(env, "kick", status);
+        response.headers.append("set-cookie", kickStateCookie(null, secureCookie));
+        response.headers.set("cache-control", "no-store");
+        response.headers.set("referrer-policy", "no-referrer");
+        return response;
+      };
+      if (!env.DB || !env.KICK_CLIENT_ID || !env.KICK_CLIENT_SECRET || !env.TOKEN_ENCRYPTION_KEY || !env.APP_BASE_URL
+        || !state || state !== cookieState || !/^[a-f0-9]{64}$/i.test(state)) return finish("failed");
+      const digest = await digestOAuthState(state);
+      const now = new Date();
+      const claimedState = await env.DB.prepare(
+        "UPDATE provider_oauth_states SET consumed_at = ? WHERE state_digest = ? AND provider = 'kick' AND consumed_at IS NULL AND expires_at > ? RETURNING account_id, code_verifier_ciphertext",
+      ).bind(now.toISOString(), digest, now.toISOString()).first<{ account_id: string; code_verifier_ciphertext: string | null }>();
+      if (!claimedState?.account_id || !claimedState.code_verifier_ciphertext) return finish("failed");
+      if (url.searchParams.has("error")) return finish("denied");
+      const code = url.searchParams.get("code");
+      if (!code || code.length > 2048) return finish("failed");
+
+      let redirectUri: URL;
+      try {
+        const appUrl = new URL(env.APP_BASE_URL);
+        redirectUri = new URL(env.KICK_REDIRECT_URI ?? "/api/v1/providers/kick/callback", appUrl);
+      } catch { return finish("failed"); }
+      if (redirectUri.pathname !== "/api/v1/providers/kick/callback" || redirectUri.origin !== new URL(env.APP_BASE_URL).origin) return finish("failed");
+
+      try {
+        const verifier = await decryptProviderToken(claimedState.code_verifier_ciphertext, env.TOKEN_ENCRYPTION_KEY);
+        const tokenResponse = await fetch("https://id.kick.com/oauth/token", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+          body: new URLSearchParams({
+            client_id: env.KICK_CLIENT_ID,
+            client_secret: env.KICK_CLIENT_SECRET,
+            code,
+            grant_type: "authorization_code",
+            redirect_uri: redirectUri.toString(),
+            code_verifier: verifier,
+          }),
+        });
+        if (!tokenResponse.ok) return finish("failed");
+        const tokenPayload: unknown = await tokenResponse.json();
+        if (!tokenPayload || typeof tokenPayload !== "object" || Array.isArray(tokenPayload)) return finish("failed");
+        const token = tokenPayload as Record<string, unknown>;
+        const expiresIn = typeof token.expires_in === "number" ? token.expires_in : Number(token.expires_in);
+        if (typeof token.access_token !== "string" || !token.access_token
+          || typeof token.refresh_token !== "string" || !token.refresh_token
+          || !Number.isFinite(expiresIn) || expiresIn <= 0) return finish("failed");
+
+        const introspectResponse = await fetch("https://id.kick.com/oauth/token/introspect", {
+          method: "POST",
+          headers: { authorization: "Bearer " + token.access_token, accept: "application/json" },
+        });
+        if (!introspectResponse.ok) return finish("failed");
+        const introspectPayload: unknown = await introspectResponse.json();
+        if (!introspectPayload || typeof introspectPayload !== "object" || Array.isArray(introspectPayload)) return finish("failed");
+        const introspectRoot = introspectPayload as Record<string, unknown>;
+        const introspect = typeof introspectRoot.data === "object" && introspectRoot.data !== null && !Array.isArray(introspectRoot.data)
+          ? introspectRoot.data as Record<string, unknown> : {};
+        if (introspect.active !== true || introspect.client_id !== env.KICK_CLIENT_ID || introspect.token_type !== "user"
+          || typeof introspect.scope !== "string") return finish("failed");
+        const scopes = introspect.scope.split(/\s+/).filter(Boolean);
+        if (!["user:read", "channel:read", "events:subscribe"].every(scope => scopes.includes(scope))) return finish("failed");
+
+        const userResponse = await fetch("https://api.kick.com/public/v1/users", {
+          headers: { authorization: "Bearer " + token.access_token, accept: "application/json" },
+        });
+        if (!userResponse.ok) return finish("failed");
+        const userPayload: unknown = await userResponse.json();
+        if (!userPayload || typeof userPayload !== "object" || Array.isArray(userPayload)) return finish("failed");
+        const userData = (userPayload as Record<string, unknown>).data;
+        const user = Array.isArray(userData) ? userData[0] : userData;
+        if (!user || typeof user !== "object" || Array.isArray(user)) return finish("failed");
+        const kickUser = user as Record<string, unknown>;
+        const externalAccountId = typeof kickUser.user_id === "string" || typeof kickUser.user_id === "number" ? String(kickUser.user_id) : "";
+        const displayName = typeof kickUser.name === "string" ? kickUser.name : typeof kickUser.username === "string" ? kickUser.username : "";
+        if (!externalAccountId || !displayName) return finish("failed");
+
+        const saved = await persistProviderTokens(env.DB, {
+          accountId: claimedState.account_id, provider: "kick", externalAccountId, displayName,
+          accessToken: token.access_token, refreshToken: token.refresh_token,
+          tokenExpiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(), scopes,
+        }, env.TOKEN_ENCRYPTION_KEY);
+        if (!saved.ok) return finish("failed");
+
+        const health = await env.DB.prepare(
+          "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'kick', 'degraded', NULL, ?, 'webhook_subscription_pending', NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'degraded', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = 'webhook_subscription_pending', viewer_count_observed_at = NULL",
         ).bind(crypto.randomUUID(), claimedState.account_id, new Date().toISOString()).run();
         if (!health.success) return finish("failed");
         return finish("connected");
@@ -486,7 +858,7 @@ export default {
       if (!isTrustedMutationOrigin(request, env)) return jsonError(403, "untrusted_origin", "Request origin is not trusted.", requestId);
       if (!env.DB) return jsonError(503, "database_unavailable", "Provider storage is not configured.", requestId);
       const provider = disconnectProviderMatch[1] as typeof PROVIDERS[number];
-      if (provider === "tiktok") return jsonError(409, "provider_unsupported", "TikTok LIVE is not available in this build.", requestId);
+      if (provider === "tiktok") return jsonError(409, "connector_lifecycle_managed_separately", "TikTok bridge lifecycle is managed separately from OAuth connections.", requestId);
       if (!await disconnectProvider(env.DB, authContext.userId, provider)) return jsonError(503, "provider_store_unavailable", "Could not disconnect provider.", requestId);
       const health = await env.DB.prepare(
         "UPDATE integration_health SET status = 'disconnected', viewer_count = NULL, viewer_count_observed_at = NULL, observed_at = ?, detail_code = 'user_disconnected' WHERE account_id = ? AND provider = ?",
@@ -695,8 +1067,8 @@ export default {
       if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
       if (!env.DB) return jsonError(503, "database_unavailable", "Database binding is not configured.", requestId);
       const result = await env.DB.prepare(
-        "SELECT id, provider, external_message_id AS externalMessageId, channel_id AS channelId, channel_name AS channelName, sender_id AS senderId, sender_name AS senderName, text, sent_at AS sentAt, received_at AS receivedAt, badges_json AS badgesJson FROM chat_messages WHERE account_id = ? ORDER BY received_at DESC LIMIT 100",
-      ).bind(authContext.userId).all<{
+        "SELECT * FROM (SELECT id, provider, external_message_id AS externalMessageId, channel_id AS channelId, channel_name AS channelName, sender_id AS senderId, sender_name AS senderName, text, sent_at AS sentAt, received_at AS receivedAt, badges_json AS badgesJson FROM chat_messages WHERE account_id = ? UNION ALL SELECT id, provider, external_event_id AS externalMessageId, channel_id AS channelId, channel_name AS channelName, COALESCE(actor_id, 'event') AS senderId, COALESCE(actor_name, 'Stream event') AS senderName, CASE kind WHEN 'follow' THEN 'followed the channel' WHEN 'subscription' THEN 'subscribed' WHEN 'gift' THEN 'sent ' || COALESCE(CASE WHEN quantity IS NOT NULL THEN CAST(quantity AS TEXT) || ' × ' ELSE '' END, '') || COALESCE(item_name, 'a gift') WHEN 'bits' THEN 'cheered ' || COALESCE(CAST(amount AS TEXT), '') || ' Bits' WHEN 'super_chat' THEN 'sent a Super Chat' WHEN 'donation' THEN 'donated ' || COALESCE(currency, '') || COALESCE(CAST(amount AS TEXT), '') WHEN 'like' THEN 'liked the stream' WHEN 'share' THEN 'shared the stream' WHEN 'raid' THEN 'raided the channel' WHEN 'member_join' THEN 'joined the stream' WHEN 'viewer_count' THEN 'Viewer count: ' || COALESCE(CAST(quantity AS TEXT), 'unknown') ELSE kind END || CASE WHEN message IS NOT NULL THEN ': ' || message ELSE '' END AS text, occurred_at AS sentAt, received_at AS receivedAt, '{}' AS badgesJson FROM provider_events WHERE account_id = ?) ORDER BY receivedAt DESC LIMIT 100",
+      ).bind(authContext.userId, authContext.userId).all<{
         id: string; provider: string; externalMessageId: string; channelId: string; channelName: string;
         senderId: string; senderName: string; text: string; sentAt: string; receivedAt: string; badgesJson: string;
       }>();

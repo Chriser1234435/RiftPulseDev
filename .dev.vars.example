@@ -12,3 +12,13 @@ TWITCH_REDIRECT_URI=http://127.0.0.1:5173/api/v1/providers/twitch/callback
 TOKEN_ENCRYPTION_KEY=<base64-encoded-32-byte-key>
 # Generate a separate 32–64 character ASCII secret for EventSub webhook verification.
 TWITCH_EVENTSUB_SECRET=<random-eventsub-secret>
+# Optional until you register a Google OAuth web application and enable YouTube Data API v3.
+YOUTUBE_CLIENT_ID=<google-oauth-client-id>
+YOUTUBE_CLIENT_SECRET=<google-oauth-client-secret>
+YOUTUBE_REDIRECT_URI=http://127.0.0.1:5173/api/v1/providers/youtube/callback
+# Kick requires OAuth 2.1 authorization-code flow with PKCE (S256).
+KICK_CLIENT_ID=<kick-client-id>
+KICK_CLIENT_SECRET=<kick-client-secret>
+KICK_REDIRECT_URI=http://127.0.0.1:5173/api/v1/providers/kick/callback
+# Generate a separate random secret for the isolated TikTok connector bridge; never reuse an app or OAuth secret.
+TIKTOK_CONNECTOR_INGEST_SECRET=<random-tiktok-bridge-hmac-secret>

@@ -7,11 +7,11 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const migrations = ["0001_initial.sql", "0002_auth.sql", "0003_chat_foundation.sql", "0004_provider_oauth_states.sql"].map(name =>
+const migrations = ["0001_initial.sql", "0002_auth.sql", "0003_chat_foundation.sql", "0004_provider_oauth_states.sql", "0005_kick_pkce.sql", "0006_provider_events.sql"].map(name =>
   readFileSync(join(root, "migrations", name), "utf8")
 );
 
-test("application, authentication, chat, and OAuth-state migrations apply cleanly to isolated SQLite", () => {
+test("application, authentication, chat, OAuth-state, and provider-event migrations apply cleanly to isolated SQLite", () => {
   const temp = mkdtempSync(join(tmpdir(), "riftpulse-schema-"));
   const dbPath = join(temp, "schema-test.sqlite");
   const db = new DatabaseSync(dbPath);
@@ -21,7 +21,7 @@ test("application, authentication, chat, and OAuth-state migrations apply cleanl
     const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
     const expected = [
       "accounts", "devices", "pairing_challenges", "provider_connections", "module_settings",
-      "chat_commands", "song_requests", "integration_health", "idempotency_keys", "chat_messages",
+      "chat_commands", "song_requests", "integration_health", "idempotency_keys", "chat_messages", "provider_events",
       "user", "session", "account", "verification", "provider_oauth_states",
     ];
     for (const table of expected) assert.equal(tables.has(table), true, `missing table: ${table}`);

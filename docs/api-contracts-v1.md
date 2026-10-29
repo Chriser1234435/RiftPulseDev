@@ -53,15 +53,19 @@ The mod polls this endpoint using the unguessable challenge UUID returned at cre
 
 ### `GET /api/v1/chat/messages`
 
-Requires an authenticated account session. Returns up to 100 recent normalized messages for that account, oldest-to-newest within the returned window. Raw provider payloads are not returned.
+Requires an authenticated account session. Returns up to 100 recent normalized chat messages and stream-event summaries for that account, oldest-to-newest within the returned window. Raw provider payloads are not returned.
 
 ### `GET /api/v1/integrations/health`
 
-Requires an authenticated account session. Returns health snapshots for the four provider keys and a viewer aggregate. Only fresh counts from connected/degraded providers contribute. `total: null` means unknown, not zero; `partial: true` means at least one count is fresh while other providers are missing or stale. The API is a read model; provider ingestion and viewer-count updates are still being implemented.
+Requires an authenticated account session. Returns health snapshots for the four provider keys and a viewer aggregate. Only fresh counts from connected/degraded providers contribute. `total: null` means unknown, not zero; `partial: true` means at least one count is fresh while other providers are missing or stale. TikTok viewer freshness is updated by the signed bridge ingestion path; other providers still need complete viewer-count collection.
 
 ### `POST /api/v1/providers/twitch/webhook`
 
-Public Twitch EventSub callback. Requires the local-only `TWITCH_EVENTSUB_SECRET` (10–100 characters) and verifies the HMAC-SHA256 signature over message ID + timestamp + exact raw body before processing. Rejects stale messages, caps bodies at 64 KiB, returns the signed challenge for callback verification, handles channel-chat notifications, and marks mapped connections degraded on signed revocation events. OAuth and subscription creation are not implemented yet.
+Public Twitch EventSub callback. Requires the local-only `TWITCH_EVENTSUB_SECRET` (10–100 characters) and verifies the HMAC-SHA256 signature over message ID + timestamp + exact raw body before processing. Rejects stale messages, caps bodies at 64 KiB, returns the signed challenge for callback verification, handles channel-chat notifications, and marks mapped connections degraded on signed revocation events. OAuth and subscription-creation routes exist, but require real app credentials and a public HTTPS development hostname for live validation.
+
+### `POST /api/v1/providers/tiktok/ingest`
+
+Bridge-only endpoint for the isolated Node.js `tiktok-live-connector` process; it is not a browser-facing connect route. Requires `x-riftpulse-timestamp` (Unix seconds) and `x-riftpulse-signature` (`sha256=<hex>`), computed as HMAC-SHA256 over `<timestamp>.<exact raw body>` with `TIKTOK_CONNECTOR_INGEST_SECRET`. Timestamps older than five minutes and bodies over 16 KiB are rejected. The handler verifies the target account, normalizes chat or supported TikTok events, persists them idempotently, updates provider health/viewer freshness, and publishes realtime events. TikTok remains unofficial/best-effort; live verification is still outstanding.
 
 ### `POST /api/v1/providers/kick/webhook`
 
@@ -71,7 +75,7 @@ Implementation references: [Kick webhook security](https://github.com/KickEngine
 
 ### `GET /api/v1/realtime`
 
-Requires an authenticated session, a trusted browser `Origin`, and a WebSocket upgrade. The Worker selects a per-account Durable Object, which sends new normalized `chat.message` events to connected clients. Realtime delivery is best-effort; clients can recover missed messages through `GET /api/v1/chat/messages`.
+Requires an authenticated session, a trusted browser `Origin`, and a WebSocket upgrade. The Worker selects a per-account Durable Object, which sends normalized `chat.message` and `provider.event` frames to connected clients. Realtime delivery is best-effort; clients can recover missed messages and stored event summaries through `GET /api/v1/chat/messages`.
 
 ## Provider connection endpoints
 
@@ -87,13 +91,29 @@ Requires an authenticated session and trusted `Origin`. Creates a high-entropy, 
 
 Consumes state once and requires a matching same-browser cookie. Exchanges the authorization code, validates the resulting token with Twitch, requires `user:read:chat`, `user:bot`, and `channel:bot` for the webhook-based chat flow, and stores access/refresh tokens using AES-256-GCM encryption. It redirects to the local dashboard with a non-sensitive status. On-demand token refresh is available during subscription setup; scheduled refresh and subscription recovery remain unfinished.
 
+### `POST /api/v1/providers/youtube/connect`
+
+Requires an authenticated session and trusted `Origin`. Creates a short-lived, single-use state digest and HttpOnly/SameSite cookie, then returns Google's OAuth authorization URL for the minimal YouTube read-only scope. The callback URI must be same-origin and registered exactly with Google. Offline access is requested so the backend can later refresh tokens without user presence.
+
+### `GET /api/v1/providers/youtube/callback`
+
+Consumes state once and requires the matching same-browser cookie. Exchanges the authorization code, verifies the granted YouTube read-only scope, calls the YouTube Data API to identify the authenticated channel, and stores access/refresh tokens using AES-256-GCM encryption. It marks the provider degraded until live-chat polling is implemented. The real OAuth round trip has not been tested because Google OAuth credentials are not configured locally.
+
+### POST /api/v1/providers/kick/connect
+
+Requires an authenticated session and trusted Origin. Creates a high-entropy one-time state, generates an OAuth 2.1 PKCE S256 verifier/challenge pair, encrypts the short-lived verifier in D1, and returns Kick's authorization URL. The local callback must be registered exactly with Kick. A small redirect=127.0.0.1 compatibility parameter is included before the redirect URI for the local development case; this behavior requires real-provider verification.
+
+### GET /api/v1/providers/kick/callback
+
+Consumes the matching state and same-browser cookie once, decrypts the PKCE verifier, exchanges the code, introspects the resulting user token, checks required scopes, looks up the Kick account, and persists access/refresh tokens as AES-256-GCM ciphertext. It marks health degraded until the Kick webhook subscription flow is implemented. Kick OAuth remains best-effort until tested against a real registered application.
+
 ### `POST /api/v1/providers/twitch/eventsub/subscribe`
 
 Requires an authenticated session and trusted `Origin`. Requires configured Twitch app credentials, an EventSub webhook secret, and a public HTTPS app URL. Validates the saved user token and required chat scopes, obtains an app access token for the webhook subscription API, checks for an existing matching subscription, and creates `channel.chat.message` version 1 if needed. It reports verification pending until Twitch sends the signed callback challenge; it does not mark the provider healthy merely because a create request succeeded.
 
 ### `DELETE /api/v1/providers/{provider}`
 
-Requires an authenticated session and trusted `Origin`. Clears locally stored token ciphertext and marks health disconnected. TikTok disconnection is rejected because that connector is unavailable in this build.
+Requires an authenticated session and trusted `Origin`. Clears locally stored token ciphertext and marks health disconnected. TikTok bridge lifecycle is managed separately from OAuth connections and is not controlled through this endpoint.
 
 ## Database entities
 
@@ -101,8 +121,11 @@ Requires an authenticated session and trusted `Origin`. Clears locally stored to
 - `devices`: platform, game/mod versions, ownership, last-seen, and revocation.
 - `pairing_challenges`: HMAC digest, expiry, state, attempt counter, and claim metadata.
 - `provider_connections`: one record per account/provider; access and refresh tokens are stored only as AES-256-GCM ciphertext.
+- `provider_oauth_states`: short-lived one-time state digests bound to an account/provider. Kick PKCE verifiers are encrypted in `code_verifier_ciphertext` and consumed with their state.
 - `module_settings`: persisted enabled flag and JSON configuration for each V1 module.
 - `chat_commands`: configurable commands, actions, cooldowns, and JSON configuration.
+- `chat_messages`: normalized chat history with per-account/provider/external-message uniqueness.
+- `provider_events`: normalized follows, subscriptions, gifts, Bits, Super Chats, donations, likes, shares, raids, joins, and viewer-count events with per-account/provider/external-event uniqueness.
 - `song_requests`: normalized request input, BeatSaver key/metadata, requester, provider, and queue state.
 - `integration_health`: per-provider status and last observed viewer count; null means unknown, not zero.
 - `idempotency_keys`: operation-scoped idempotency responses with expiry.
@@ -111,5 +134,5 @@ Requires an authenticated session and trusted `Origin`. Clears locally stored to
 
 - Five-digit codes have low entropy. HMAC is required rather than an ordinary unsalted hash, but it does not replace rate limiting. Production must add edge-level rate limits, per-account/IP attempt limits, and monitoring before public deployment.
 - Pairing challenges must only be claimed by an authenticated account, must be single-use, and must expire.
-- A local AES-256-GCM provider-token vault helper is unit-tested, but OAuth token persistence, refresh flows, key rotation, and provider scopes are not yet wired.
+- The AES-256-GCM provider-token vault and encrypted token persistence are unit-tested. Twitch has an on-demand refresh helper; scheduled refresh/recovery, YouTube token refresh, and key rotation remain open.
 - No remote D1 database, production binding, secret, or deployment is created in Step 5.
