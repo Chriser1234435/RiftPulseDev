@@ -1,0 +1,8 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "riftpulse-dev",
+  "compatibility_date": "2026-10-29",
+  "main": "./src/index.ts",
+  "upload_source_maps": true,
+  "observability": { "enabled": true }
+}
