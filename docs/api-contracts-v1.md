@@ -45,9 +45,9 @@ Statuses: 201 created; 400 invalid request; 409 active code collision; 429 activ
 
 Accepts `{ "code": "04271" }`. It currently returns 401 until Step 6 connects the website's verified authentication session. The account ID must be derived from that verified session and must never be trusted from request JSON. The shared persistence helper performs a one-time pending-to-claimed transition and inserts the device in a D1 batch; the raw code digest is cleared on claim. Claim integration tests require an authenticated test context and are deferred to the auth integration step.
 
-### `GET /api/v1/pairing/status`
+### `GET /api/v1/pairing/challenges/:id`
 
-Requires a verified website session; currently returns 401 until the Step 6 authentication adapter exists.
+The mod polls this endpoint using the unguessable challenge UUID returned at creation. It returns only the challenge ID, status, expiry, and optional claim timestamp; it never returns the code or its digest. Unknown IDs return 404. The authenticated website claim endpoint remains gated until Step 6 adds the verified account session.
 
 ## Database entities
 
