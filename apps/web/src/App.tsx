@@ -249,6 +249,25 @@ function App() {
   const handleProviderAction = async () => {
     const provider = providers.find(item => item.key === selectedProvider)!;
     const current = providerConnections[selectedProvider];
+    if (current.status === "connected" && selectedProvider === "twitch" && (current.detailCode === "eventsub_subscription_pending" || current.detailCode === "eventsub_subscription_failed")) {
+      try {
+        const response = await fetch("/api/v1/providers/twitch/eventsub/subscribe", {
+          method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: "{}",
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error?.message ?? "Could not enable Twitch chat events.");
+        await refreshProviderConnections();
+        await refreshProviderHealth();
+        flash(data.status === "subscribed" ? "Twitch chat events are enabled." : "Subscription requested. Waiting for Twitch to verify the webhook.");
+      } catch (error) {
+        flash(error instanceof Error ? error.message : "Could not enable Twitch chat events.");
+      }
+      return;
+    }
+    if (current.status === "connected" && current.detailCode === "eventsub_verification_pending") {
+      flash("Twitch is still verifying the webhook. Check back in a moment.");
+      return;
+    }
     if (current.status === "connected") {
       try {
         const response = await fetch("/api/v1/providers/" + selectedProvider, { method: "DELETE", credentials: "include" });
@@ -573,7 +592,7 @@ function App() {
           {modal === "provider" && <><div className={`modal-icon provider-icon ${providers.find(p => p.key === selectedProvider)?.className}`}>{providers.find(p => p.key === selectedProvider)?.short}</div><div className="modal-eyebrow">PLATFORM INTEGRATION</div><h2 id="modal-title">{providerConnections[selectedProvider].status === "connected" ? "Manage" : "Connect"} {providers.find(p => p.key === selectedProvider)?.name}</h2><p className="modal-copy">{selectedProvider === "twitch" ? (providerConnections.twitch.configured ? "Authorize your Twitch account securely. After authorization, EventSub subscription setup is still required before live messages arrive." : "The Twitch OAuth flow is implemented locally, but app credentials and a token encryption key have not been configured in this workspace.") : selectedProvider === "tiktok" ? "TikTok LIVE is unavailable in this build; no unofficial endpoint is being contacted." : (providers.find(p => p.key === selectedProvider)?.name + " authorization is not implemented yet. The account will remain disconnected until its secure OAuth flow is ready.")}</p>
             {selectedProvider === "tiktok" && <div className="warning-note"><ShieldCheck size={16} /><span><b>Unofficial connector</b><br />TikTok LIVE support is best effort and may be unavailable or change without notice.</span></div>}
             <div className="provider-permissions"><div><Check size={15} /> Chat event capability</div><div><Users size={15} /> Viewer count where supported</div><div><LockKeyhole size={15} /> Secure account authorization</div></div>
-            <button className="primary-button modal-submit" disabled={providerConnections[selectedProvider].status !== "connected" && (selectedProvider !== "twitch" || !providerConnections.twitch.configured)} onClick={() => void handleProviderAction()}>{providerConnections[selectedProvider].status === "connected" ? <><Unplug size={16} /> Disconnect account</> : selectedProvider === "twitch" && providerConnections.twitch.configured ? <><Link2 size={16} /> Connect with Twitch</> : <>Not configured yet <LockKeyhole size={15} /></>}</button><p className="modal-footnote">{providerConnections[selectedProvider].status === "connected" ? "Disconnecting clears stored token ciphertext." : "No external account is contacted until you choose an enabled connection action."}</p>
+            <button className="primary-button modal-submit" disabled={(providerConnections[selectedProvider].status !== "connected" && (selectedProvider !== "twitch" || !providerConnections.twitch.configured)) || providerConnections[selectedProvider].detailCode === "eventsub_verification_pending"} onClick={() => void handleProviderAction()}>{providerConnections[selectedProvider].status === "connected" ? providerConnections[selectedProvider].detailCode === "eventsub_subscription_pending" || providerConnections[selectedProvider].detailCode === "eventsub_subscription_failed" ? <><Radio size={16} /> Enable chat events</> : providerConnections[selectedProvider].detailCode === "eventsub_verification_pending" ? <><RefreshCw size={16} className="spin" /> Waiting for verification</> : <><Unplug size={16} /> Disconnect account</> : selectedProvider === "twitch" && providerConnections.twitch.configured ? <><Link2 size={16} /> Connect with Twitch</> : <>Not configured yet <LockKeyhole size={15} /></>}</button><p className="modal-footnote">{providerConnections[selectedProvider].status === "connected" && providerConnections[selectedProvider].detailCode === "eventsub_subscription_pending" ? "Twitch is authorized. Enable the signed webhook subscription to receive live chat." : providerConnections[selectedProvider].status === "connected" && providerConnections[selectedProvider].detailCode === "eventsub_verification_pending" ? "Twitch is validating the webhook endpoint. The status will update after its signed challenge arrives." : providerConnections[selectedProvider].status === "connected" ? "Disconnecting clears stored token ciphertext." : "No external account is contacted until you choose an enabled connection action."}</p>
           </>}
           {modal === "settings" && <><div className="modal-icon purple-modal"><Settings2 size={22} /></div><div className="modal-eyebrow">PREFERENCES</div><h2 id="modal-title">Tune your setup.</h2><p className="modal-copy">Module switches and the BSR command save to your account. Provider OAuth and device preferences remain gated until their integrations are complete.</p>
             <div className="settings-option"><div><b>Automatically save toggles</b><small>Apply module changes immediately.</small></div><button className={`toggle ${autoSave ? "on" : ""}`} role="switch" aria-checked={autoSave} onClick={() => setAutoSave(!autoSave)}><span /></button></div>

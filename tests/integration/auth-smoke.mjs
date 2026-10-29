@@ -59,6 +59,10 @@ const connectTwitchWithoutOrigin = await fetch(`${base}/api/v1/providers/twitch/
 assert.equal(connectTwitchWithoutOrigin.status, 403, "provider authorization start must enforce trusted Origin");
 const connectTwitchUnconfigured = await fetch(`${base}/api/v1/providers/twitch/connect`, { method: "POST", headers: { cookie, origin } });
 assert.equal(connectTwitchUnconfigured.status, 503, "provider OAuth must fail closed without app credentials");
+const subscribeTwitchWithoutOrigin = await fetch(`${base}/api/v1/providers/twitch/eventsub/subscribe`, { method: "POST", headers: { cookie } });
+assert.equal(subscribeTwitchWithoutOrigin.status, 403, "EventSub setup must enforce trusted Origin");
+const subscribeTwitchUnconfigured = await fetch(`${base}/api/v1/providers/twitch/eventsub/subscribe`, { method: "POST", headers: { cookie, origin } });
+assert.equal(subscribeTwitchUnconfigured.status, 503, "EventSub setup must fail closed without provider secrets");
 
 const realtimeUnauthenticated = await fetch(`${base}/api/v1/realtime`, { headers: { origin } });
 assert.equal(realtimeUnauthenticated.status, 401, "realtime must require an account session");

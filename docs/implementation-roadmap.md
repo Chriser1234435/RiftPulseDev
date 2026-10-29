@@ -53,7 +53,8 @@ Status: Step 6 local website/auth foundation complete. Step 7 chat/provider foun
 - [x] Implement signed Kick webhook verification and idempotent ingestion for version 1 chat.message.sent events.
 - [x] Apply the chat foundation migration to the local D1 database and extend schema/unit tests.
 - [x] Add Twitch OAuth authorization-code start/callback, one-time state, token validation, encrypted token storage, connection status API, and disconnect endpoint.
-- [ ] Implement Twitch EventSub subscription creation, token refresh/validation lifecycle, and recovery.
+- [x] Add guarded Twitch EventSub subscription creation with app access tokens and signed HTTPS webhook verification; health only becomes healthy after an enabled subscription or signed callback challenge.
+- [ ] Implement token refresh/validation lifecycle, subscription recovery, and pagination-aware subscription reconciliation.
 - [ ] Implement YouTube live-chat streaming and fallback handling.
 - [ ] Finish Kick OAuth, subscription setup, channel mapping validation, and live end-to-end testing.
 - [x] Add per-account Durable Object WebSocket fan-out for the website and future PCVR/Quest clients.

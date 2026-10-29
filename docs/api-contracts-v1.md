@@ -85,7 +85,11 @@ Requires an authenticated session and trusted `Origin`. Creates a high-entropy, 
 
 ### `GET /api/v1/providers/twitch/callback`
 
-Consumes state once and requires a matching same-browser cookie. Exchanges the authorization code, validates the resulting token with Twitch, requires the `user:read:chat` scope, and stores access/refresh tokens using AES-256-GCM encryption. It redirects to the local dashboard with a non-sensitive status. EventSub subscription creation and token refresh remain unfinished.
+Consumes state once and requires a matching same-browser cookie. Exchanges the authorization code, validates the resulting token with Twitch, requires `user:read:chat`, `user:bot`, and `channel:bot` for the webhook-based chat flow, and stores access/refresh tokens using AES-256-GCM encryption. It redirects to the local dashboard with a non-sensitive status. Token refresh and subscription recovery remain unfinished.
+
+### `POST /api/v1/providers/twitch/eventsub/subscribe`
+
+Requires an authenticated session and trusted `Origin`. Requires configured Twitch app credentials, an EventSub webhook secret, and a public HTTPS app URL. Validates the saved user token and required chat scopes, obtains an app access token for the webhook subscription API, checks for an existing matching subscription, and creates `channel.chat.message` version 1 if needed. It reports verification pending until Twitch sends the signed callback challenge; it does not mark the provider healthy merely because a create request succeeded.
 
 ### `DELETE /api/v1/providers/{provider}`
 

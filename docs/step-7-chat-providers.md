@@ -32,12 +32,12 @@ Status: **in progress**. Chat ingestion primitives, signed Twitch/Kick webhook r
 
 Copy the example variable names into a local-only `.dev.vars` file and replace placeholders with credentials you own. Register the exact callback URL `http://127.0.0.1:5173/api/v1/providers/twitch/callback` for local testing. Generate a separate random 32-byte Base64 token-encryption key and a separate 10–100 character ASCII EventSub secret. Never commit `.dev.vars` or use these local values in production.
 
-Twitch OAuth uses the official authorization-code flow and validates the resulting access token before storage. The requested scope is limited to `user:read:chat`. Token storage is encrypted; provider tokens are never returned by the status API. See the [official Twitch OAuth documentation](https://dev.twitch.tv/docs/authentication/getting-tokens-oauth) and [EventSub webhook verification guide](https://dev.twitch.tv/docs/eventsub/handling-webhook-events/).
+Twitch OAuth uses the official authorization-code flow and validates the resulting access token before storage. The webhook-based chat subscription requests `user:read:chat`, `user:bot`, and `channel:bot`, because Twitch requires an app access token for webhook subscriptions and the appropriate chat-user/broadcaster permissions. Token storage is encrypted; provider tokens are never returned by the status API. See the [official Twitch OAuth documentation](https://dev.twitch.tv/docs/authentication/getting-tokens-oauth), [EventSub subscription management](https://dev.twitch.tv/docs/eventsub/manage-subscriptions/), and [EventSub webhook verification guide](https://dev.twitch.tv/docs/eventsub/handling-webhook-events/).
 
 ## Current limitations
 
 - OAuth routes are ready for local configuration but have not completed a real Twitch authorization, because no Twitch app credentials are configured in this workspace.
-- Twitch OAuth success alone does not deliver chat; EventSub subscription creation remains unfinished.
+- Twitch OAuth success alone does not deliver chat. The guarded EventSub subscription-creation endpoint is implemented, but it requires a public HTTPS development hostname and a real Twitch app before live verification can be tested.
 - YouTube and Kick connection buttons remain disabled until their secure authorization flows are implemented.
 - TikTok remains unavailable/unofficial until a compliant, maintainable live-chat path is verified.
 - No production Cloudflare resources, remote D1, DNS, OAuth app registrations, or deployments have been changed.

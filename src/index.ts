@@ -6,7 +6,7 @@ import { persistNormalizedChatMessage } from "../packages/shared/src/chat-persis
 import { extractKickPublicKey, verifyKickWebhookSignature } from "../packages/shared/src/kick-webhook.ts";
 import { verifyTwitchEventSubSignature } from "../packages/shared/src/twitch-eventsub.ts";
 import { createOAuthState, digestOAuthState } from "../packages/shared/src/oauth-state.ts";
-import { disconnectProvider, persistProviderTokens } from "../packages/shared/src/provider-connections.ts";
+import { disconnectProvider, persistProviderTokens, readProviderTokens } from "../packages/shared/src/provider-connections.ts";
 import { claimPairingChallenge, createPairingChallenge } from "../packages/shared/src/pairing.ts";
 import { createAuth } from "./auth.ts";
 export { ChatRoom } from "./chat-room.ts";
@@ -214,8 +214,8 @@ export default {
       if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
       if (!env.DB) return jsonError(503, "database_unavailable", "Provider storage is not configured.", requestId);
       const result = await env.DB.prepare(
-        "SELECT provider, display_name AS displayName, status, connected_at AS connectedAt FROM provider_connections WHERE account_id = ?",
-      ).bind(authContext.userId).all<{ provider: string; displayName: string | null; status: string; connectedAt: string | null }>();
+        "SELECT pc.provider, pc.display_name AS displayName, pc.status, pc.connected_at AS connectedAt, ih.status AS healthStatus, ih.detail_code AS healthDetailCode FROM provider_connections pc LEFT JOIN integration_health ih ON ih.account_id = pc.account_id AND ih.provider = pc.provider WHERE pc.account_id = ?",
+      ).bind(authContext.userId).all<{ provider: string; displayName: string | null; status: string; connectedAt: string | null; healthStatus: string | null; healthDetailCode: string | null }>();
       if (!result.success) return jsonError(503, "provider_store_unavailable", "Could not load provider connections.", requestId);
       const rows = new Map((result.results ?? []).map(row => [row.provider, row]));
       const configured = !!(env.TWITCH_CLIENT_ID && env.TWITCH_CLIENT_SECRET && env.TOKEN_ENCRYPTION_KEY && env.APP_BASE_URL);
@@ -229,7 +229,8 @@ export default {
           configured: provider === "twitch" ? configured : false,
           detailCode: provider === "tiktok" ? "unofficial_connector_unavailable"
             : provider === "twitch" && !configured ? "oauth_credentials_not_configured"
-            : provider === "twitch" && row?.status === "connected" ? "eventsub_subscription_pending" : null,
+            : provider === "twitch" && row?.status === "connected" && row.healthStatus !== "healthy" ? row?.healthDetailCode ?? "eventsub_subscription_pending"
+            : row?.healthDetailCode ?? null,
         };
       });
       return Response.json({ connections }, { headers: JSON_HEADERS });
@@ -274,7 +275,7 @@ export default {
       authorizationUrl.searchParams.set("client_id", env.TWITCH_CLIENT_ID);
       authorizationUrl.searchParams.set("redirect_uri", redirectUri.toString());
       authorizationUrl.searchParams.set("response_type", "code");
-      authorizationUrl.searchParams.set("scope", "user:read:chat");
+      authorizationUrl.searchParams.set("scope", "user:read:chat user:bot channel:bot");
       authorizationUrl.searchParams.set("state", state);
       return Response.json({ authorizationUrl: authorizationUrl.toString() }, {
         headers: { ...JSON_HEADERS, "set-cookie": twitchStateCookie(state, redirectUri.protocol === "https:") },
@@ -337,16 +338,18 @@ export default {
         const validationPayload: unknown = await validateResponse.json();
         if (!validationPayload || typeof validationPayload !== "object" || Array.isArray(validationPayload)) return finish("failed");
         const validation = validationPayload as Record<string, unknown>;
+        const validationScopes = Array.isArray(validation.scopes) && validation.scopes.every(scope => typeof scope === "string")
+          ? validation.scopes as string[] : null;
+        const requiredScopes = ["user:read:chat", "user:bot", "channel:bot"];
         if (validation.client_id !== env.TWITCH_CLIENT_ID || typeof validation.user_id !== "string"
           || !validation.user_id || typeof validation.login !== "string" || !validation.login
-          || !Array.isArray(validation.scopes) || validation.scopes.some(scope => typeof scope !== "string")
-          || !validation.scopes.includes("user:read:chat")) return finish("failed");
+          || !validationScopes || !requiredScopes.every(scope => validationScopes.includes(scope))) return finish("failed");
 
         const saved = await persistProviderTokens(env.DB, {
           accountId: claimedState.account_id, provider: "twitch", externalAccountId: validation.user_id,
           displayName: validation.login, accessToken: token.access_token, refreshToken: token.refresh_token,
           tokenExpiresAt: new Date(Date.now() + token.expires_in * 1000).toISOString(),
-          scopes: validation.scopes as string[],
+          scopes: validationScopes,
         }, env.TOKEN_ENCRYPTION_KEY);
         if (!saved.ok) return finish("failed");
 
@@ -357,6 +360,134 @@ export default {
         return finish("connected");
       } catch {
         return finish("failed");
+      }
+    }
+
+    if (url.pathname === "/api/v1/providers/twitch/eventsub/subscribe" && request.method === "POST") {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!isTrustedMutationOrigin(request, env)) return jsonError(403, "untrusted_origin", "Request origin is not trusted.", requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Provider storage is not configured.", requestId);
+      if (!env.TWITCH_CLIENT_ID || !env.TWITCH_CLIENT_SECRET || !env.TWITCH_EVENTSUB_SECRET
+        || env.TWITCH_EVENTSUB_SECRET.length < 10 || env.TWITCH_EVENTSUB_SECRET.length > 100 || !env.TOKEN_ENCRYPTION_KEY || !env.APP_BASE_URL) {
+        return jsonError(503, "twitch_eventsub_not_configured", "Twitch app credentials, EventSub secret, token key, and app URL must be configured.", requestId);
+      }
+
+      let appUrl: URL;
+      let callbackUrl: URL;
+      try {
+        appUrl = new URL(env.APP_BASE_URL);
+        callbackUrl = new URL("/api/v1/providers/twitch/webhook", appUrl);
+      } catch {
+        return jsonError(503, "twitch_eventsub_not_configured", "The Twitch webhook URL is invalid.", requestId);
+      }
+      if (callbackUrl.protocol !== "https:" || callbackUrl.origin !== appUrl.origin || callbackUrl.username || callbackUrl.password) {
+        return jsonError(503, "twitch_eventsub_requires_https", "Twitch webhook subscriptions require a public HTTPS callback on port 443.", requestId);
+      }
+
+      const connection = await env.DB.prepare(
+        "SELECT external_account_id AS externalAccountId FROM provider_connections WHERE account_id = ? AND provider = 'twitch' AND status = 'connected' LIMIT 1",
+      ).bind(authContext.userId).first<{ externalAccountId: string | null }>();
+      if (!connection?.externalAccountId) return jsonError(409, "twitch_not_connected", "Connect a Twitch account before enabling chat events.", requestId);
+
+      const stored = await readProviderTokens(env.DB, authContext.userId, "twitch", env.TOKEN_ENCRYPTION_KEY);
+      if (!stored.ok) return jsonError(409, "twitch_token_unavailable", "Reconnect Twitch before enabling chat events.", requestId);
+      try {
+        const validationResponse = await fetch("https://id.twitch.tv/oauth2/validate", {
+          headers: { authorization: "OAuth " + stored.accessToken, accept: "application/json" },
+        });
+        if (!validationResponse.ok) return jsonError(409, "twitch_token_expired", "Reconnect Twitch to refresh its authorization.", requestId);
+        const validationPayload: unknown = await validationResponse.json();
+        if (!validationPayload || typeof validationPayload !== "object" || Array.isArray(validationPayload)) {
+          return jsonError(502, "twitch_validation_failed", "Twitch returned an invalid token validation response.", requestId);
+        }
+        const validation = validationPayload as Record<string, unknown>;
+        const validationScopes = Array.isArray(validation.scopes) && validation.scopes.every(scope => typeof scope === "string")
+          ? validation.scopes as string[] : null;
+        const requiredScopes = ["user:read:chat", "user:bot", "channel:bot"];
+        if (validation.client_id !== env.TWITCH_CLIENT_ID || validation.user_id !== connection.externalAccountId
+          || !validationScopes || !requiredScopes.every(scope => validationScopes.includes(scope))) {
+          return jsonError(409, "twitch_scope_mismatch", "Reconnect Twitch and grant the required chat permissions.", requestId);
+        }
+
+        const appTokenResponse = await fetch("https://id.twitch.tv/oauth2/token", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+          body: new URLSearchParams({
+            client_id: env.TWITCH_CLIENT_ID,
+            client_secret: env.TWITCH_CLIENT_SECRET,
+            grant_type: "client_credentials",
+          }),
+        });
+        if (!appTokenResponse.ok) return jsonError(502, "twitch_app_token_failed", "Could not obtain the Twitch application token.", requestId);
+        const appTokenPayload: unknown = await appTokenResponse.json();
+        if (!appTokenPayload || typeof appTokenPayload !== "object" || Array.isArray(appTokenPayload)) {
+          return jsonError(502, "twitch_app_token_failed", "Twitch returned an invalid application token response.", requestId);
+        }
+        const appToken = (appTokenPayload as Record<string, unknown>).access_token;
+        if (typeof appToken !== "string" || !appToken) return jsonError(502, "twitch_app_token_failed", "Twitch returned an invalid application token response.", requestId);
+
+        const listUrl = new URL("https://api.twitch.tv/helix/eventsub/subscriptions");
+        listUrl.searchParams.set("type", "channel.chat.message");
+
+        listUrl.searchParams.set("first", "100");
+        const existingResponse = await fetch(listUrl, {
+          headers: { "Client-Id": env.TWITCH_CLIENT_ID, authorization: "Bearer " + appToken, accept: "application/json" },
+        });
+        if (!existingResponse.ok) return jsonError(502, "twitch_eventsub_lookup_failed", "Could not check existing Twitch chat subscriptions.", requestId);
+        const existingPayload: unknown = await existingResponse.json();
+        const existingData = typeof existingPayload === "object" && existingPayload !== null && !Array.isArray(existingPayload)
+          ? (existingPayload as Record<string, unknown>).data : null;
+        const existing = Array.isArray(existingData) ? existingData.find(item => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+          const sub = item as Record<string, unknown>;
+          const condition = typeof sub.condition === "object" && sub.condition !== null ? sub.condition as Record<string, unknown> : {};
+          const transport = typeof sub.transport === "object" && sub.transport !== null ? sub.transport as Record<string, unknown> : {};
+          return sub.type === "channel.chat.message" && (sub.status === "enabled" || sub.status === "webhook_callback_verification_pending")
+            && condition.broadcaster_user_id === connection.externalAccountId
+            && condition.user_id === connection.externalAccountId
+            && transport.method === "webhook" && transport.callback === callbackUrl.toString();
+        }) : null;
+
+        if (!existing) {
+          const createResponse = await fetch("https://api.twitch.tv/helix/eventsub/subscriptions", {
+            method: "POST",
+            headers: {
+              "Client-Id": env.TWITCH_CLIENT_ID,
+              authorization: "Bearer " + appToken,
+              "content-type": "application/json",
+              accept: "application/json",
+            },
+            body: JSON.stringify({
+              type: "channel.chat.message",
+              version: "1",
+              condition: { broadcaster_user_id: connection.externalAccountId, user_id: connection.externalAccountId },
+              transport: { method: "webhook", callback: callbackUrl.toString(), secret: env.TWITCH_EVENTSUB_SECRET },
+            }),
+          });
+          if (!createResponse.ok) {
+            await env.DB.prepare(
+              "UPDATE integration_health SET status = 'degraded', observed_at = ?, detail_code = 'eventsub_subscription_failed' WHERE account_id = ? AND provider = 'twitch'",
+            ).bind(new Date().toISOString(), authContext.userId).run();
+            return jsonError(502, "twitch_eventsub_subscription_failed", "Twitch did not accept the chat subscription. Check the requested scopes and callback configuration.", requestId);
+          }
+        }
+
+        const now = new Date().toISOString();
+        if (existing && typeof existing === "object" && !Array.isArray(existing) && (existing as Record<string, unknown>).status === "enabled") {
+          const health = await env.DB.prepare(
+            "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'twitch', 'healthy', NULL, ?, NULL, NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'healthy', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = NULL, viewer_count_observed_at = NULL",
+          ).bind(crypto.randomUUID(), authContext.userId, now).run();
+          if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not update Twitch chat setup status.", requestId);
+          return Response.json({ status: "subscribed", alreadyEnabled: true }, { headers: JSON_HEADERS });
+        }
+        const health = await env.DB.prepare(
+          "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'twitch', 'degraded', NULL, ?, 'eventsub_verification_pending', NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'degraded', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = 'eventsub_verification_pending', viewer_count_observed_at = NULL",
+        ).bind(crypto.randomUUID(), authContext.userId, now).run();
+        if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not update Twitch chat setup status.", requestId);
+        return Response.json({ status: "verification_pending", alreadyEnabled: false }, { headers: JSON_HEADERS });
+      } catch {
+        return jsonError(502, "twitch_eventsub_setup_failed", "Could not complete Twitch chat setup.", requestId);
       }
     }
 
@@ -411,6 +542,24 @@ export default {
       if (messageType === "webhook_callback_verification") {
         const challenge = typeof root.challenge === "string" ? root.challenge : "";
         if (!challenge || challenge.length > 512) return jsonError(400, "invalid_challenge", "Twitch challenge is invalid.", requestId);
+        const subscription = typeof root.subscription === "object" && root.subscription !== null && !Array.isArray(root.subscription)
+          ? root.subscription as Record<string, unknown> : {};
+        const condition = typeof subscription.condition === "object" && subscription.condition !== null && !Array.isArray(subscription.condition)
+          ? subscription.condition as Record<string, unknown> : {};
+        const broadcasterId = typeof condition.broadcaster_user_id === "string" ? condition.broadcaster_user_id : "";
+        if (subscription.type === "channel.chat.message" && subscription.version === "1" && broadcasterId) {
+          const connections = await env.DB.prepare(
+            "SELECT account_id FROM provider_connections WHERE provider = 'twitch' AND external_account_id = ? AND status = 'connected'",
+          ).bind(broadcasterId).all<{ account_id: string }>();
+          if (!connections.success) return jsonError(503, "provider_connection_lookup_failed", "Could not confirm Twitch webhook setup.", requestId);
+          const now = new Date().toISOString();
+          for (const connection of connections.results ?? []) {
+            const health = await env.DB.prepare(
+              "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'twitch', 'healthy', NULL, ?, NULL, NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'healthy', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = NULL, viewer_count_observed_at = NULL",
+            ).bind(crypto.randomUUID(), connection.account_id, now).run();
+            if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not confirm Twitch webhook setup.", requestId);
+          }
+        }
         return new Response(challenge, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
       }
 
