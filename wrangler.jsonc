@@ -5,17 +5,22 @@
   "main": "./src/index.ts",
   "upload_source_maps": true,
   "observability": { "enabled": true },
+  "vars": {
+    "APP_BASE_URL": "https://riftpulse-dev.chrismeten0.workers.dev",
+    "TRUSTED_ORIGINS": "https://riftpulse-dev.chrismeten0.workers.dev"
+  },
   "durable_objects": { "bindings": [{ "name": "CHAT_ROOM", "class_name": "ChatRoom" }] },
   "migrations": [{ "tag": "v1-chat-room", "new_sqlite_classes": ["ChatRoom"] }],
   "assets": {
+    "directory": "./dist/client",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application"
   },
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "riftpulse-local",
-      "database_id": "00000000-0000-0000-0000-000000000001",
+      "database_name": "riftpulse-dev-db",
+      "database_id": "1ebf28ca-fcc5-4cb6-8be3-92d889ffc090",
       "migrations_dir": "migrations"
     }
   ]
