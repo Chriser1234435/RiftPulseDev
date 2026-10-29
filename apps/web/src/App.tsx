@@ -33,6 +33,7 @@ type ProviderEventPayload = {
 function providerEventAsChatMessage(value: unknown): ChatMessage | null {
   if (!value || typeof value !== "object") return null;
   const event = value as Partial<ProviderEventPayload>;
+  if (event.kind === "viewer_count") return null;
   if (typeof event.id !== "string" || typeof event.provider !== "string"
     || !providers.some(provider => provider.key === event.provider)
     || typeof event.kind !== "string" || typeof event.receivedAt !== "string") return null;
@@ -49,7 +50,7 @@ function providerEventAsChatMessage(value: unknown): ChatMessage | null {
     case "share": description = "shared the stream"; break;
     case "raid": description = "raided the channel"; break;
     case "member_join": description = "joined the stream"; break;
-    case "viewer_count": description = "viewer count updated to " + (event.quantity ?? "unknown"); break;
+    case "viewer_count": return null;
     default: description = "triggered " + event.kind;
   }
   if (event.message) description += ": " + event.message;
@@ -194,6 +195,14 @@ function App() {
     void refreshProviderHealth();
     void refreshProviderConnections();
   }, [user?.id, refreshDevices, refreshChat, refreshProviderHealth, refreshProviderConnections]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const timer = window.setInterval(() => { void refreshProviderHealth(); }, 5000);
+    return () => window.clearInterval(timer);
+  }, [user?.id, refreshProviderHealth]);
+
+
 
   useEffect(() => {
     if (!user?.id || !enabled.chat) return;
@@ -684,7 +693,7 @@ function App() {
             <div className="provider-list">
               {providers.map(provider => <div className="provider-row" key={provider.key}>
                 <div className={`provider-icon ${provider.className}`}>{provider.short}</div>
-                <div className="provider-main"><b>{provider.name}{provider.key === "tiktok" && <span className="unofficial-label">UNOFFICIAL</span>}</b><small>{providerConnections[provider.key].status === "connected" ? "Connected as " + (providerConnections[provider.key].displayName ?? "account") : providerConnections[provider.key].status === "unsupported" ? "Unavailable in this build" : providerConnections[provider.key].configured ? provider.note : providerConnections[provider.key].detailCode === "oauth_credentials_not_configured" ? "Local OAuth credentials not configured" : provider.note}</small></div>
+                <div className="provider-main"><b>{provider.name}{provider.key === "tiktok" && <>{providerConnections.tiktok.status === "connected" && <span className="tiktok-live-viewers" title="Current TikTok LIVE viewers"><Users size={13} /><span>{providerHealth.find(item => item.provider === "tiktok")?.viewerCount ?? "-"}</span></span>}<span className="unofficial-label">UNOFFICIAL</span></>}</b><small>{providerConnections[provider.key].status === "connected" ? "Connected as " + (providerConnections[provider.key].displayName ?? "account") : providerConnections[provider.key].status === "unsupported" ? "Unavailable in this build" : providerConnections[provider.key].configured ? provider.note : providerConnections[provider.key].detailCode === "oauth_credentials_not_configured" ? "Local OAuth credentials not configured" : provider.note}</small></div>
                 <div className={"connection-state " + (providerConnections[provider.key].status === "connected" ? "is-connected" : "")}><span className="status-dot" />{providerConnections[provider.key].status === "connected" ? "Connected" : providerConnections[provider.key].status === "unsupported" ? "Unavailable" : providerConnections[provider.key].status === "degraded" ? "Needs attention" : providerConnections[provider.key].status === "error" ? "Error" : "Not connected"}</div>
                 <button className={providerConnections[provider.key].status === "connected" ? "disconnect-button" : "connect-button"} onClick={() => openProvider(provider.key)}>{providerConnections[provider.key].status === "connected" ? "Manage" : providerConnections[provider.key].status === "unsupported" ? "Details" : "Connect"}{providerConnections[provider.key].status === "connected" ? <ChevronDown size={14} /> : <ExternalLink size={13} />}</button>
               </div>)}

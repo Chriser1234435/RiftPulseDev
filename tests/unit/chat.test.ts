@@ -112,6 +112,20 @@ test("normalizes TikTok chat and platform events without inventing cash values",
   assert.equal(gift?.itemName, "Rose");
   assert.equal(gift?.quantity, 3);
   assert.equal(gift?.amount, null);
+  const connectorGift = normalizeTikTokProviderEvent("gift", {
+    common: { msgId: "gift-msg-9", createTime: 1793275140 }, giftId: 5655, repeatCount: 4,
+    giftDetails: { giftName: "Rose", giftType: 0 },
+    user: { userId: "viewer-3", uniqueId: "gifter", nickname: "Gift Viewer" },
+  }, "room-1", "Streamer", now);
+  assert.equal(connectorGift?.externalEventId, "gift-msg-9");
+  assert.equal(connectorGift?.itemName, "Rose");
+  assert.equal(connectorGift?.quantity, 4);
+
+  const protobufViewerStats = normalizeTikTokProviderEvent("room_user", {
+    common: { msgId: "viewer-count-2" }, total: "41", totalUser: "39",
+  }, "room-1", "Streamer", now);
+  assert.equal(protobufViewerStats?.kind, "viewer_count");
+  assert.equal(protobufViewerStats?.quantity, 39);
   assert.equal(normalizeTikTokProviderEvent("unknown", { id: "x" }, "room-1", "Streamer", now), null);
   assert.equal(emptyProviderHealth("tiktok", now).state, "disconnected");
   assert.equal(emptyProviderHealth("tiktok", now).unofficial, true);

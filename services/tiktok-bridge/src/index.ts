@@ -44,14 +44,14 @@ class AccountRunner {
     this.accountId = config.accountId;
     this.username = config.username.replace(/^@/, "");
     this.channelName = this.username;
-    this.connection = new TikTokLiveConnection(this.username, {}) as ConnectorWithEvents;
+    this.connection = new TikTokLiveConnection(this.username, { enableExtendedGiftInfo: true }) as ConnectorWithEvents;
     this.connection.on(WebcastEvent.CHAT, data => this.enqueue("chat", data));
     this.connection.on(WebcastEvent.FOLLOW, data => this.enqueue("event", data, "follow"));
-    this.connection.on(WebcastEvent.GIFT, data => this.enqueue("event", data, "gift"));
+    this.connection.on(WebcastEvent.GIFT, data => { const gift = data as Record<string, unknown>; const details = gift.giftDetails as Record<string, unknown> | undefined; if (details?.giftType === 1 && gift.repeatEnd !== true && gift.repeatEnd !== 1) return; this.enqueue("event", data, "gift"); });
     this.connection.on(WebcastEvent.LIKE, data => this.enqueue("event", data, "like"));
     this.connection.on(WebcastEvent.SHARE, data => this.enqueue("event", data, "share"));
     this.connection.on(WebcastEvent.MEMBER, data => this.enqueue("event", data, "member"));
-    this.connection.on(WebcastEvent.ROOM_USER, data => this.enqueue("event", data, "room_user"));
+    this.connection.on(WebcastEvent.ROOM_USER, data => this.enqueue("viewers", data));
     this.connection.on("disconnected", () => this.requestReconnect("disconnected"));
     this.connection.on("error", () => this.requestReconnect("connector error"));
     this.connection.on("streamEnd", () => this.requestReconnect("stream ended"));
@@ -69,7 +69,7 @@ class AccountRunner {
     }).catch(() => console.warn("TikTok status update failed; the next connection sync will retry."));
   }
 
-  private enqueue(kind: "chat" | "event", payload: unknown, eventName?: string): void {
+  private enqueue(kind: "chat" | "event" | "viewers", payload: unknown, eventName?: string): void {
     if (this.stopped || !this.roomId) return;
     this.queue = this.queue.then(async () => {
       const body = JSON.stringify({

@@ -129,24 +129,31 @@ export function normalizeTikTokProviderEvent(
   const user = child(root, "user") ?? child(root, "gifter") ?? child(root, "userInfo");
   const kind = TIKTOK_EVENT_KIND[eventName.toLowerCase()];
   if (!root || !kind || !id(channelId)) return null;
-  const eventId = id(root.eventId ?? root.event_id ?? root.msgId ?? root.messageId ?? root.id
-    ?? (root.createTime !== undefined ? eventName + ":" + id(root.createTime) + ":" + id(user?.userId ?? user?.id)
-      : kind === "viewer_count" ? eventName + ":" + id(root.totalUserCount ?? root.viewerCount) + ":" + receivedAt.getTime() : ""));
+  const common = child(root, "common");
+  const eventId = id(common?.msgId ?? common?.messageId ?? common?.logId ?? root.eventId ?? root.event_id
+    ?? root.msgId ?? root.messageId ?? root.logId ?? root.id
+    ?? ((common?.createTime ?? root.createTime ?? root.create_time) !== undefined
+      ? eventName + ":" + id(common?.createTime ?? root.createTime ?? root.create_time) + ":" + id(user?.userId ?? user?.id)
+      : kind === "viewer_count" ? eventName + ":" + id(root.totalUser ?? root.total ?? root.totalUserCount ?? root.viewerCount) + ":" + receivedAt.getTime() : kind === "gift" ? eventName + ":" + id(user?.userId ?? user?.id) + ":" + id(root.giftId ?? child(root, "giftDetails")?.giftId) + ":" + receivedAt.getTime() : ""));
   if (!eventId) return null;
-  const gift = child(root, "gift") ?? child(root, "giftDetails") ?? child(root, "extendedGiftInfo");
+  const gift = child(root, "giftDetails") ?? child(root, "extendedGiftInfo") ?? child(root, "gift");
   const amountValue = root.amount ?? root.superChatAmount ?? root.bits;
   const amount = typeof amountValue === "number" && Number.isFinite(amountValue) && amountValue >= 0 ? amountValue : null;
-  const quantityValue = root.repeatCount ?? root.repeat_count ?? root.count ?? root.likeCount ?? root.totalUserCount ?? root.viewerCount;
-  const quantity = typeof quantityValue === "number" && Number.isSafeInteger(quantityValue) && quantityValue >= 0 ? quantityValue : null;
+  const quantityValue = kind === "viewer_count"
+    ? root.viewerCount ?? root.totalUser ?? root.total ?? root.totalUserCount ?? root.memberCount
+    : root.repeatCount ?? root.repeat_count ?? root.count ?? root.likeCount ?? root.viewerCount ?? root.totalUserCount ?? root.memberCount;
+  const parsedQuantity = typeof quantityValue === "number" ? quantityValue
+    : typeof quantityValue === "string" && /^\d+$/.test(quantityValue) ? Number(quantityValue) : NaN;
+  const quantity = Number.isSafeInteger(parsedQuantity) && parsedQuantity >= 0 ? parsedQuantity : null;
   return {
     id: "tiktok:" + eventId, provider: "tiktok", externalEventId: eventId, kind,
     channelId: id(channelId), channelName: text(channelName, 80) || id(channelId),
     actorId: id(user?.userId ?? user?.user_id ?? user?.id) || null,
     actorName: text(user?.uniqueId ?? user?.nickname ?? user?.displayId ?? user?.username, 80) || null,
     message: text(root.comment ?? root.message ?? root.text, 500) || null,
-    itemName: text(gift?.name ?? root.giftName ?? root.gift_name, 100) || null,
+    itemName: text(gift?.giftName ?? gift?.name ?? root.giftName ?? root.gift_name ?? child(root, "trayInfo")?.name, 100) || null,
     quantity, amount, currency: text(root.currency, 8) || null,
-    occurredAt: date(root.createTime ?? root.create_time ?? root.timestamp, receivedAt),
+    occurredAt: date(common?.createTime ?? root.createTime ?? root.create_time ?? root.timestamp, receivedAt),
     receivedAt: receivedAt.toISOString(),
   };
 }

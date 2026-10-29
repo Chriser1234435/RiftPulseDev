@@ -365,7 +365,7 @@ export default {
       if (typeof body.accountId !== "string" || !body.accountId || body.accountId.length > 128
         || typeof body.channelId !== "string" || !body.channelId || body.channelId.length > 128
         || typeof body.channelName !== "string" || body.channelName.length > 80
-        || (body.kind !== "chat" && body.kind !== "event") || !body.payload || typeof body.payload !== "object" || Array.isArray(body.payload)) {
+        || (body.kind !== "chat" && body.kind !== "event" && body.kind !== "viewers") || !body.payload || typeof body.payload !== "object" || Array.isArray(body.payload)) {
         return jsonError(400, "invalid_connector_payload", "Account, channel, kind, and event payload are required.", requestId);
       }
       const account = await env.DB.prepare("SELECT id FROM accounts WHERE id = ? LIMIT 1").bind(body.accountId).first<{ id: string }>();
@@ -384,6 +384,7 @@ export default {
       const now = new Date();
       let inserted = false;
       let eventKind: string | null = null;
+      let normalizedViewerCount: number | null = null;
       if (body.kind === "chat") {
         const message = normalizeTikTokChatMessage(body.payload, body.channelId, body.channelName, now);
         if (!message) return jsonError(400, "invalid_tiktok_chat", "TikTok chat payload is missing required fields.", requestId);
@@ -391,29 +392,39 @@ export default {
         if (!stored.ok) return jsonError(503, "chat_store_unavailable", "Could not store TikTok chat.", requestId);
         inserted = stored.inserted;
         if (inserted) await publishChatMessage(env, body.accountId, message);
+      } else if (body.kind === "viewers") {
+        const event = normalizeTikTokProviderEvent("roomUser", body.payload, body.channelId, body.channelName, now);
+        if (!event || event.kind !== "viewer_count") return jsonError(400, "invalid_tiktok_viewers", "TikTok viewer statistics are invalid.", requestId);
+        eventKind = event.kind;
+        normalizedViewerCount = event.quantity;
       } else {
         if (typeof body.eventName !== "string" || body.eventName.length > 80) return jsonError(400, "invalid_tiktok_event", "TikTok event name is required.", requestId);
         const event = normalizeTikTokProviderEvent(body.eventName, body.payload, body.channelId, body.channelName, now);
         if (!event) return jsonError(400, "invalid_tiktok_event", "TikTok event type or payload is not supported.", requestId);
-        const stored = await persistNormalizedProviderEvent(env.DB, body.accountId, event);
-        if (!stored.ok) return jsonError(503, "provider_event_store_unavailable", "Could not store TikTok stream event.", requestId);
-        inserted = stored.inserted;
         eventKind = event.kind;
-        if (inserted) await publishProviderEvent(env, body.accountId, event);
+        if (event.kind === "viewer_count") {
+          // ROOM_USER is periodic telemetry, not a user-facing event. Update the live
+          // count below without persisting/broadcasting a new feed row every interval.
+          normalizedViewerCount = event.quantity;
+        } else {
+          const stored = await persistNormalizedProviderEvent(env.DB, body.accountId, event);
+          if (!stored.ok) return jsonError(503, "provider_event_store_unavailable", "Could not store TikTok stream event.", requestId);
+          inserted = stored.inserted;
+          if (inserted) await publishProviderEvent(env, body.accountId, event);
+        }
       }
       const connection = await env.DB.prepare(
         "INSERT INTO provider_connections (id, account_id, provider, external_account_id, display_name, status, connected_at, updated_at) VALUES (?, ?, 'tiktok', ?, ?, 'connected', ?, ?) ON CONFLICT(account_id, provider) DO UPDATE SET external_account_id = excluded.external_account_id, display_name = excluded.display_name, status = 'connected', connected_at = COALESCE(provider_connections.connected_at, excluded.connected_at), updated_at = excluded.updated_at"
       ).bind(crypto.randomUUID(), body.accountId, body.channelId, body.channelName, now.toISOString(), now.toISOString()).run();
       if (!connection.success) return jsonError(503, "provider_connection_store_unavailable", "Could not update TikTok connector status.", requestId);
-      const payloadRecord = body.payload as Record<string, unknown>;
-      const rawViewerCount = payloadRecord.totalUserCount ?? payloadRecord.viewerCount;
-      const viewerCount = body.kind === "event" && eventKind === "viewer_count" && typeof rawViewerCount === "number"
-        && Number.isSafeInteger(rawViewerCount) && rawViewerCount >= 0 ? rawViewerCount : null;
+      const viewerCount = (body.kind === "viewers" || (body.kind === "event" && eventKind === "viewer_count"))
+        && normalizedViewerCount !== null && Number.isSafeInteger(normalizedViewerCount) && normalizedViewerCount >= 0
+        ? normalizedViewerCount : null;
       const health = await env.DB.prepare(
         "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'tiktok', 'healthy', ?, ?, NULL, ?) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'healthy', viewer_count = COALESCE(excluded.viewer_count, integration_health.viewer_count), observed_at = excluded.observed_at, detail_code = NULL, viewer_count_observed_at = COALESCE(excluded.viewer_count_observed_at, integration_health.viewer_count_observed_at)"
       ).bind(crypto.randomUUID(), body.accountId, viewerCount, now.toISOString(), viewerCount === null ? null : now.toISOString()).run();
       if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not update TikTok connector health.", requestId);
-      return Response.json({ status: inserted ? "accepted" : "duplicate", kind: body.kind, eventKind }, { headers: JSON_HEADERS });
+      return Response.json({ status: eventKind === "viewer_count" ? "accepted" : inserted ? "accepted" : "duplicate", kind: body.kind, eventKind }, { headers: JSON_HEADERS });
     }
 
     if (url.pathname === "/api/v1/providers/connections" && request.method === "GET") {
@@ -1442,7 +1453,7 @@ export default {
       if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
       if (!env.DB) return jsonError(503, "database_unavailable", "Database binding is not configured.", requestId);
       const result = await env.DB.prepare(
-        "SELECT * FROM (SELECT id, provider, external_message_id AS externalMessageId, channel_id AS channelId, channel_name AS channelName, sender_id AS senderId, sender_name AS senderName, text, sent_at AS sentAt, received_at AS receivedAt, badges_json AS badgesJson FROM chat_messages WHERE account_id = ? UNION ALL SELECT id, provider, external_event_id AS externalMessageId, channel_id AS channelId, channel_name AS channelName, COALESCE(actor_id, 'event') AS senderId, COALESCE(actor_name, 'Stream event') AS senderName, CASE kind WHEN 'follow' THEN 'followed the channel' WHEN 'subscription' THEN 'subscribed' WHEN 'gift' THEN 'sent ' || COALESCE(CASE WHEN quantity IS NOT NULL THEN CAST(quantity AS TEXT) || ' x ' ELSE '' END, '') || COALESCE(item_name, 'a gift') WHEN 'bits' THEN 'cheered ' || COALESCE(CAST(amount AS TEXT), '') || ' Bits' WHEN 'super_chat' THEN 'sent a Super Chat' WHEN 'donation' THEN 'donated ' || COALESCE(currency, '') || COALESCE(CAST(amount AS TEXT), '') WHEN 'like' THEN 'liked the stream' WHEN 'share' THEN 'shared the stream' WHEN 'raid' THEN 'raided the channel' WHEN 'member_join' THEN 'joined the stream' WHEN 'viewer_count' THEN 'Viewer count: ' || COALESCE(CAST(quantity AS TEXT), 'unknown') ELSE kind END || CASE WHEN message IS NOT NULL THEN ': ' || message ELSE '' END AS text, occurred_at AS sentAt, received_at AS receivedAt, '{}' AS badgesJson FROM provider_events WHERE account_id = ?) ORDER BY receivedAt DESC LIMIT 100",
+        "SELECT * FROM (SELECT id, provider, external_message_id AS externalMessageId, channel_id AS channelId, channel_name AS channelName, sender_id AS senderId, sender_name AS senderName, text, sent_at AS sentAt, received_at AS receivedAt, badges_json AS badgesJson FROM chat_messages WHERE account_id = ? UNION ALL SELECT id, provider, external_event_id AS externalMessageId, channel_id AS channelId, channel_name AS channelName, COALESCE(actor_id, 'event') AS senderId, COALESCE(actor_name, 'Stream event') AS senderName, CASE kind WHEN 'follow' THEN 'followed the channel' WHEN 'subscription' THEN 'subscribed' WHEN 'gift' THEN 'sent ' || COALESCE(CASE WHEN quantity IS NOT NULL THEN CAST(quantity AS TEXT) || ' x ' ELSE '' END, '') || COALESCE(item_name, 'a gift') WHEN 'bits' THEN 'cheered ' || COALESCE(CAST(amount AS TEXT), '') || ' Bits' WHEN 'super_chat' THEN 'sent a Super Chat' WHEN 'donation' THEN 'donated ' || COALESCE(currency, '') || COALESCE(CAST(amount AS TEXT), '') WHEN 'like' THEN 'liked the stream' WHEN 'share' THEN 'shared the stream' WHEN 'raid' THEN 'raided the channel' WHEN 'member_join' THEN 'joined the stream' WHEN 'viewer_count' THEN 'Viewer count: ' || COALESCE(CAST(quantity AS TEXT), 'unknown') ELSE kind END || CASE WHEN message IS NOT NULL THEN ': ' || message ELSE '' END AS text, occurred_at AS sentAt, received_at AS receivedAt, '{}' AS badgesJson FROM provider_events WHERE account_id = ? AND kind != 'viewer_count') ORDER BY receivedAt DESC LIMIT 100",
       ).bind(authContext.userId, authContext.userId).all<{
         id: string; provider: string; externalMessageId: string; channelId: string; channelName: string;
         senderId: string; senderName: string; text: string; sentAt: string; receivedAt: string; badgesJson: string;
