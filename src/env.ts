@@ -47,6 +47,8 @@ export interface Env {
   TIKTOK_CONNECTOR_INGEST_SECRET?: string;
   /** Base64-encoded 32-byte AES-256-GCM key for provider tokens; never commit the value. */
   TOKEN_ENCRYPTION_KEY?: string;
+  /** Optional upstream Railway API origin; Cloudflare forwards /api/* while keeping the browser same-origin. */
+  RAILWAY_API_URL?: string;
   /** Canonical base URL for auth redirects and cookies. */
   APP_BASE_URL?: string;
   /** Comma-separated exact trusted browser origins. */

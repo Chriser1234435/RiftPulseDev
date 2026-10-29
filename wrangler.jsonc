@@ -7,6 +7,7 @@
   "observability": { "enabled": true },
   "vars": {
     "APP_BASE_URL": "https://riftpulse-dev.chrismeten0.workers.dev",
+    "RAILWAY_API_URL": "https://riftpulse-api-development.up.railway.app",
     "TRUSTED_ORIGINS": "https://riftpulse-dev.chrismeten0.workers.dev",
     "ALLOW_REMOTE_DEV_AUTH": "true"
   },

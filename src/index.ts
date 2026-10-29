@@ -144,6 +144,19 @@ export default {
     const url = new URL(request.url);
     const requestId = crypto.randomUUID();
 
+    // Keep Cloudflare as the browser-facing origin, but run all API logic on Railway.
+    // This also keeps Better Auth cookies same-origin for the Cloudflare-hosted UI.
+    if (env.RAILWAY_API_URL && url.pathname.startsWith("/api/")) {
+      try {
+        const upstream = new URL(url.pathname + url.search, env.RAILWAY_API_URL);
+        const headers = new Headers(request.headers);
+        headers.delete("host");
+        return await fetch(new Request(upstream, new Request(request, { headers })));
+      } catch {
+        return jsonError(502, "api_upstream_unavailable", "The RiftPulse API service is temporarily unavailable.", requestId);
+      }
+    }
+
     if (url.pathname.startsWith("/api/auth/")) {
       const auth = createAuth(env);
       if (!auth) return jsonError(503, "auth_not_configured", "Local authentication is not configured. Use the local development origin and set the required secrets.", requestId);
