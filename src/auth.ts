@@ -10,9 +10,28 @@ export function createAuth(env: Env): AuthInstance | null {
 
   const baseURL = env.APP_BASE_URL ?? "http://127.0.0.1:5173";
   const isLocal = baseURL.startsWith("http://localhost:") || baseURL.startsWith("http://127.0.0.1:");
-  // This step only enables account creation on localhost. Remote auth stays disabled
-  // until email verification delivery, origin allowlisting, and production review exist.
-  if (!isLocal) return null;
+  const configuredOrigins = (env.TRUSTED_ORIGINS ?? baseURL).split(",").map(value => value.trim()).filter(Boolean);
+
+  // Remote sign-up is allowed only for an explicitly enabled, HTTPS workers.dev
+  // preview. This is a development-only account system, not production auth:
+  // email verification delivery and a production-domain review are still required.
+  let isAllowedRemotePreview = false;
+  try {
+    const origin = new URL(baseURL);
+    isAllowedRemotePreview = env.ALLOW_REMOTE_DEV_AUTH === "true"
+      && origin.protocol === "https:"
+      && origin.hostname.endsWith(".workers.dev")
+      && !origin.username
+      && !origin.password
+      && origin.pathname === "/"
+      && !origin.search
+      && !origin.hash
+      && configuredOrigins.length === 1
+      && configuredOrigins[0] === origin.origin;
+  } catch {
+    isAllowedRemotePreview = false;
+  }
+  if (!isLocal && !isAllowedRemotePreview) return null;
 
   const key = env.DB as object;
   const cached = cache.get(key);
@@ -22,7 +41,7 @@ export function createAuth(env: Env): AuthInstance | null {
     appName: "RiftPulse",
     baseURL,
     secret: env.BETTER_AUTH_SECRET,
-    trustedOrigins: (env.TRUSTED_ORIGINS ?? baseURL).split(",").map(value => value.trim()).filter(Boolean),
+    trustedOrigins: configuredOrigins,
     database: {
       dialect: new D1Dialect({ database: env.DB as never }),
       type: "sqlite",
@@ -32,6 +51,8 @@ export function createAuth(env: Env): AuthInstance | null {
       enabled: true,
       minPasswordLength: 8,
       maxPasswordLength: 128,
+      // Remote preview accounts are temporary test accounts. Production must
+      // enable verification and configure a real verification-email delivery path.
       requireEmailVerification: false,
     },
     session: {
@@ -41,7 +62,7 @@ export function createAuth(env: Env): AuthInstance | null {
     rateLimit: { enabled: true },
     advanced: {
       database: { generateId: "uuid" },
-      useSecureCookies: false,
+      useSecureCookies: !isLocal,
     },
     databaseHooks: {
       user: {

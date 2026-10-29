@@ -21,6 +21,8 @@ export interface Env {
   PAIRING_HMAC_KEY?: string;
   /** Separate Better Auth signing key. Never reuse the pairing key. */
   BETTER_AUTH_SECRET?: string;
+  /** Explicit opt-in for temporary authentication on the isolated HTTPS workers.dev preview only. */
+  ALLOW_REMOTE_DEV_AUTH?: string;
   /** Twitch OAuth application client ID. */
   TWITCH_CLIENT_ID?: string;
   /** Twitch OAuth application client secret; never commit the value. */
@@ -45,7 +47,7 @@ export interface Env {
   TIKTOK_CONNECTOR_INGEST_SECRET?: string;
   /** Base64-encoded 32-byte AES-256-GCM key for provider tokens; never commit the value. */
   TOKEN_ENCRYPTION_KEY?: string;
-  /** Canonical base URL for auth redirects and cookies. Local development only in Step 6. */
+  /** Canonical base URL for auth redirects and cookies. */
   APP_BASE_URL?: string;
   /** Comma-separated exact trusted browser origins. */
   TRUSTED_ORIGINS?: string;
