@@ -3,8 +3,9 @@ import { randomBytes } from "node:crypto";
 import test from "node:test";
 import type { D1Database, D1PreparedStatement, D1Result } from "../../src/env.ts";
 import {
-  disconnectProvider, persistProviderTokens, readProviderTokens,
+  disconnectProvider, ensureFreshTwitchProviderTokens, persistProviderTokens, readProviderTokens,
 } from "../../packages/shared/src/provider-connections.ts";
+import { encryptProviderToken } from "../../packages/shared/src/provider-token-vault.ts";
 
 class FakeStatement implements D1PreparedStatement {
   values: unknown[] = [];
@@ -56,6 +57,42 @@ test("provider token persistence stores ciphertext and can decrypt it for the ow
     assert.equal(read.refreshToken, refreshToken);
     assert.deepEqual(read.scopes, ["user:read:chat"]);
   }
+});
+
+
+test("Twitch token refresh validates the rotated token and persists only encrypted token material", async () => {
+  const db = new FakeDatabase();
+  const key = randomBytes(32).toString("base64");
+  const scopes = ["user:read:chat", "user:bot", "channel:bot"];
+  db.firstResult = {
+    accessTokenCiphertext: await encryptProviderToken("expired-access", key),
+    refreshTokenCiphertext: await encryptProviderToken("old-refresh", key),
+    tokenExpiresAt: "2026-10-29T11:00:00.000Z",
+    scopesJson: JSON.stringify(scopes),
+    status: "connected",
+    externalAccountId: "channel-1",
+    displayName: "Streamer",
+  };
+  const responses = [
+    new Response("{}", { status: 401 }),
+    new Response(JSON.stringify({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 }), { status: 200 }),
+    new Response(JSON.stringify({ client_id: "client-1", user_id: "channel-1", login: "streamer", scopes, expires_in: 3600 }), { status: 200 }),
+  ];
+  const fakeFetch: typeof fetch = async () => responses.shift() ?? new Response("{}", { status: 500 });
+  const now = new Date("2026-10-29T12:00:00.000Z");
+  const result = await ensureFreshTwitchProviderTokens(db, "acct-1", "client-1", "client-secret", key, now, fakeFetch);
+
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.accessToken, "new-access");
+    assert.equal(result.refreshToken, "new-refresh");
+    assert.equal(result.externalAccountId, "channel-1");
+    assert.deepEqual(result.scopes, scopes);
+    assert.equal(result.tokenExpiresAt, "2026-10-29T13:00:00.000Z");
+  }
+  assert.match(db.lastQuery, /access_token_ciphertext/);
+  assert.equal(JSON.stringify(db.lastValues).includes("new-access"), false);
+  assert.equal(JSON.stringify(db.lastValues).includes("new-refresh"), false);
 });
 
 test("provider disconnect clears stored token ciphertext", async () => {

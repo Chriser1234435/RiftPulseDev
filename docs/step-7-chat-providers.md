@@ -10,6 +10,7 @@ Status: **in progress**. Chat ingestion primitives, signed Twitch/Kick webhook r
 - D1 migration `0003_chat_foundation.sql` adds `chat_messages`, per-account/provider/external-message uniqueness, a recent-message index, and a separate viewer-count freshness timestamp.
 - D1 migration `0004_provider_oauth_states.sql` stores only a SHA-256 digest of high-entropy, short-lived OAuth state and supports single-use consumption.
 - AES-256-GCM token vault with random nonces and authenticated ciphertext; token persistence helpers never store raw provider access/refresh tokens.
+- On-demand Twitch token lifecycle helper validates access tokens, refreshes expired/near-expiry tokens, validates the rotated token and required scopes, and persists rotated tokens encrypted.
 - Twitch OAuth authorization-code start and callback: trusted-Origin check, HttpOnly/SameSite state cookie, one-time server-side state, exact same-origin callback validation, token exchange, Twitch token validation, required chat scope validation, encrypted token persistence, and health marked degraded until EventSub subscriptions exist.
 - Authenticated `GET /api/v1/providers/connections` returns safe status/display metadata only; authenticated `DELETE /api/v1/providers/{provider}` clears stored token ciphertext.
 - Signed Twitch EventSub callback handles challenge verification, chat notifications, and revocation; signed Kick webhook handles version 1 `chat.message.sent`. Both route only to mapped connected channels and persist idempotently.
@@ -20,7 +21,7 @@ Status: **in progress**. Chat ingestion primitives, signed Twitch/Kick webhook r
 ## Remaining before Step 7 is complete
 
 1. Register/configure the Twitch developer app locally and test the real OAuth round trip; no client credentials are present in the template.
-2. Implement Twitch EventSub subscription creation, token refresh/validation lifecycle, and reconnect/revocation recovery.
+2. Add scheduled Twitch token refresh, subscription recovery/reconciliation, and revocation recovery; the on-demand refresh helper and subscription-creation endpoint are implemented.
 3. Implement YouTube OAuth, live-chat discovery, streaming/list fallback, quota-aware polling, and viewer-count collection.
 4. Implement Kick OAuth, subscription creation, channel mapping validation, and real end-to-end webhook tests.
 5. Connect PCVR/Quest mod clients to the authenticated realtime endpoint in their separate game-specific adapters.

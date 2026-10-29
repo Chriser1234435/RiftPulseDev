@@ -67,7 +67,7 @@ export async function persistProviderTokens(
 }
 
 export type ProviderTokenReadResult =
-  | { ok: true; accessToken: string; refreshToken: string | null; tokenExpiresAt: string | null; scopes: string[] }
+  | { ok: true; accessToken: string; refreshToken: string | null; tokenExpiresAt: string | null; scopes: string[]; externalAccountId: string; displayName: string | null }
   | { ok: false; reason: "not_connected" | "database_error" | "token_decryption_failed" };
 
 export async function readProviderTokens(
@@ -78,14 +78,14 @@ export async function readProviderTokens(
 ): Promise<ProviderTokenReadResult> {
   let row: {
     accessTokenCiphertext: string | null; refreshTokenCiphertext: string | null;
-    tokenExpiresAt: string | null; scopesJson: string; status: string;
+    tokenExpiresAt: string | null; scopesJson: string; status: string; externalAccountId: string | null; displayName: string | null;
   } | null;
   try {
     row = await db.prepare(
-      "SELECT access_token_ciphertext AS accessTokenCiphertext, refresh_token_ciphertext AS refreshTokenCiphertext, token_expires_at AS tokenExpiresAt, scopes_json AS scopesJson, status FROM provider_connections WHERE account_id = ? AND provider = ? LIMIT 1",
+      "SELECT access_token_ciphertext AS accessTokenCiphertext, refresh_token_ciphertext AS refreshTokenCiphertext, token_expires_at AS tokenExpiresAt, scopes_json AS scopesJson, status, external_account_id AS externalAccountId, display_name AS displayName FROM provider_connections WHERE account_id = ? AND provider = ? LIMIT 1",
     ).bind(accountId, provider).first<{
       accessTokenCiphertext: string | null; refreshTokenCiphertext: string | null;
-      tokenExpiresAt: string | null; scopesJson: string; status: string;
+      tokenExpiresAt: string | null; scopesJson: string; status: string; externalAccountId: string | null; displayName: string | null;
     }>();
   } catch {
     return { ok: false, reason: "database_error" };
@@ -100,10 +100,101 @@ export async function readProviderTokens(
       ? await decryptProviderToken(row.refreshTokenCiphertext, encryptionKey) : null;
     return {
       ok: true, accessToken, refreshToken, tokenExpiresAt: row.tokenExpiresAt,
-      scopes: scopes as string[],
+      scopes: scopes as string[], externalAccountId: row.externalAccountId ?? "", displayName: row.displayName,
     };
   } catch {
     return { ok: false, reason: "token_decryption_failed" };
+  }
+}
+
+export type EnsureFreshTwitchTokenResult =
+  | { ok: true; accessToken: string; refreshToken: string | null; tokenExpiresAt: string | null; scopes: string[]; externalAccountId: string }
+  | { ok: false; reason: "not_connected" | "database_error" | "token_decryption_failed" | "missing_refresh_token" | "refresh_failed" | "token_validation_failed" | "storage_failed" };
+
+/**
+ * Validates the saved Twitch token, refreshes it when it is expired or within five minutes of expiry,
+ * validates the rotated token, then persists the new token pair encrypted.
+ */
+export async function ensureFreshTwitchProviderTokens(
+  db: D1Database,
+  accountId: string,
+  clientId: string,
+  clientSecret: string,
+  encryptionKey: string,
+  now = new Date(),
+  fetcher: typeof fetch = fetch,
+): Promise<EnsureFreshTwitchTokenResult> {
+  const current = await readProviderTokens(db, accountId, "twitch", encryptionKey);
+  if (!current.ok) return current;
+  if (!current.externalAccountId || !clientId || !clientSecret) return { ok: false, reason: "token_validation_failed" };
+
+  const requiredScopes = ["user:read:chat", "user:bot", "channel:bot"];
+  const validate = async (accessToken: string) => {
+    try {
+      const response = await fetcher("https://id.twitch.tv/oauth2/validate", {
+        headers: { authorization: "OAuth " + accessToken, accept: "application/json" },
+      });
+      if (!response.ok) return null;
+      const payload: unknown = await response.json();
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+      const data = payload as Record<string, unknown>;
+      const scopes = Array.isArray(data.scopes) && data.scopes.every(scope => typeof scope === "string")
+        ? data.scopes as string[] : null;
+      if (data.client_id !== clientId || data.user_id !== current.externalAccountId || !scopes
+        || !requiredScopes.every(scope => scopes.includes(scope))
+        || typeof data.expires_in !== "number" || !Number.isFinite(data.expires_in) || data.expires_in <= 0) return null;
+      return { scopes, expiresIn: data.expires_in, login: typeof data.login === "string" ? data.login : current.displayName };
+    } catch {
+      return null;
+    }
+  };
+
+  const currentValidation = await validate(current.accessToken);
+  if (currentValidation && currentValidation.expiresIn > 300) {
+    return {
+      ok: true, accessToken: current.accessToken, refreshToken: current.refreshToken,
+      tokenExpiresAt: new Date(now.getTime() + currentValidation.expiresIn * 1000).toISOString(),
+      scopes: currentValidation.scopes, externalAccountId: current.externalAccountId,
+    };
+  }
+  if (!current.refreshToken) return { ok: false, reason: "missing_refresh_token" };
+
+  try {
+    const response = await fetcher("https://id.twitch.tv/oauth2/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: "refresh_token",
+        refresh_token: current.refreshToken,
+      }),
+    });
+    if (!response.ok) return { ok: false, reason: "refresh_failed" };
+    const payload: unknown = await response.json();
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return { ok: false, reason: "refresh_failed" };
+    const token = payload as Record<string, unknown>;
+    if (typeof token.access_token !== "string" || !token.access_token
+      || typeof token.refresh_token !== "string" || !token.refresh_token
+      || typeof token.expires_in !== "number" || !Number.isFinite(token.expires_in) || token.expires_in <= 0) {
+      return { ok: false, reason: "refresh_failed" };
+    }
+
+    const validation = await validate(token.access_token);
+    if (!validation) return { ok: false, reason: "token_validation_failed" };
+    const tokenExpiresAt = new Date(now.getTime() + token.expires_in * 1000).toISOString();
+    const saved = await persistProviderTokens(db, {
+      accountId, provider: "twitch", externalAccountId: current.externalAccountId,
+      displayName: validation.login, accessToken: token.access_token, refreshToken: token.refresh_token,
+      tokenExpiresAt, scopes: validation.scopes, now,
+    }, encryptionKey);
+    if (!saved.ok) return { ok: false, reason: "storage_failed" };
+    return {
+      ok: true, accessToken: token.access_token, refreshToken: token.refresh_token,
+      tokenExpiresAt, scopes: validation.scopes, externalAccountId: current.externalAccountId,
+    };
+  } catch {
+    return { ok: false, reason: "refresh_failed" };
   }
 }
 

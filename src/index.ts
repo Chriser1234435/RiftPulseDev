@@ -6,7 +6,7 @@ import { persistNormalizedChatMessage } from "../packages/shared/src/chat-persis
 import { extractKickPublicKey, verifyKickWebhookSignature } from "../packages/shared/src/kick-webhook.ts";
 import { verifyTwitchEventSubSignature } from "../packages/shared/src/twitch-eventsub.ts";
 import { createOAuthState, digestOAuthState } from "../packages/shared/src/oauth-state.ts";
-import { disconnectProvider, persistProviderTokens, readProviderTokens } from "../packages/shared/src/provider-connections.ts";
+import { disconnectProvider, ensureFreshTwitchProviderTokens, persistProviderTokens } from "../packages/shared/src/provider-connections.ts";
 import { claimPairingChallenge, createPairingChallenge } from "../packages/shared/src/pairing.ts";
 import { createAuth } from "./auth.ts";
 export { ChatRoom } from "./chat-room.ts";
@@ -390,26 +390,14 @@ export default {
       ).bind(authContext.userId).first<{ externalAccountId: string | null }>();
       if (!connection?.externalAccountId) return jsonError(409, "twitch_not_connected", "Connect a Twitch account before enabling chat events.", requestId);
 
-      const stored = await readProviderTokens(env.DB, authContext.userId, "twitch", env.TOKEN_ENCRYPTION_KEY);
-      if (!stored.ok) return jsonError(409, "twitch_token_unavailable", "Reconnect Twitch before enabling chat events.", requestId);
+      const stored = await ensureFreshTwitchProviderTokens(
+        env.DB, authContext.userId, env.TWITCH_CLIENT_ID, env.TWITCH_CLIENT_SECRET, env.TOKEN_ENCRYPTION_KEY,
+      );
+      if (!stored.ok) return jsonError(409, "twitch_token_unavailable", "Reconnect Twitch and grant the required chat permissions.", requestId);
+      if (stored.externalAccountId !== connection.externalAccountId) {
+        return jsonError(409, "twitch_account_mismatch", "Reconnect the intended Twitch account before enabling chat events.", requestId);
+      }
       try {
-        const validationResponse = await fetch("https://id.twitch.tv/oauth2/validate", {
-          headers: { authorization: "OAuth " + stored.accessToken, accept: "application/json" },
-        });
-        if (!validationResponse.ok) return jsonError(409, "twitch_token_expired", "Reconnect Twitch to refresh its authorization.", requestId);
-        const validationPayload: unknown = await validationResponse.json();
-        if (!validationPayload || typeof validationPayload !== "object" || Array.isArray(validationPayload)) {
-          return jsonError(502, "twitch_validation_failed", "Twitch returned an invalid token validation response.", requestId);
-        }
-        const validation = validationPayload as Record<string, unknown>;
-        const validationScopes = Array.isArray(validation.scopes) && validation.scopes.every(scope => typeof scope === "string")
-          ? validation.scopes as string[] : null;
-        const requiredScopes = ["user:read:chat", "user:bot", "channel:bot"];
-        if (validation.client_id !== env.TWITCH_CLIENT_ID || validation.user_id !== connection.externalAccountId
-          || !validationScopes || !requiredScopes.every(scope => validationScopes.includes(scope))) {
-          return jsonError(409, "twitch_scope_mismatch", "Reconnect Twitch and grant the required chat permissions.", requestId);
-        }
-
         const appTokenResponse = await fetch("https://id.twitch.tv/oauth2/token", {
           method: "POST",
           headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },

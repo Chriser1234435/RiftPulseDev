@@ -85,7 +85,7 @@ Requires an authenticated session and trusted `Origin`. Creates a high-entropy, 
 
 ### `GET /api/v1/providers/twitch/callback`
 
-Consumes state once and requires a matching same-browser cookie. Exchanges the authorization code, validates the resulting token with Twitch, requires `user:read:chat`, `user:bot`, and `channel:bot` for the webhook-based chat flow, and stores access/refresh tokens using AES-256-GCM encryption. It redirects to the local dashboard with a non-sensitive status. Token refresh and subscription recovery remain unfinished.
+Consumes state once and requires a matching same-browser cookie. Exchanges the authorization code, validates the resulting token with Twitch, requires `user:read:chat`, `user:bot`, and `channel:bot` for the webhook-based chat flow, and stores access/refresh tokens using AES-256-GCM encryption. It redirects to the local dashboard with a non-sensitive status. On-demand token refresh is available during subscription setup; scheduled refresh and subscription recovery remain unfinished.
 
 ### `POST /api/v1/providers/twitch/eventsub/subscribe`
 
