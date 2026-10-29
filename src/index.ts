@@ -1,12 +1,33 @@
 import type { Env } from "./env.ts";
 import { API_VERSION, PROVIDERS, SUPPORTED_MODULES, validateCreatePairingChallenge, validateClaimPairing } from "../packages/contracts/src/v1.ts";
 import type { ProviderHealthSnapshot } from "../packages/contracts/src/chat-v1.ts";
-import { aggregateViewerCounts, emptyProviderHealth } from "../packages/shared/src/chat.ts";
+import { aggregateViewerCounts, emptyProviderHealth, normalizeKickChatMessage } from "../packages/shared/src/chat.ts";
+import { persistNormalizedChatMessage } from "../packages/shared/src/chat-persistence.ts";
+import { extractKickPublicKey, verifyKickWebhookSignature } from "../packages/shared/src/kick-webhook.ts";
 import { claimPairingChallenge, createPairingChallenge } from "../packages/shared/src/pairing.ts";
 import { createAuth } from "./auth.ts";
+export { ChatRoom } from "./chat-room.ts";
 
 const VERSION = "0.1.0-dev";
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
+
+let kickPublicKeyCache: { value: string; expiresAt: number } | null = null;
+
+async function loadKickPublicKey(): Promise<string | null> {
+  if (kickPublicKeyCache && kickPublicKeyCache.expiresAt > Date.now()) return kickPublicKeyCache.value;
+  try {
+    const response = await fetch("https://api.kick.com/public/v1/public-key", {
+      headers: { accept: "application/json, text/plain" },
+    });
+    if (!response.ok) return null;
+    const key = extractKickPublicKey(await response.text());
+    if (!key) return null;
+    kickPublicKeyCache = { value: key, expiresAt: Date.now() + 15 * 60 * 1000 };
+    return key;
+  } catch {
+    return null;
+  }
+}
 
 function jsonError(status: number, code: string, message: string, requestId?: string): Response {
   return Response.json({ error: { code, message, ...(requestId ? { requestId } : {}) } }, {
@@ -35,6 +56,25 @@ async function getAuthContext(request: Request, env: Env): Promise<AuthContext> 
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session?.user?.id) return { ok: false, status: 401, code: "authentication_required", message: "Sign in to RiftPulse to continue." };
   return { ok: true, userId: session.user.id, auth };
+}
+
+async function publishChatMessage(env: Env, accountId: string, message: {
+  id: string; provider: "twitch" | "youtube" | "kick" | "tiktok"; externalMessageId: string;
+  channelId: string; channelName: string; senderId: string; senderName: string; text: string;
+  sentAt: string; receivedAt: string; badges: { moderator: boolean; subscriber: boolean; verified: boolean };
+}): Promise<void> {
+  if (!env.CHAT_ROOM) return;
+  try {
+    const roomId = env.CHAT_ROOM.idFromName(accountId);
+    const room = env.CHAT_ROOM.get(roomId);
+    await room.fetch(new Request("https://chat-room/publish", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "chat.message", message }),
+    }));
+  } catch {
+    // Chat history remains durable; realtime delivery is best-effort.
+  }
 }
 
 function isTrustedMutationOrigin(request: Request, env: Env): boolean {
@@ -137,6 +177,82 @@ export default {
       let settings: unknown = {};
       try { settings = JSON.parse(nextSettings); } catch { settings = {}; }
       return Response.json({ moduleKey, enabled: enabled === 1, settings, updatedAt: now }, { headers: JSON_HEADERS });
+    }
+
+    if (url.pathname === "/api/v1/realtime" && request.method === "GET") {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!isTrustedMutationOrigin(request, env)) return jsonError(403, "untrusted_origin", "WebSocket origin is not trusted.", requestId);
+      if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+        return jsonError(426, "websocket_upgrade_required", "Use a WebSocket connection.", requestId);
+      }
+      if (!env.CHAT_ROOM) return jsonError(503, "realtime_unavailable", "Realtime chat is not configured.", requestId);
+      const roomId = env.CHAT_ROOM.idFromName(authContext.userId);
+      return env.CHAT_ROOM.get(roomId).fetch(new Request("https://chat-room/connect", request));
+    }
+
+    if (url.pathname === "/api/v1/providers/kick/webhook" && request.method === "POST") {
+      if (!env.DB) return jsonError(503, "database_unavailable", "Database binding is not configured.", requestId);
+      const declaredLength = Number(request.headers.get("content-length") ?? "0");
+      if (Number.isFinite(declaredLength) && declaredLength > 65_536) {
+        return jsonError(413, "body_too_large", "Webhook body exceeds 64 KiB.", requestId);
+      }
+      const rawBody = await request.text();
+      if (new TextEncoder().encode(rawBody).byteLength > 65_536) {
+        return jsonError(413, "body_too_large", "Webhook body exceeds 64 KiB.", requestId);
+      }
+
+      const messageId = request.headers.get("Kick-Event-Message-Id");
+      const timestamp = request.headers.get("Kick-Event-Message-Timestamp");
+      const signature = request.headers.get("Kick-Event-Signature");
+      const eventType = request.headers.get("Kick-Event-Type");
+      const eventVersion = request.headers.get("Kick-Event-Version");
+      if (!messageId || !timestamp || !signature || !eventType || !eventVersion) {
+        return jsonError(400, "webhook_headers_missing", "Required Kick webhook headers are missing.", requestId);
+      }
+      const publicKey = await loadKickPublicKey();
+      if (!publicKey) return jsonError(503, "kick_public_key_unavailable", "Could not validate the current Kick webhook key.", requestId);
+      const validSignature = await verifyKickWebhookSignature(
+        { messageId, timestamp, signature, rawBody }, publicKey,
+      );
+      if (!validSignature) return jsonError(401, "invalid_webhook_signature", "Kick webhook signature or timestamp is invalid.", requestId);
+      if (eventType !== "chat.message.sent" || eventVersion !== "1") {
+        return Response.json({ status: "ignored", reason: "unsupported_event" }, { status: 202, headers: JSON_HEADERS });
+      }
+
+      let payload: unknown;
+      try { payload = JSON.parse(rawBody) as unknown; }
+      catch { return jsonError(400, "invalid_webhook_json", "Webhook body is not valid JSON.", requestId); }
+      const message = normalizeKickChatMessage(payload);
+      if (!message) return jsonError(400, "invalid_chat_event", "Kick chat event is missing required message fields.", requestId);
+
+      const connections = await env.DB.prepare(
+        "SELECT account_id FROM provider_connections WHERE provider = 'kick' AND external_account_id = ? AND status = 'connected'",
+      ).bind(message.channelId).all<{ account_id: string }>();
+      if (!connections.success) return jsonError(503, "provider_connection_lookup_failed", "Could not route the Kick event.", requestId);
+      if (!connections.results?.length) {
+        return Response.json({ status: "ignored", reason: "channel_not_connected" }, { status: 202, headers: JSON_HEADERS });
+      }
+
+      let insertedMessages = 0;
+      const now = new Date().toISOString();
+      for (const connection of connections.results) {
+        const persisted = await persistNormalizedChatMessage(env.DB, connection.account_id, message);
+        if (!persisted.ok) return jsonError(503, "chat_store_unavailable", "Could not store the Kick chat event.", requestId);
+        if (persisted.inserted) {
+          insertedMessages++;
+          await publishChatMessage(env, connection.account_id, message);
+        }
+        const health = await env.DB.prepare(
+          "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'kick', 'healthy', NULL, ?, NULL, NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'healthy', observed_at = excluded.observed_at, detail_code = NULL",
+        ).bind(crypto.randomUUID(), connection.account_id, now).run();
+        if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not update Kick provider health.", requestId);
+      }
+      return Response.json({
+        status: insertedMessages > 0 ? "accepted" : "duplicate",
+        deliveredAccounts: connections.results.length,
+        insertedMessages,
+      }, { headers: JSON_HEADERS });
     }
 
     if (url.pathname === "/api/v1/chat/messages" && request.method === "GET") {

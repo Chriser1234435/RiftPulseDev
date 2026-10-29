@@ -15,6 +15,7 @@ export interface D1Database {
 }
 export interface Env {
   DB?: D1Database;
+  CHAT_ROOM?: { idFromName(name: string): unknown; get(id: unknown): { fetch(request: Request): Promise<Response> } };
   ASSETS?: { fetch(request: Request): Promise<Response> };
   /** Set with a local-only .dev.vars file or Wrangler secret; never commit the value. */
   PAIRING_HMAC_KEY?: string;

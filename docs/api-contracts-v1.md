@@ -59,6 +59,16 @@ Requires an authenticated account session. Returns up to 100 recent normalized m
 
 Requires an authenticated account session. Returns health snapshots for the four provider keys and a viewer aggregate. Only fresh counts from connected/degraded providers contribute. `total: null` means unknown, not zero; `partial: true` means at least one count is fresh while other providers are missing or stale. The API is a read model; provider ingestion and viewer-count updates are still being implemented.
 
+### `POST /api/v1/providers/kick/webhook`
+
+Public provider callback; it does not use a browser account session. It requires Kick message ID, timestamp, signature, event type, and version headers. The receiver fetches and briefly caches Kick's current public key, verifies the RSA-SHA256 signature over `messageId.timestamp.rawBody`, rejects stale timestamps, caps the body at 64 KiB, accepts version 1 `chat.message.sent` events, and routes only to connected channel mappings. Stored messages are idempotent by account/provider/message ID. Unsupported events and unmapped channels receive a successful ignored response. OAuth and subscription setup remain unfinished.
+
+Implementation references: [Kick webhook security](https://github.com/KickEngineering/KickDevDocs/blob/main/events/webhook-security.md) and [Twitch EventSub verification](https://dev.twitch.tv/docs/eventsub/handling-webhook-events/).
+
+### `GET /api/v1/realtime`
+
+Requires an authenticated session, a trusted browser `Origin`, and a WebSocket upgrade. The Worker selects a per-account Durable Object, which sends new normalized `chat.message` events to connected clients. Realtime delivery is best-effort; clients can recover missed messages through `GET /api/v1/chat/messages`.
+
 ## Database entities
 
 - `accounts`: stable internal account ID and lifecycle status; no auth vendor-specific columns.

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { generateKeyPairSync, sign } from "node:crypto";
 import test from "node:test";
+import { extractKickPublicKey, verifyKickWebhookSignature } from "../../packages/shared/src/kick-webhook.ts";
 import {
   ChatMessageDeduplicator, aggregateViewerCounts, emptyProviderHealth, normalizeKickChatMessage,
   normalizeTwitchChatMessage, normalizeYouTubeChatMessage, reconnectDelayMs,
@@ -68,4 +70,23 @@ test("viewer aggregation distinguishes unknown, zero, stale, and partial data", 
   assert.equal(result.partial, true);
   assert.deepEqual(result.includedProviders, ["twitch", "youtube"]);
   assert.equal(aggregateViewerCounts([emptyProviderHealth("twitch", now)], now).total, null);
+});
+
+test("verifies Kick webhook signatures and rejects stale or modified payloads", async () => {
+  const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const publicKeyPem = publicKey.export({ type: "spki", format: "pem" }).toString();
+  const messageId = "01JTESTMESSAGEID";
+  const timestamp = now.toISOString();
+  const rawBody = JSON.stringify({ message_id: "kick-message-1", content: "hello" });
+  const signed = messageId + "." + timestamp + "." + rawBody;
+  const signature = sign("RSA-SHA256", Buffer.from(signed), privateKey).toString("base64");
+  const input = { messageId, timestamp, signature, rawBody };
+
+  assert.equal(extractKickPublicKey(publicKeyPem), publicKeyPem.trim());
+  assert.equal(extractKickPublicKey(JSON.stringify({ data: { public_key: publicKeyPem } })), publicKeyPem.trim());
+  assert.equal(extractKickPublicKey("not a key"), null);
+  assert.equal(await verifyKickWebhookSignature(input, publicKeyPem, now), true);
+  assert.equal(await verifyKickWebhookSignature({ ...input, rawBody: rawBody + " " }, publicKeyPem, now), false);
+  assert.equal(await verifyKickWebhookSignature(input, publicKeyPem, new Date(now.getTime() + 10 * 60_000)), false);
+  assert.equal(await verifyKickWebhookSignature({ ...input, signature: "not-base64" }, publicKeyPem, now), false);
 });

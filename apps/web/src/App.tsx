@@ -119,6 +119,48 @@ function App() {
   }, [user?.id, refreshDevices, refreshChat, refreshProviderHealth]);
 
   useEffect(() => {
+    if (!user?.id || !enabled.chat) return;
+    let disposed = false;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | undefined;
+    let attempts = 0;
+
+    const connect = () => {
+      if (disposed) return;
+      const endpoint = new URL("/api/v1/realtime", window.location.href);
+      endpoint.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      socket = new WebSocket(endpoint);
+      socket.onopen = () => { attempts = 0; };
+      socket.onmessage = event => {
+        try {
+          const payload = JSON.parse(String(event.data));
+          const message = payload?.type === "chat.message" ? payload.message as ChatMessage : null;
+          if (!message || typeof message.id !== "string" || typeof message.text !== "string"
+            || typeof message.senderName !== "string" || !providers.some(provider => provider.key === message.provider)) return;
+          setChatMessages(current => [...current.filter(item => item.id !== message.id), message].slice(-100));
+          setChatError(false);
+        } catch {
+          // Ignore malformed frames; chat history remains available via the API.
+        }
+      };
+      socket.onclose = () => {
+        if (disposed) return;
+        const delay = Math.min(30_000, 1000 * (2 ** Math.min(attempts, 5)));
+        attempts++;
+        reconnectTimer = window.setTimeout(connect, delay);
+      };
+      socket.onerror = () => socket?.close();
+    };
+
+    connect();
+    return () => {
+      disposed = true;
+      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+      socket?.close();
+    };
+  }, [user?.id, enabled.chat]);
+
+  useEffect(() => {
     let alive = true;
     fetch("/api/v1/health").then(r => { if (!r.ok) throw new Error("API unavailable"); return r.json(); })
       .then(() => { if (alive) setApiStatus("online"); })

@@ -5,6 +5,8 @@
   "main": "./src/index.ts",
   "upload_source_maps": true,
   "observability": { "enabled": true },
+  "durable_objects": { "bindings": [{ "name": "CHAT_ROOM", "class_name": "ChatRoom" }] },
+  "migrations": [{ "tag": "v1-chat-room", "new_sqlite_classes": ["ChatRoom"] }],
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application"

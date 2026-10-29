@@ -47,6 +47,11 @@ assert.equal(providerHealth.providers.length, 4);
 assert.equal(providerHealth.viewers.total, null, "unknown viewer counts must not be represented as zero");
 assert.equal(providerHealth.providers.find(provider => provider.provider === "tiktok").state, "unsupported");
 
+const realtimeUnauthenticated = await fetch(`${base}/api/v1/realtime`, { headers: { origin } });
+assert.equal(realtimeUnauthenticated.status, 401, "realtime must require an account session");
+const realtimeWithoutUpgrade = await fetch(`${base}/api/v1/realtime`, { headers: { cookie, origin } });
+assert.equal(realtimeWithoutUpgrade.status, 426, "realtime must require a WebSocket upgrade");
+
 const noOriginPatch = await fetch(`${base}/api/v1/settings/modules/chat`, {
   method: "PATCH", headers: { cookie, "content-type": "application/json" },
   body: JSON.stringify({ enabled: false }),
