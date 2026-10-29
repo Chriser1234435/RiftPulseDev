@@ -1,6 +1,6 @@
 # RiftPulseDev - Proposed Roadmap
 
-Status: Step 6 complete for the local website/authentication foundation. Step 7 has not started and requires explicit authorization.
+Status: Step 6 local website/auth foundation complete. Step 7 chat/provider foundation is in progress. Production authentication and deployment remain gated on separate release checks and explicit authorization.
 
 ## Step 3 - Architecture and design
 - [x] Define V1 scope: Chat + BSR Song Request only.
@@ -26,28 +26,45 @@ Status: Step 6 complete for the local website/authentication foundation. Step 7 
 - [x] Add the initial D1 schema and local-only migration workflow.
 - [x] Add health/version and pairing challenge/status endpoints.
 - [x] Add HMAC-based code digest storage, five-minute expiry, active collision checks, and per-device challenge limits.
-- [x] Add a one-time claim helper and keep the public claim route gated until verified website authentication exists.
-- [x] Validate TypeScript, unit tests, isolated schema constraints, local migration, and Worker build.
+- [x] Add one-time claim helper and authenticated claim route.
+- [x] Add authenticated module settings, device listing and revocation routes with origin checks for mutations.
+- [x] Validate TypeScript, unit tests, isolated schema constraints, local migrations, and Worker build.
 
-## Step 6 - Website and authentication
-- [x] Build the responsive RiftPulse dashboard, module cards, integration UI, settings/help dialogs, and pairing form.
-- [x] Add local-only Better Auth sign-up/sign-in/session/sign-out backed by D1.
-- [x] Add authenticated per-account module settings persistence and BSR command preference storage.
-- [x] Add authenticated device listing, claim, and revocation.
-- [x] Add trusted-Origin checks for cookie-authenticated mutation routes.
-- [x] Verify cookie flags, local auth/device/settings smoke tests, migration schema, TypeScript, and Worker/client build.
-- [x] Keep remote auth and Cloudflare deployment disabled until email delivery and production security configuration are approved.
+## Step 6 - Website and authentication (local foundation complete)
+- [x] Build responsive dark RiftPulse dashboard and sign-in/account screens.
+- [x] Add sign-up/sign-in using Better Auth, local-only D1 schema, session lookup and sign-out.
+- [x] Persist module toggles and BSR command settings per account.
+- [x] Add device pairing, device listing and revocation UI/API.
+- [x] Add provider connection UI with explicit preview-only states.
+- [x] Test session cookie flags, origin checks, settings persistence, pairing claim, device list/revoke, and sign-out.
+- [x] Visually review the entry screen at desktop and narrow layout sizes; adjust mobile breakpoint.
+- [x] Ensure build output removes .dev.vars copies after bundling.
+- [ ] Production email verification and production-safe origin/cookie configuration remain release gates; remote authentication stays disabled.
 
-## Step 7 - Chat and providers (not started; requires authorization)
-Implement normalized events, deduplication, reconnect handling, provider health, viewer aggregation, and chat display. Validate each provider's current OAuth/API requirements. Prove TikTok runtime feasibility in isolation.
+## Step 7 - Chat and providers (in progress)
+- [x] Add shared normalized chat message and provider health contracts.
+- [x] Normalize Twitch EventSub, YouTube Live Chat, and official Kick chat webhook payloads.
+- [x] Add bounded TTL deduplication and full-jitter reconnect backoff helpers.
+- [x] Aggregate only fresh provider viewer counts; unknown stays null and partial data is explicit.
+- [x] Add D1 chat message persistence with per-account/provider/message uniqueness and viewer-count freshness.
+- [x] Add authenticated chat-history and provider-health APIs plus dashboard chat/provider-health display.
+- [x] Add Kick webhook signature/timestamp verification using the current public key and idempotent message persistence.
+- [x] Apply the chat foundation migration to the local D1 database and extend schema/unit tests.
+- [ ] Implement Twitch EventSub OAuth, connection lifecycle, and recovery.
+- [ ] Implement YouTube live-chat streaming and fallback handling.
+- [ ] Finish Kick OAuth, webhook subscription setup, and live end-to-end testing.
+- [ ] Add Durable Object WebSocket fan-out for PCVR/Quest clients.
+- [ ] Prove a compliant TikTok LIVE connector in isolation; do not scrape undocumented/private endpoints.
+- [ ] Run provider mock/integration tests and verify fresh viewer counts end to end.
+- [ ] Keep provider UI buttons preview-only until actual authorization and status are wired.
 
-## Step 8 - BSR Song Request
+## Step 8 - BSR Song Request (not started)
 Implement command parsing, BeatSaver metadata validation, cooldowns, queue rules, and explicit error states.
 
-## Step 9 - PCVR and Quest integration
+## Step 9 - PCVR and Quest integration (not started)
 Build the in-game pairing flow and UI for each target; test them separately on actual devices.
 
-## Step 10 - End-to-end validation and deployment
+## Step 10 - End-to-end validation and deployment (not started)
 Run security, API, provider-mock, PCVR, and Quest tests. Deploy only to isolated Cloudflare development resources and a development hostname after explicit authorization. Test the actual development domain, not only previews.
 
 ## V1 acceptance criteria
