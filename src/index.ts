@@ -151,7 +151,17 @@ export default {
         const upstream = new URL(url.pathname + url.search, env.RAILWAY_API_URL);
         const headers = new Headers(request.headers);
         headers.delete("host");
-        return await fetch(new Request(upstream, new Request(request, { headers })));
+        const init: RequestInit & { duplex?: "half" } = {
+          method: request.method,
+          headers,
+          redirect: request.redirect,
+          signal: request.signal,
+        };
+        if (request.method !== "GET" && request.method !== "HEAD") {
+          init.body = request.body;
+          init.duplex = "half";
+        }
+        return await fetch(new Request(upstream, init));
       } catch {
         return jsonError(502, "api_upstream_unavailable", "The RiftPulse API service is temporarily unavailable.", requestId);
       }
