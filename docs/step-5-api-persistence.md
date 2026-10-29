@@ -29,10 +29,10 @@ Provider access and refresh token columns are placeholders for ciphertext only. 
 ## Validation results
 
 - `npm test` passed: strict TypeScript check, 15 unit tests, isolated SQLite schema/constraint test, and Worker build.
-- Local Wrangler D1 migration `0001_initial.sql` applied successfully; a subsequent migration listing reported no pending migrations.
+- Local Wrangler D1 migration `0001_initial.sql` is applied; a migration listing reports no pending migrations.
 - Local schema inventory showed all nine application tables plus Wrangler migration metadata; `PRAGMA foreign_key_check` returned no violations.
-- Local API smoke test verified health/version, challenge creation without echoing the code, and challenge status. Claim remains blocked until website authentication exists.
-- Temporary `.dev.vars` test secret was removed. No production resources were changed.
+- Worker route tests cover health/version, challenge creation without echoing the code, challenge status, validation failures, collision/active-challenge limits, and rejection of unauthenticated claims. The one-time claim helper has separate replay, expiry, and account-ownership tests.
+- Verified that `.dev.vars` and `dist/worker/.dev.vars` are absent. No secret is committed and no production resources were changed.
 
 ## Local development
 
