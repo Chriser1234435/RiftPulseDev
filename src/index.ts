@@ -254,6 +254,38 @@ export default {
       return Response.json({ moduleKey, enabled: enabled === 1, settings, updatedAt: now }, { headers: JSON_HEADERS });
     }
 
+    if (url.pathname === "/api/v1/providers/tiktok/settings" && (request.method === "GET" || request.method === "PUT")) {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "TikTok settings storage is not configured.", requestId);
+      if (request.method === "PUT") {
+        if (!isTrustedMutationOrigin(request, env)) return jsonError(403, "untrusted_origin", "Request origin is not trusted.", requestId);
+        let body: unknown;
+        try { body = await request.json(); } catch { return jsonError(400, "invalid_json", "Request body must be valid JSON.", requestId); }
+        if (!body || typeof body !== "object" || Array.isArray(body) || typeof (body as Record<string, unknown>).username !== "string") {
+          return jsonError(400, "invalid_tiktok_username", "Enter a public TikTok username.", requestId);
+        }
+        const username = ((body as Record<string, unknown>).username as string).trim().replace(/^@/, "");
+        if (username.length > 24 || (username !== "" && !/^[A-Za-z0-9._]{2,24}$/.test(username))) {
+          return jsonError(400, "invalid_tiktok_username", "Enter the username only (2–24 letters, numbers, dots, or underscores); do not paste a URL.", requestId);
+        }
+        const now = new Date().toISOString();
+        const saved = await env.DB.prepare(
+          "INSERT INTO provider_settings (account_id, provider, settings_json, updated_at) VALUES (?, 'tiktok', ?, ?) ON CONFLICT(account_id, provider) DO UPDATE SET settings_json = excluded.settings_json, updated_at = excluded.updated_at",
+        ).bind(authContext.userId, JSON.stringify({ username }), now).run();
+        if (!saved.success) return jsonError(503, "tiktok_settings_store_unavailable", "Could not save TikTok settings.", requestId);
+        return Response.json({ accountId: authContext.userId, username, saved: true, updatedAt: now }, { headers: JSON_HEADERS });
+      }
+      const row = await env.DB.prepare(
+        "SELECT settings_json AS settingsJson, updated_at AS updatedAt FROM provider_settings WHERE account_id = ? AND provider = 'tiktok' LIMIT 1",
+      ).bind(authContext.userId).first<{ settingsJson: string; updatedAt: string }>();
+      let username = "";
+      try {
+        const settings = row ? JSON.parse(row.settingsJson) as Record<string, unknown> : {};
+        if (typeof settings.username === "string") username = settings.username;
+      } catch { /* treat malformed settings as empty */ }
+      return Response.json({ accountId: authContext.userId, username, saved: !!row, updatedAt: row?.updatedAt ?? null }, { headers: JSON_HEADERS });
+    }
     if (url.pathname === "/api/v1/providers/tiktok/ingest" && request.method === "POST") {
       if (!env.DB || !env.TIKTOK_CONNECTOR_INGEST_SECRET || !env.CHAT_ROOM) {
         return jsonError(503, "tiktok_connector_not_configured", "The isolated TikTok connector bridge is not configured.", requestId);
