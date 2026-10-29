@@ -1,0 +1,5 @@
+﻿cmake_minimum_required(VERSION 3.22)
+project(riftpulse_quest_toolchain_smoke LANGUAGES CXX)
+add_library(riftpulse_quest_toolchain_smoke SHARED src/main.cpp)
+target_compile_features(riftpulse_quest_toolchain_smoke PRIVATE cxx_std_20)
+target_link_libraries(riftpulse_quest_toolchain_smoke PRIVATE log)

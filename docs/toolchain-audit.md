@@ -1,48 +1,58 @@
-# Step 4 — Toolchain audit
+# Step 4 — Toolchain audit and validation
 
 Date: 2026-10-29
 
-## Verified on the Windows development machine
+## Step 4 outcome
 
-- Node.js `24.22.1` and npm `11.19.1` are installed. PowerShell blocks the `npm.ps1` shim under the current execution policy; invoking `npm.cmd` works. No execution-policy changes were made.
-- Portable Git `2.56.0.windows.4` is available at `C:\Users\chris\Documents\RiftPulse Development\tools\MinGit\cmd\git.exe`.
-- .NET 8 SDK `8.0.427` is installed; .NET 8 and .NET 10 runtimes are present.
-- Beat Saber PCVR instance `1.40.8_7379` exists at `C:\Users\chris\BSManager\BSInstances\1.40.8`.
-- User confirmed the standalone Quest Beat Saber version is also `1.40.8_7379`.
-- PCVR assembly inspection confirmed `IPA.Injector.dll` assembly version `4.3.6.0`, `IPA.Loader.dll` assembly version `2.0.0.0`, and `BSML.dll` assembly version `1.12.5.0` (`1.12.5+bs.1.40.0`). The game's `Main.dll` and Unity managed assemblies are present. A minimal mod compile/load test remains outstanding.
-- Android SDK Platform-Tools `37.0.1` was installed through WinGet; a fresh shell is needed for its PATH update to be visible. No Quest device connection/build has yet been verified.
-- CMake `4.4.4` installation was started through WinGet but appears to be waiting on Windows Installer elevation/consent. Installation is not yet confirmed. Ninja installation was queued after CMake and is also not confirmed.
-- Java/JDK, Android NDK, QPM, Unity Hub/Editor, and Visual Studio were not found in PATH or checked common install paths. This is a preliminary check, not proof that no copy exists elsewhere.
-- `.gitignore` ignores `.env`, `.dev.vars`, and generated web folders such as `node_modules` and `dist`.
+**Complete for local toolchain setup and compile validation.** Both PCVR and standalone Quest builds have passed compile-only smoke tests, and the QPM Quest template with its real mod dependencies has built successfully. Runtime loading inside Beat Saber and a connected Quest device have not been tested; ADB currently reports no attached devices.
 
-## Repository and web toolchain
+## Verified local development tools
 
-- Local Git repository tracks `origin/main` at `https://github.com/Chriser1234435/RiftPulseDev.git`; the remote's existing initial commit was fetched successfully.
-- Clean folder skeleton: `apps/web`, `apps/api`, `packages/contracts`, `packages/shared`, `mods/pcvr`, `mods/quest`, `tests/unit`, and `tests/integration`.
-- Root tooling dependencies are pinned in `package.json` and `package-lock.json`: Vite `8.3.5`, Cloudflare Wrangler `4.155.0`, TypeScript `7.0.2`, and `@cloudflare/vite-plugin` `1.66.0`.
-- `npm run check:toolchain` succeeded, reporting Wrangler `4.155.0`, Vite `8.3.5`, and TypeScript `7.0.2`.
-- `npm run build` succeeded using Cloudflare's official Vite plugin, producing a local Worker build in `dist/worker/`.
-- Local Vite dev server smoke test: `/api/v1/health` returned HTTP 200 with `{"service":"riftpulse-api","status":"ok","version":"0.1.0-dev"}`. The local server was stopped after the test.
-- `npm exec -- esbuild --version` succeeded (`0.28.2`). `npm audit --omit=dev` reported zero vulnerabilities.
-- npm warned that `workerd` and `esbuild` install scripts were not covered by its script-approval setting. The build and runtime smoke test succeeded without changing that setting.
-- Local Git branch `main` contains four local commits ahead of `origin/main`; the remote has not been updated. Working-tree status must be checked after this audit update.
+- Node.js `24.22.1`; npm `11.19.1`. PowerShell blocks the `npm.ps1` shim under the current execution policy, so use `npm.cmd`. No execution-policy changes were made.
+- Portable Git `2.56.0.windows.4` at `C:\Users\chris\Documents\RiftPulse Development\tools\MinGit\cmd\git.exe`.
+- .NET SDK `8.0.427`; .NET 8 and .NET 10 runtimes are present.
+- Portable CMake `4.4.4` and Ninja `1.13.2` under `C:\Users\chris\Documents\RiftPulse Development\tools\portable`.
+- Android SDK Platform-Tools / ADB `37.0.1` installed through WinGet. The explicit executable works; a fresh shell does not yet resolve `adb` by command name. `adb devices` returned no connected devices.
+- QPM CLI `1.5.12+3b7834d` is installed portably. `qpm doctor` reports CMake, Ninja, QPM, and ADB found when the portable tool paths are supplied.
+- Android NDK `27.2.12479018` was downloaded and extracted by QPM. Clang reports version `18.0.3`.
+- QPM warns that Windows symbolic-link privilege is unavailable and falls back to copying dependency files. Dependency restore completed successfully; no Windows developer mode or privilege setting was changed.
 
-## Toolchain decisions based on current documentation
+## PCVR target validation
 
-- **Cloudflare web/API:** use React + Vite with Cloudflare's official Vite plugin and project-local Wrangler. Sources: https://developers.cloudflare.com/workers/vite-plugin/get-started/ and https://developers.cloudflare.com/workers/wrangler/install-and-update/.
-- **PCVR:** Beat Saber `1.40.8` uses the legacy Unity `2021.3.16f1` branch; PC modding uses C#, BSIPA, and the .NET Framework 4.7.2 ecosystem. The local loader versions above are now inspected, but target framework and a minimal compile/load test remain outstanding. Sources: https://bsmg.wiki/pc-modding.html and https://bsmg.wiki/modding/pc/setup.html.
-- **Standalone Quest:** target `1.40.8_7379` is user-confirmed. Quest mods are native Android/ARM64 shared libraries (C++), not PCVR C# DLLs; Scotland2 is the relevant loader family. Validate exact Scotland2/QPM/NDK dependencies before choosing and building the starter template. Sources: https://questsaber.com/wiki/?page=quest-modding%2Foverview and https://bsmg.wiki/quest-modding.
-- **Quest build tools:** QPM supports NDK management and downloading CMake/Ninja, but QPM, NDK, and a Quest build have not yet been verified. Source: https://github.com/QuestPackageManager/QPM.CLI.
-- **Authentication / D1:** Better Auth remains a candidate pending an isolated local Worker/D1 integration test before locking auth dependencies or creating database migrations. Sources: https://better-auth.com/docs/adapters/other-relational-databases and https://better-auth.com/blog/1-5.
+- Installed Beat Saber PCVR instance: `1.40.8_7379` at `C:\Users\chris\BSManager\BSInstances\1.40.8`.
+- Inspected loader assemblies: `IPA.Injector.dll` assembly version `4.3.6.0`, `IPA.Loader.dll` assembly version `2.0.0.0`, and `BSML.dll` assembly version `1.12.5.0` (`1.12.5+bs.1.40.0`).
+- Created a compile-only smoke project at `mods/pcvr/toolchain-smoke` targeting .NET Framework 4.7.2 and using the current BSIPA attribute-based plugin API.
+- `dotnet build` succeeded with **0 warnings and 0 errors**. The smoke-test DLL was not copied into the game or loaded in-game.
 
-## Still to validate before implementation
+## Standalone Quest target validation
 
-- Build a minimal PCVR mod against the installed game and loader assemblies; confirm the target framework and BSML API use.
-- Finish confirming CMake/Ninja, obtain/configure QPM and an appropriate Android NDK, and run QPM diagnostics/build for Quest `1.40.8_7379`.
-- Verify ADB visibility in a fresh shell and only perform a device connection check if the Quest is connected and debugging is enabled.
-- Add the actual React UI scaffold in its own authorized step; the current Worker is only a health-check foundation.
-- Prove Better Auth + D1 in an isolated local integration test before adopting its auth schema.
+- User-confirmed Quest target: `1.40.8_7379`.
+- Built a simple native Android shared library with CMake/Ninja and NDK 27.2.12479018; ELF inspection confirmed `ELF64`, `DYN`, `AArch64`.
+- Generated a separate validation copy of the current Quest mod template outside the repository at `tools/qpm-template-validation`. QPM restored dependencies including Scotland2 `0.1.7`, beatsaber-hook `5.1.9`, and paper `3.7.0`.
+- Built the actual QPM/Scotland2 template with CMake/Ninja for `arm64-v8a`; build exited with code 0 and produced `libriftpulse.so`. CMake printed upstream NDK deprecation/override warnings, but they did not prevent the build.
+- The template-validation copy is kept outside the project repository so upstream template and third-party dependency files are not imported into RiftPulseDev. Only the minimal local toolchain smoke-test source is kept under `mods/quest/toolchain-smoke`.
+- No mod has been installed on the Quest or copied into the PCVR game folder. Runtime loading still requires a later explicit test with the relevant game/device available.
 
-## Safety boundaries
+## Cloudflare web/API foundation
 
-No Cloudflare projects, databases, DNS records, OAuth integrations, or deployments were changed during Step 4. No old RiftPulse source code, database migrations, secrets, or deployment settings were imported. No push to GitHub has been made.
+- Root tooling dependencies are pinned: Vite `8.3.5`, Wrangler `4.155.0`, TypeScript `7.0.2`, and `@cloudflare/vite-plugin` `1.66.0`.
+- `npm.cmd run check:toolchain` succeeded.
+- `npm.cmd run build` succeeded using Cloudflare's official Vite plugin.
+- Local Vite dev-server smoke test: `/api/v1/health` returned HTTP 200 with `{"service":"riftpulse-api","status":"ok","version":"0.1.0-dev"}`. The local server was stopped after the test.
+- `npm.cmd audit --omit=dev` reported zero vulnerabilities. npm warned that `workerd` and `esbuild` install scripts were not covered by the current script-approval setting; no approval or security setting was changed.
+- This is only a health-check foundation, not the finished website or API.
+
+## Still outstanding (not blockers for Step 4 completion)
+
+- Run the PCVR plugin in-game and validate menu integration against the target game.
+- Connect the Quest with developer debugging enabled and verify ADB device visibility before any device install/load test.
+- Integrate the QPM/Scotland2 template into the real Quest module project only in its authorized implementation step.
+- Add the React website UI and perform isolated Better Auth/D1 integration testing in their authorized implementation steps.
+
+## Repository and safety boundaries
+
+- Main repository: `C:\Users\chris\Documents\RiftPulse Development\workspace\RiftPulseDev`.
+- The local repository contains the clean skeleton, Cloudflare Worker foundation, architecture/roadmap docs, audit, and two compile-only smoke-test source projects.
+- Local commits have not been pushed to GitHub.
+- No Cloudflare projects, databases, DNS records, OAuth integrations, or deployments were changed.
+- No legacy RiftPulse source, migrations, secrets, or deployment configuration was imported.
