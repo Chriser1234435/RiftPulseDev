@@ -286,6 +286,29 @@ export default {
       } catch { /* treat malformed settings as empty */ }
       return Response.json({ accountId: authContext.userId, username, saved: !!row, updatedAt: row?.updatedAt ?? null }, { headers: JSON_HEADERS });
     }
+    if (url.pathname === "/api/v1/internal/tiktok/accounts" && request.method === "GET") {
+      if (!env.DB || !env.TIKTOK_CONNECTOR_INGEST_SECRET) {
+        return jsonError(503, "tiktok_connector_not_configured", "TikTok connector is not configured.", requestId);
+      }
+      const authorization = request.headers.get("authorization") ?? "";
+      if (authorization !== "Bearer " + env.TIKTOK_CONNECTOR_INGEST_SECRET) {
+        return jsonError(401, "internal_auth_required", "Connector authentication is required.", requestId);
+      }
+      const rows = await env.DB.prepare(
+        "SELECT ps.account_id AS accountId, ps.settings_json AS settingsJson FROM provider_settings ps INNER JOIN accounts a ON a.id = ps.account_id WHERE ps.provider = 'tiktok' ORDER BY ps.updated_at DESC LIMIT 200",
+      ).all<{ accountId: string; settingsJson: string }>();
+      if (!rows.success) return jsonError(503, "tiktok_accounts_unavailable", "Could not load TikTok account settings.", requestId);
+      const accounts: Array<{ accountId: string; username: string }> = [];
+      for (const row of rows.results ?? []) {
+        try {
+          const settings = JSON.parse(row.settingsJson) as Record<string, unknown>;
+          const username = typeof settings.username === "string" ? settings.username.trim().replace(/^@/, "") : "";
+          if (username && /^[A-Za-z0-9._]{2,24}$/.test(username)) accounts.push({ accountId: row.accountId, username });
+        } catch { /* Skip malformed settings safely. */ }
+      }
+      return Response.json({ accounts: accounts.slice(0, 50) }, { headers: JSON_HEADERS });
+    }
+
     if (url.pathname === "/api/v1/providers/tiktok/ingest" && request.method === "POST") {
       if (!env.DB || !env.TIKTOK_CONNECTOR_INGEST_SECRET || !env.CHAT_ROOM) {
         return jsonError(503, "tiktok_connector_not_configured", "The isolated TikTok connector bridge is not configured.", requestId);
@@ -309,6 +332,17 @@ export default {
       }
       const account = await env.DB.prepare("SELECT id FROM accounts WHERE id = ? LIMIT 1").bind(body.accountId).first<{ id: string }>();
       if (!account) return jsonError(404, "connector_account_not_found", "The target RiftPulse account does not exist.", requestId);
+      const configured = await env.DB.prepare(
+        "SELECT settings_json AS settingsJson FROM provider_settings WHERE account_id = ? AND provider = 'tiktok' LIMIT 1",
+      ).bind(body.accountId).first<{ settingsJson: string }>();
+      let configuredUsername = "";
+      try {
+        const settings = configured ? JSON.parse(configured.settingsJson) as Record<string, unknown> : {};
+        configuredUsername = typeof settings.username === "string" ? settings.username.trim().replace(/^@/, "") : "";
+      } catch { configuredUsername = ""; }
+      if (!configuredUsername || configuredUsername.toLowerCase() !== String(body.channelName).replace(/^@/, "").toLowerCase()) {
+        return jsonError(403, "tiktok_account_binding_mismatch", "The event does not match the TikTok username configured for this RiftPulse account.", requestId);
+      }
       const now = new Date();
       let inserted = false;
       let eventKind: string | null = null;

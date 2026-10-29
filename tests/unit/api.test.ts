@@ -181,3 +181,16 @@ test("requires pairing configuration and rejects unknown API routes", async () =
   const missing = await call("/api/v1/not-a-route");
   assert.equal(missing.status, 404);
 });
+
+
+test("private TikTok account discovery requires the bridge secret", async () => {
+  const secret = "unit-test-connector-secret-that-is-at-least-32-bytes";
+  const bindings = { ...env(), TIKTOK_CONNECTOR_INGEST_SECRET: secret };
+  const denied = await call("/api/v1/internal/tiktok/accounts", {}, bindings);
+  assert.equal(denied.status, 401);
+  const allowed = await call("/api/v1/internal/tiktok/accounts", {
+    headers: { authorization: "Bearer " + secret },
+  }, bindings);
+  assert.equal(allowed.status, 200);
+  assert.deepEqual((await allowed.json()).accounts, []);
+});

@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { TikTokLiveConnection, WebcastEvent } from "tiktok-live-connector";
 
-const required = ["RIFTPULSE_INGEST_URL", "RIFTPULSE_ACCOUNT_ID", "TIKTOK_USERNAME", "TIKTOK_CONNECTOR_INGEST_SECRET"] as const;
+const required = ["RIFTPULSE_INGEST_URL", "TIKTOK_CONNECTOR_INGEST_SECRET"] as const;
 for (const key of required) if (!process.env[key]) throw new Error(`Missing required environment variable: ${key}`);
 
 const ingestUrl = new URL(process.env.RIFTPULSE_INGEST_URL!);
@@ -11,110 +11,192 @@ if (ingestUrl.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(inge
 if (!ingestUrl.pathname.endsWith("/api/v1/providers/tiktok/ingest")) {
   throw new Error("RIFTPULSE_INGEST_URL must point to /api/v1/providers/tiktok/ingest.");
 }
-
-const accountId = process.env.RIFTPULSE_ACCOUNT_ID!;
-const username = process.env.TIKTOK_USERNAME!.replace(/^@/, "");
+const accountsUrl = new URL(ingestUrl);
+accountsUrl.pathname = ingestUrl.pathname.replace(
+  /\/api\/v1\/providers\/tiktok\/ingest$/,
+  "/api/v1/internal/tiktok/accounts",
+);
+if (accountsUrl.pathname === ingestUrl.pathname) throw new Error("Could not derive the internal TikTok account-list URL.");
 const secret = process.env.TIKTOK_CONNECTOR_INGEST_SECRET!;
 if (secret.length < 32) throw new Error("TIKTOK_CONNECTOR_INGEST_SECRET must be at least 32 characters.");
+const pollMs = Math.max(15_000, Number(process.env.TIKTOK_ACCOUNT_POLL_MS) || 30_000);
+const maxAccounts = Math.max(1, Math.min(50, Number(process.env.TIKTOK_MAX_ACTIVE_ACCOUNTS) || 10));
 
+type AccountConfig = { accountId: string; username: string };
 type ConnectorWithEvents = TikTokLiveConnection & { on(event: string, listener: (data: unknown) => void): unknown };
-const connection = new TikTokLiveConnection(username, {}) as ConnectorWithEvents;
-let roomId = "";
-let channelName = username;
-let queue = Promise.resolve();
+
+class AccountRunner {
+  readonly accountId: string;
+  readonly username: string;
+  private readonly connection: ConnectorWithEvents;
+  private roomId = "";
+  private channelName: string;
+  private queue = Promise.resolve();
+  private stopped = false;
+  private reconnectWaiter: (() => void) | null = null;
+  private retryWaiter: (() => void) | null = null;
+  private reconnectRequested = false;
+  private runPromise: Promise<void>;
+
+  constructor(config: AccountConfig) {
+    this.accountId = config.accountId;
+    this.username = config.username.replace(/^@/, "");
+    this.channelName = this.username;
+    this.connection = new TikTokLiveConnection(this.username, {}) as ConnectorWithEvents;
+    this.connection.on(WebcastEvent.CHAT, data => this.enqueue("chat", data));
+    this.connection.on(WebcastEvent.FOLLOW, data => this.enqueue("event", data, "follow"));
+    this.connection.on(WebcastEvent.GIFT, data => this.enqueue("event", data, "gift"));
+    this.connection.on(WebcastEvent.LIKE, data => this.enqueue("event", data, "like"));
+    this.connection.on(WebcastEvent.SHARE, data => this.enqueue("event", data, "share"));
+    this.connection.on(WebcastEvent.MEMBER, data => this.enqueue("event", data, "member"));
+    this.connection.on(WebcastEvent.ROOM_USER, data => this.enqueue("event", data, "room_user"));
+    this.connection.on("disconnected", () => this.requestReconnect("disconnected"));
+    this.connection.on("error", () => this.requestReconnect("connector error"));
+    this.connection.on("streamEnd", () => this.requestReconnect("stream ended"));
+    this.runPromise = this.run();
+  }
+
+  private enqueue(kind: "chat" | "event", payload: unknown, eventName?: string): void {
+    if (this.stopped || !this.roomId) return;
+    this.queue = this.queue.then(async () => {
+      const body = JSON.stringify({
+        accountId: this.accountId, channelId: this.roomId, channelName: this.channelName, kind,
+        ...(eventName ? { eventName } : {}), payload,
+      });
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      const signature = "sha256=" + createHmac("sha256", secret).update(timestamp + "." + body).digest("hex");
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const response = await fetch(ingestUrl, {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-riftpulse-timestamp": timestamp, "x-riftpulse-signature": signature },
+            body, signal: AbortSignal.timeout(10_000),
+          });
+          if (response.ok) return;
+          if (response.status < 500 && response.status !== 429) {
+            console.error(`RiftPulse rejected a TikTok event for one account (HTTP ${response.status}); payload details suppressed.`);
+            return;
+          }
+          lastError = new Error(`HTTP ${response.status}`);
+        } catch (error) { lastError = error; }
+        await sleep(250 * (attempt + 1));
+      }
+      console.error("RiftPulse ingest failed after retries; event details suppressed.", lastError instanceof Error ? lastError.message : "network error");
+    }).catch(error => console.error("TikTok account queue failed; event details suppressed.", error instanceof Error ? error.message : "unknown error"));
+  }
+
+  private requestReconnect(reason: string): void {
+    if (this.stopped) return;
+    this.roomId = "";
+    this.reconnectRequested = true;
+    console.info(`TikTok connection for a configured account ended (${reason}); reconnect scheduled.`);
+    this.reconnectWaiter?.();
+  }
+
+  private async run(): Promise<void> {
+    let attempt = 0;
+    while (!this.stopped) {
+      this.reconnectRequested = false;
+      try {
+        const state = await this.connection.connect();
+        const roomId = String(state.roomId ?? "");
+        if (!roomId) throw new Error("TikTok connector did not return a room ID.");
+        if (!this.reconnectRequested) this.roomId = roomId;
+        attempt = 0;
+        console.info(`TikTok LIVE connected for configured account @${this.username}; room ID hidden.`);
+        await new Promise<void>(resolve => {
+          this.reconnectWaiter = resolve;
+          if (this.reconnectRequested || this.stopped) resolve();
+        });
+        this.reconnectWaiter = null;
+      } catch (error) {
+        this.roomId = "";
+        console.warn(`TikTok connection attempt failed for @${this.username}; account may be offline or connector unavailable.`, error instanceof Error ? error.message : "unknown error");
+      }
+      if (this.stopped) break;
+      attempt++;
+      const capMs = Math.min(60_000, 1_000 * (2 ** Math.min(attempt, 6)));
+      await new Promise<void>(resolve => {
+        const timer = setTimeout(() => { this.retryWaiter = null; resolve(); }, Math.floor(capMs / 2 + Math.random() * capMs / 2));
+        this.retryWaiter = () => { clearTimeout(timer); this.retryWaiter = null; resolve(); };
+      });
+      try { await this.connection.disconnect(); } catch { /* already disconnected */ }
+    }
+    await this.queue;
+  }
+
+  async stop(): Promise<void> {
+    if (this.stopped) return;
+    this.stopped = true;
+    this.roomId = "";
+    this.reconnectWaiter?.();
+    this.retryWaiter?.();
+    try { await this.connection.disconnect(); } catch { /* already disconnected */ }
+    await this.runPromise;
+  }
+}
+
+const runners = new Map<string, { username: string; runner: AccountRunner }>();
 let shuttingDown = false;
 
-function enqueue(kind: "chat" | "event", payload: unknown, eventName?: string) {
-  if (shuttingDown || !roomId) return;
-  queue = queue.then(async () => {
-    const body = JSON.stringify({
-      accountId, channelId: roomId, channelName, kind,
-      ...(eventName ? { eventName } : {}), payload,
-    });
-    const timestamp = Math.floor(Date.now() / 1000).toString();
-    const signature = "sha256=" + createHmac("sha256", secret).update(timestamp + "." + body).digest("hex");
-    let lastError: unknown;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const response = await fetch(ingestUrl, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "x-riftpulse-timestamp": timestamp,
-            "x-riftpulse-signature": signature,
-          },
-          body,
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (response.ok) return;
-        if (response.status < 500 && response.status !== 429) {
-          console.error(`RiftPulse ingest rejected an event (HTTP ${response.status}); payload details suppressed.`);
-          return;
-        }
-        lastError = new Error(`HTTP ${response.status}`);
-      } catch (error) { lastError = error; }
-      await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function fetchConfiguredAccounts(): Promise<AccountConfig[]> {
+  const response = await fetch(accountsUrl, {
+    headers: { authorization: "Bearer " + secret, accept: "application/json" },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`account-list endpoint returned HTTP ${response.status}`);
+  const payload: unknown = await response.json();
+  if (!payload || typeof payload !== "object" || !Array.isArray((payload as Record<string, unknown>).accounts)) {
+    throw new Error("account-list endpoint returned an invalid response");
+  }
+  const seen = new Set<string>();
+  return ((payload as { accounts: unknown[] }).accounts).flatMap(item => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const value = item as Record<string, unknown>;
+    if (typeof value.accountId !== "string" || !value.accountId || typeof value.username !== "string") return [];
+    const username = value.username.trim().replace(/^@/, "");
+    if (!/^[A-Za-z0-9._]{2,24}$/.test(username) || seen.has(value.accountId)) return [];
+    seen.add(value.accountId);
+    return [{ accountId: value.accountId, username }];
+  }).slice(0, maxAccounts);
+}
+
+async function syncAccounts(): Promise<void> {
+  const accounts = await fetchConfiguredAccounts();
+  const desired = new Map(accounts.map(account => [account.accountId, account]));
+  for (const [accountId, current] of runners) {
+    const next = desired.get(accountId);
+    if (!next || next.username.toLowerCase() !== current.username.toLowerCase()) {
+      runners.delete(accountId);
+      await current.runner.stop();
+      console.info("Stopped a TikTok connection because its configuration was removed or changed.");
     }
-    console.error("RiftPulse ingest failed after retries; event details suppressed.", lastError instanceof Error ? lastError.message : "network error");
-  }).catch(error => console.error("TikTok bridge queue error; event details suppressed.", error instanceof Error ? error.message : "unknown error"));
+  }
+  for (const account of accounts) {
+    if (runners.has(account.accountId)) continue;
+    const runner = new AccountRunner(account);
+    runners.set(account.accountId, { username: account.username, runner });
+  }
+  console.info(`TikTok account sync complete: ${runners.size} configured account(s) managed; limit ${maxAccounts}.`);
 }
 
-connection.on(WebcastEvent.CHAT, data => enqueue("chat", data));
-connection.on(WebcastEvent.FOLLOW, data => enqueue("event", data, "follow"));
-connection.on(WebcastEvent.GIFT, data => enqueue("event", data, "gift"));
-connection.on(WebcastEvent.LIKE, data => enqueue("event", data, "like"));
-connection.on(WebcastEvent.SHARE, data => enqueue("event", data, "share"));
-connection.on(WebcastEvent.MEMBER, data => enqueue("event", data, "member"));
-connection.on(WebcastEvent.ROOM_USER, data => enqueue("event", data, "room_user"));
-let reconnectWaiter: (() => void) | null = null;
-let reconnectRequested = false;
-
-function requestReconnect(reason: string) {
-  if (shuttingDown) return;
-  roomId = "";
-  reconnectRequested = true;
-  console.info(`TikTok LIVE connection ended (${reason}); reconnect will be attempted.`);
-  reconnectWaiter?.();
-}
-
-connection.on("disconnected", () => requestReconnect("disconnected"));
-connection.on("error", () => requestReconnect("connector error"));
-connection.on("streamEnd", () => requestReconnect("stream ended"));
-
-async function stop() {
+async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
-  reconnectWaiter?.();
-  try { await connection.disconnect(); } catch { /* already disconnected */ }
-  await queue;
-  process.exit();
+  await Promise.all([...runners.values()].map(value => value.runner.stop()));
+  runners.clear();
+  process.exit(0);
 }
-process.on("SIGINT", () => void stop());
-process.on("SIGTERM", () => void stop());
+process.on("SIGINT", () => void shutdown());
+process.on("SIGTERM", () => void shutdown());
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-let reconnectAttempt = 0;
 while (!shuttingDown) {
-  reconnectRequested = false;
-  try {
-    const state = await connection.connect();
-    const connectedRoomId = String(state.roomId ?? "");
-    if (!connectedRoomId) throw new Error("TikTok connector did not return a room ID.");
-    if (!reconnectRequested) roomId = connectedRoomId;
-    reconnectAttempt = 0;
-    console.info(`TikTok bridge connected for @${username}; room ID hidden.`);
-    await new Promise<void>(resolve => {
-      reconnectWaiter = resolve;
-      if (reconnectRequested || shuttingDown) resolve();
-    });
-    reconnectWaiter = null;
-  } catch (error) {
-    roomId = "";
-    console.error("TikTok bridge connection attempt failed; retrying. Verify that the account is live and the connector is available.", error instanceof Error ? error.message : "unknown error");
+  try { await syncAccounts(); }
+  catch (error) {
+    console.error("TikTok account sync failed; keeping current connections and retrying.", error instanceof Error ? error.message : "unknown error");
   }
-  if (shuttingDown) break;
-  reconnectAttempt++;
-  const capMs = Math.min(30_000, 1_000 * (2 ** Math.min(reconnectAttempt, 5)));
-  await sleep(Math.floor(capMs / 2 + Math.random() * capMs / 2));
-  try { await connection.disconnect(); } catch { /* already disconnected */ }
+  await sleep(pollMs);
 }
