@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const migrations = ["0001_initial.sql", "0002_auth.sql", "0003_chat_foundation.sql", "0004_provider_oauth_states.sql", "0005_kick_pkce.sql", "0006_provider_events.sql"].map(name =>
+const migrations = ["0001_initial.sql", "0002_auth.sql", "0003_chat_foundation.sql", "0004_provider_oauth_states.sql", "0005_kick_pkce.sql", "0006_provider_events.sql", "0007_youtube_live_chat_cursor.sql"].map(name =>
   readFileSync(join(root, "migrations", name), "utf8")
 );
 
@@ -22,7 +22,7 @@ test("application, authentication, chat, OAuth-state, and provider-event migrati
     const expected = [
       "accounts", "devices", "pairing_challenges", "provider_connections", "module_settings",
       "chat_commands", "song_requests", "integration_health", "idempotency_keys", "chat_messages", "provider_events",
-      "user", "session", "account", "verification", "provider_oauth_states",
+      "user", "session", "account", "verification", "provider_oauth_states", "youtube_live_chat_cursors",
     ];
     for (const table of expected) assert.equal(tables.has(table), true, `missing table: ${table}`);
     const healthColumns = new Set(db.prepare("PRAGMA table_info(integration_health)").all().map(row => row.name));

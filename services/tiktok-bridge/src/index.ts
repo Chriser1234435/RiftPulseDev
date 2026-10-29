@@ -66,24 +66,55 @@ connection.on(WebcastEvent.LIKE, data => enqueue("event", data, "like"));
 connection.on(WebcastEvent.SHARE, data => enqueue("event", data, "share"));
 connection.on(WebcastEvent.MEMBER, data => enqueue("event", data, "member"));
 connection.on(WebcastEvent.ROOM_USER, data => enqueue("event", data, "room_user"));
-connection.on("streamEnd", () => console.info("TikTok LIVE stream ended; connector will stop forwarding events."));
+let reconnectWaiter: (() => void) | null = null;
+let reconnectRequested = false;
 
-try {
-  const state = await connection.connect();
-  roomId = String(state.roomId ?? "");
-  if (!roomId) throw new Error("TikTok connector did not return a room ID.");
-  console.info(`TikTok bridge connected for @${username}; room ID hidden.`);
-} catch (error) {
-  console.error("TikTok bridge could not connect. Verify that the account is live and the connector is available.", error instanceof Error ? error.message : "unknown error");
-  process.exitCode = 1;
+function requestReconnect(reason: string) {
+  if (shuttingDown) return;
+  roomId = "";
+  reconnectRequested = true;
+  console.info(`TikTok LIVE connection ended (${reason}); reconnect will be attempted.`);
+  reconnectWaiter?.();
 }
+
+connection.on("disconnected", () => requestReconnect("disconnected"));
+connection.on("error", () => requestReconnect("connector error"));
+connection.on("streamEnd", () => requestReconnect("stream ended"));
 
 async function stop() {
   if (shuttingDown) return;
   shuttingDown = true;
+  reconnectWaiter?.();
   try { await connection.disconnect(); } catch { /* already disconnected */ }
   await queue;
   process.exit();
 }
 process.on("SIGINT", () => void stop());
 process.on("SIGTERM", () => void stop());
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+let reconnectAttempt = 0;
+while (!shuttingDown) {
+  reconnectRequested = false;
+  try {
+    const state = await connection.connect();
+    const connectedRoomId = String(state.roomId ?? "");
+    if (!connectedRoomId) throw new Error("TikTok connector did not return a room ID.");
+    if (!reconnectRequested) roomId = connectedRoomId;
+    reconnectAttempt = 0;
+    console.info(`TikTok bridge connected for @${username}; room ID hidden.`);
+    await new Promise<void>(resolve => {
+      reconnectWaiter = resolve;
+      if (reconnectRequested || shuttingDown) resolve();
+    });
+    reconnectWaiter = null;
+  } catch (error) {
+    roomId = "";
+    console.error("TikTok bridge connection attempt failed; retrying. Verify that the account is live and the connector is available.", error instanceof Error ? error.message : "unknown error");
+  }
+  if (shuttingDown) break;
+  reconnectAttempt++;
+  const capMs = Math.min(30_000, 1_000 * (2 ** Math.min(reconnectAttempt, 5)));
+  await sleep(Math.floor(capMs / 2 + Math.random() * capMs / 2));
+  try { await connection.disconnect(); } catch { /* already disconnected */ }
+}

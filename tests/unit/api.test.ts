@@ -162,6 +162,15 @@ test("rejects invalid pairing code and fails closed when auth is not configured"
   assert.equal(claim.status, 503);
 });
 
+test("YouTube live-chat polling fails closed when authentication is not configured", async () => {
+  const response = await call("/api/v1/providers/youtube/poll", {
+    method: "POST", headers: { "content-type": "application/json", origin: "https://riftpulse.test" }, body: "{}",
+  }, { ...env(), APP_BASE_URL: "https://riftpulse.test", TRUSTED_ORIGINS: "https://riftpulse.test" });
+  assert.equal(response.status, 503);
+  const payload = await response.json();
+  assert.equal(payload.error.code, "auth_not_configured");
+});
+
 test("requires pairing configuration and rejects unknown API routes", async () => {
   const unconfigured = await call("/api/v1/pairing/challenges", {
     method: "POST",

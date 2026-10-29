@@ -61,7 +61,7 @@ Requires an authenticated account session. Returns health snapshots for the four
 
 ### `POST /api/v1/providers/twitch/webhook`
 
-Public Twitch EventSub callback. Requires the local-only `TWITCH_EVENTSUB_SECRET` (10–100 characters) and verifies the HMAC-SHA256 signature over message ID + timestamp + exact raw body before processing. Rejects stale messages, caps bodies at 64 KiB, returns the signed challenge for callback verification, handles channel-chat notifications, and marks mapped connections degraded on signed revocation events. OAuth and subscription-creation routes exist, but require real app credentials and a public HTTPS development hostname for live validation.
+Public Twitch EventSub callback. Requires the local-only `TWITCH_EVENTSUB_SECRET` (10–100 characters) and verifies the HMAC-SHA256 signature over message ID + timestamp + exact raw body before processing. Rejects stale messages, caps bodies at 64 KiB, returns the signed challenge for callback verification, handles chat messages and supported normalized event notifications, and marks mapped connections degraded on signed revocation events. Additional event delivery depends on creating the corresponding EventSub subscriptions with the required OAuth scopes.
 
 ### `POST /api/v1/providers/tiktok/ingest`
 
@@ -69,7 +69,7 @@ Bridge-only endpoint for the isolated Node.js `tiktok-live-connector` process; i
 
 ### `POST /api/v1/providers/kick/webhook`
 
-Public provider callback; it does not use a browser account session. It requires Kick message ID, timestamp, signature, event type, and version headers. The receiver fetches and briefly caches Kick's current public key, verifies the RSA-SHA256 signature over `messageId.timestamp.rawBody`, rejects stale timestamps, caps the body at 64 KiB, accepts version 1 `chat.message.sent` events, and routes only to connected channel mappings. Stored messages are idempotent by account/provider/message ID. Unsupported events and unmapped channels receive a successful ignored response. OAuth and subscription setup remain unfinished.
+Public provider callback; it does not use a browser account session. It requires Kick message ID, timestamp, signature, event type, and version headers. The receiver fetches and briefly caches Kick's current public key, verifies the RSA-SHA256 signature over `messageId.timestamp.rawBody`, rejects stale timestamps, and caps the body at 64 KiB. It handles version 1 chat messages and normalizes supported follow, subscription, and gifted-subscription events into the shared event store/realtime feed. Unsupported events and unmapped channels receive a successful ignored response. OAuth and subscription setup remain unfinished.
 
 Implementation references: [Kick webhook security](https://github.com/KickEngineering/KickDevDocs/blob/main/events/webhook-security.md) and [Twitch EventSub verification](https://dev.twitch.tv/docs/eventsub/handling-webhook-events/).
 
@@ -89,7 +89,7 @@ Requires an authenticated session and trusted `Origin`. Creates a high-entropy, 
 
 ### `GET /api/v1/providers/twitch/callback`
 
-Consumes state once and requires a matching same-browser cookie. Exchanges the authorization code, validates the resulting token with Twitch, requires `user:read:chat`, `user:bot`, and `channel:bot` for the webhook-based chat flow, and stores access/refresh tokens using AES-256-GCM encryption. It redirects to the local dashboard with a non-sensitive status. On-demand token refresh is available during subscription setup; scheduled refresh and subscription recovery remain unfinished.
+Consumes state once and requires a matching same-browser cookie. Exchanges the authorization code, validates the resulting token with Twitch, requires `user:read:chat`, `user:bot`, `channel:bot`, `moderator:read:followers`, `channel:read:subscriptions`, and `bits:read` for the chat/follow/subscription/cheer event set, and stores access/refresh tokens using AES-256-GCM encryption. It redirects to the local dashboard with a non-sensitive status. On-demand token refresh is available during subscription setup; scheduled refresh and subscription recovery remain unfinished.
 
 ### `POST /api/v1/providers/youtube/connect`
 
@@ -97,7 +97,11 @@ Requires an authenticated session and trusted `Origin`. Creates a short-lived, s
 
 ### `GET /api/v1/providers/youtube/callback`
 
-Consumes state once and requires the matching same-browser cookie. Exchanges the authorization code, verifies the granted YouTube read-only scope, calls the YouTube Data API to identify the authenticated channel, and stores access/refresh tokens using AES-256-GCM encryption. It marks the provider degraded until live-chat polling is implemented. The real OAuth round trip has not been tested because Google OAuth credentials are not configured locally.
+Consumes state once and requires the matching same-browser cookie. Exchanges the authorization code, verifies the granted YouTube read-only scope, calls the YouTube Data API to identify the authenticated channel, and stores access/refresh tokens using AES-256-GCM encryption. The real OAuth round trip has not been tested because Google OAuth credentials are not configured locally.
+
+### `POST /api/v1/providers/youtube/poll`
+
+Requires an authenticated session and trusted `Origin`. Refreshes an expiring YouTube access token using the encrypted refresh token, discovers the authenticated channel's active broadcast and live-chat ID, fetches the next page of chat resources, normalizes chat plus Super Chat/Super Sticker/membership events, persists them idempotently, and publishes realtime frames. The page token is stored per account and live-chat ID in `youtube_live_chat_cursors`. This endpoint is called only when the signed-in dashboard is opened/refreshed; there is no always-running local polling process. It returns `not_live` when no active live chat exists and exposes a bounded `pollAfterMs` hint.
 
 ### POST /api/v1/providers/kick/connect
 
@@ -109,7 +113,7 @@ Consumes the matching state and same-browser cookie once, decrypts the PKCE veri
 
 ### `POST /api/v1/providers/twitch/eventsub/subscribe`
 
-Requires an authenticated session and trusted `Origin`. Requires configured Twitch app credentials, an EventSub webhook secret, and a public HTTPS app URL. Validates the saved user token and required chat scopes, obtains an app access token for the webhook subscription API, checks for an existing matching subscription, and creates `channel.chat.message` version 1 if needed. It reports verification pending until Twitch sends the signed callback challenge; it does not mark the provider healthy merely because a create request succeeded.
+Requires an authenticated session and trusted `Origin`. Requires configured Twitch app credentials, an EventSub webhook secret, and a public HTTPS app URL. Validates the saved user token and chat/follow/subscription/cheer scopes, obtains an app access token, then reconciles matching webhook subscriptions for `channel.chat.message`, `channel.follow`, `channel.subscribe`, `channel.subscription.gift`, `channel.subscription.message`, and `channel.cheer`. It reports verification pending until Twitch verifies new callbacks; it does not mark the provider healthy merely because a create request succeeded.
 
 ### `DELETE /api/v1/providers/{provider}`
 

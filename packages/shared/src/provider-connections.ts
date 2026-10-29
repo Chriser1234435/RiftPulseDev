@@ -128,7 +128,7 @@ export async function ensureFreshTwitchProviderTokens(
   if (!current.ok) return current;
   if (!current.externalAccountId || !clientId || !clientSecret) return { ok: false, reason: "token_validation_failed" };
 
-  const requiredScopes = ["user:read:chat", "user:bot", "channel:bot"];
+  const requiredScopes = ["user:read:chat", "user:bot", "channel:bot", "moderator:read:followers", "channel:read:subscriptions", "bits:read"];
   const validate = async (accessToken: string) => {
     try {
       const response = await fetcher("https://id.twitch.tv/oauth2/validate", {

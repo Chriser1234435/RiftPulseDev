@@ -7,7 +7,7 @@ import { createOAuthState, createPkceChallenge, createPkceVerifier, digestOAuthS
 import { verifyTikTokConnectorSignature } from "../../packages/shared/src/tiktok-connector-signature.ts";
 import {
   ChatMessageDeduplicator, aggregateViewerCounts, emptyProviderHealth, normalizeKickChatMessage,
-  normalizeTikTokChatMessage, normalizeTikTokProviderEvent, normalizeTwitchChatMessage, normalizeYouTubeChatMessage, reconnectDelayMs,
+  normalizePlatformProviderEvent, normalizeTikTokChatMessage, normalizeTikTokProviderEvent, normalizeTwitchChatMessage, normalizeYouTubeChatMessage, normalizeYouTubeProviderEvent, reconnectDelayMs,
 } from "../../packages/shared/src/chat.ts";
 import type { ProviderHealthSnapshot } from "../../packages/contracts/src/chat-v1.ts";
 
@@ -40,6 +40,51 @@ test("normalizes YouTube and Kick messages", () => {
   assert.equal(kick?.badges.verified, true);
   assert.equal(kick?.badges.moderator, true);
   assert.equal(normalizeTwitchChatMessage(null, now), null);
+});
+
+test("normalizes YouTube Super Chats and memberships as stream events", () => {
+  const superChat = normalizeYouTubeProviderEvent({
+    id: "yt-event-1",
+    snippet: {
+      type: "superChatEvent", publishedAt: "2026-10-29T11:59:00Z",
+      superChatDetails: { amountMicros: "2500000", currency: "USD", userComment: "Thanks!" },
+    },
+    authorDetails: { channelId: "viewer-1", displayName: "Viewer" },
+  }, "live-chat-1", "Streamer", now);
+  assert.equal(superChat?.kind, "super_chat");
+  assert.equal(superChat?.amount, 2.5);
+  assert.equal(superChat?.currency, "USD");
+  assert.equal(superChat?.message, "Thanks!");
+
+  const member = normalizeYouTubeProviderEvent({
+    id: "yt-event-2",
+    snippet: { type: "newSponsorEvent", publishedAt: "2026-10-29T11:59:00Z", newSponsorDetails: { memberLevelName: "Gold" } },
+    authorDetails: { channelId: "viewer-2", displayName: "Member" },
+  }, "live-chat-1", "Streamer", now);
+  assert.equal(member?.kind, "subscription");
+  assert.equal(member?.itemName, "Gold");
+  assert.equal(normalizeYouTubeProviderEvent({ id: "chat", snippet: { type: "textMessageEvent" }, authorDetails: {} }, "live-chat-1", "Streamer", now), null);
+});
+
+test("normalizes Twitch and Kick provider events with stable external IDs", () => {
+  const twitch = normalizePlatformProviderEvent("twitch", "channel.cheer", {
+    subscription: { type: "channel.cheer" },
+    event: { broadcaster_user_id: "1", broadcaster_user_name: "Streamer", user_id: "2", user_name: "Viewer", bits: 250, message: "Great run!" },
+  }, "twitch-event-1", now);
+  assert.equal(twitch?.kind, "bits");
+  assert.equal(twitch?.amount, 250);
+  assert.equal(twitch?.actorName, "Viewer");
+  assert.equal(twitch?.message, "Great run!");
+
+  const kick = normalizePlatformProviderEvent("kick", "channel.followed", {
+    broadcaster: { user_id: 10, username: "StreamerK" },
+    follower: { user_id: 20, username: "Follower" },
+    created_at: "2026-10-29T11:59:00Z",
+  }, "kick-event-1", now);
+  assert.equal(kick?.kind, "follow");
+  assert.equal(kick?.channelId, "10");
+  assert.equal(kick?.actorName, "Follower");
+  assert.equal(normalizePlatformProviderEvent("kick", "unknown.event", {}, "id", now), null);
 });
 
 test("normalizes TikTok chat and platform events without inventing cash values", () => {

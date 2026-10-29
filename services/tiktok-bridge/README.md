@@ -30,7 +30,7 @@ Then start the bridge in a terminal where those four environment variables are s
 npm.cmd --prefix services/tiktok-bridge start
 ```
 
-The bridge signs the exact JSON request body with HMAC-SHA256 and a Unix-seconds timestamp. The Worker rejects invalid signatures, timestamps more than five minutes old, oversized bodies, unknown accounts, and unsupported event payloads. Event/chat payload details are intentionally suppressed from bridge error logs.
+The bridge signs the exact JSON request body with HMAC-SHA256 and a Unix-seconds timestamp. The Worker rejects invalid signatures, timestamps more than five minutes old, oversized bodies, unknown accounts, and unsupported event payloads. Event/chat payload details are intentionally suppressed from bridge error logs. The bridge retries connection failures with bounded exponential backoff and reconnects after disconnects or stream-end events; keep the process running while you test, and stop it with Ctrl+C.
 
 ## Reliability and licensing
 

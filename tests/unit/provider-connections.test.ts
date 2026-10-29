@@ -63,7 +63,7 @@ test("provider token persistence stores ciphertext and can decrypt it for the ow
 test("Twitch token refresh validates the rotated token and persists only encrypted token material", async () => {
   const db = new FakeDatabase();
   const key = randomBytes(32).toString("base64");
-  const scopes = ["user:read:chat", "user:bot", "channel:bot"];
+  const scopes = ["user:read:chat", "user:bot", "channel:bot", "moderator:read:followers", "channel:read:subscriptions", "bits:read"];
   db.firstResult = {
     accessTokenCiphertext: await encryptProviderToken("expired-access", key),
     refreshTokenCiphertext: await encryptProviderToken("old-refresh", key),

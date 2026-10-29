@@ -86,6 +86,34 @@ export function normalizeTikTokChatMessage(payload: unknown, channelId = "", cha
   });
 }
 
+/** Normalize YouTube Live Chat event resources returned by liveChatMessages.list. */
+export function normalizeYouTubeProviderEvent(payload: unknown, channelId: string, channelName = "", receivedAt = new Date()): NormalizedProviderEvent | null {
+  const root = rec(payload), snippet = child(root, "snippet"), author = child(root, "authorDetails");
+  if (!root || !snippet || !author || !id(channelId)) return null;
+  const type = text(snippet.type, 80);
+  const details = child(snippet, "superChatDetails") ?? child(snippet, "superStickerDetails")
+    ?? child(snippet, "newSponsorDetails") ?? child(snippet, "memberMilestoneChatDetails")
+    ?? child(snippet, "membershipGiftingDetails");
+  const kind: ProviderEventKind | null = type === "superChatEvent" || type === "superStickerEvent" ? "super_chat"
+    : type === "newSponsorEvent" || type === "memberMilestoneChatEvent" ? "subscription"
+    : type === "membershipGiftingEvent" ? "gift" : null;
+  if (!kind) return null;
+  const rawMicros = details?.amountMicros;
+  const micros = typeof rawMicros === "string" || typeof rawMicros === "number" ? Number(rawMicros) : NaN;
+  const amount = Number.isFinite(micros) && micros >= 0 ? micros / 1_000_000 : null;
+  const rawCount = details?.giftMembershipsCount ?? details?.memberMonth;
+  const quantity = typeof rawCount === "number" && Number.isSafeInteger(rawCount) && rawCount >= 0 ? rawCount : null;
+  const externalEventId = id(root.id);
+  if (!externalEventId) return null;
+  return {
+    id: "youtube:" + externalEventId, provider: "youtube", externalEventId, kind, channelId: id(channelId),
+    channelName: text(channelName, 80) || id(channelId), actorId: id(author.channelId) || null,
+    actorName: text(author.displayName, 80) || null, message: text(details?.userComment ?? child(snippet, "textMessageDetails")?.messageText, 500) || null,
+    itemName: kind === "gift" ? "membership gift" : kind === "subscription" ? text(details?.tier ?? details?.memberLevelName, 100) || "membership" : text(details?.tier, 100) || null,
+    quantity, amount, currency: text(details?.currency, 8) || null,
+    occurredAt: date(snippet.publishedAt, receivedAt), receivedAt: receivedAt.toISOString(),
+  };
+}
 const TIKTOK_EVENT_KIND: Record<string, ProviderEventKind> = {
   follow: "follow", follow_event: "follow", subscribe: "subscription", subscription: "subscription",
   gift: "gift", gift_event: "gift", like: "like", like_event: "like", share: "share",
@@ -123,6 +151,50 @@ export function normalizeTikTokProviderEvent(
   };
 }
 
+const PLATFORM_EVENT_KIND: Record<string, ProviderEventKind> = {
+  "channel.follow": "follow", "channel.subscribe": "subscription", "channel.subscription.message": "subscription",
+  "channel.subscription.gift": "gift", "channel.cheer": "bits", "channel.bits.use": "bits",
+  "channel.raid": "raid", "channel.charity_campaign.donate": "donation",
+  "channel.followed": "follow", "channel.subscription.new": "subscription",
+  "channel.subscription.renewal": "subscription", "channel.subscription.gifts": "gift",
+  "livestream.status.updated": "other", "livestream.metadata.updated": "other",
+};
+
+/** Normalize documented Twitch EventSub and Kick webhook event payloads into the shared event contract. */
+export function normalizePlatformProviderEvent(
+  provider: "twitch" | "kick" | "youtube", eventName: string, payload: unknown,
+  externalEventId = "", receivedAt = new Date(),
+): NormalizedProviderEvent | null {
+  const root = rec(payload);
+  const event = child(root, "event") ?? root;
+  const broadcaster = child(event, "broadcaster") ?? child(root, "broadcaster");
+  const kind = PLATFORM_EVENT_KIND[eventName];
+  if (!root || !event || !kind) return null;
+  const channelId = id(event.broadcaster_user_id ?? event.to_broadcaster_user_id ?? broadcaster?.user_id);
+  const channelName = text(event.broadcaster_user_name ?? event.to_broadcaster_user_name ?? broadcaster?.username, 80);
+  if (!channelId) return null;
+  const user = child(event, "user") ?? child(event, "gifter") ?? child(event, "follower") ?? child(event, "subscriber");
+  const donation = child(event, "charity_donation") ?? child(event, "donation");
+  const rawAmount = event.bits ?? event.amount ?? donation?.value ?? donation?.amount;
+  const amount = typeof rawAmount === "number" && Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : null;
+  const rawQuantity = event.total ?? event.giftees_count ?? event.viewers ?? event.viewer_count ?? event.count;
+  const quantity = typeof rawQuantity === "number" && Number.isSafeInteger(rawQuantity) && rawQuantity >= 0 ? rawQuantity : null;
+  const occurredAt = event.followed_at ?? event.subscribed_at ?? event.created_at ?? event.started_at ?? event.ended_at ?? event.timestamp;
+  const name = text(event.user_name ?? event.user_login ?? event.follower_user_name ?? event.username
+    ?? user?.user_name ?? user?.username ?? event.gifter_user_name ?? event.from_broadcaster_user_name, 80);
+  const itemName = text(event.tier ?? event.gift_name ?? event.reward_name ?? (kind === "gift" ? "subscription gift" : ""), 100) || null;
+  const eventId = id(externalEventId || event.id || event.message_id || event.event_id
+    || (occurredAt ? eventName + ":" + id(occurredAt) + ":" + id(event.user_id ?? user?.user_id) : ""));
+  if (!eventId) return null;
+  const donationCurrency = child(event, "amount")?.currency ?? donation?.currency ?? event.currency;
+  return {
+    id: provider + ":" + eventId, provider, externalEventId: eventId, kind, channelId,
+    channelName: channelName || channelId, actorId: id(event.user_id ?? event.userId ?? user?.user_id) || null,
+    actorName: name || null, message: text(event.message ?? event.system_message ?? event.description, 500) || null,
+    itemName, quantity, amount, currency: text(donationCurrency, 8) || null,
+    occurredAt: date(occurredAt, receivedAt), receivedAt: receivedAt.toISOString(),
+  };
+}
 export class ChatMessageDeduplicator {
   private readonly seen = new Map<string, number>();
   constructor(privateTtlMs = 600_000, privateMaxEntries = 5000) {

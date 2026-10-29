@@ -1,7 +1,7 @@
 import type { Env } from "./env.ts";
 import { API_VERSION, PROVIDERS, SUPPORTED_MODULES, validateCreatePairingChallenge, validateClaimPairing } from "../packages/contracts/src/v1.ts";
 import type { NormalizedProviderEvent, ProviderHealthSnapshot } from "../packages/contracts/src/chat-v1.ts";
-import { aggregateViewerCounts, emptyProviderHealth, normalizeKickChatMessage, normalizeTikTokChatMessage, normalizeTikTokProviderEvent, normalizeTwitchChatMessage } from "../packages/shared/src/chat.ts";
+import { aggregateViewerCounts, emptyProviderHealth, normalizeKickChatMessage, normalizePlatformProviderEvent, normalizeTikTokChatMessage, normalizeTikTokProviderEvent, normalizeTwitchChatMessage, normalizeYouTubeChatMessage, normalizeYouTubeProviderEvent } from "../packages/shared/src/chat.ts";
 import { persistNormalizedChatMessage } from "../packages/shared/src/chat-persistence.ts";
 import { persistNormalizedProviderEvent } from "../packages/shared/src/provider-event-persistence.ts";
 import { verifyTikTokConnectorSignature } from "../packages/shared/src/tiktok-connector-signature.ts";
@@ -9,7 +9,7 @@ import { extractKickPublicKey, verifyKickWebhookSignature } from "../packages/sh
 import { verifyTwitchEventSubSignature } from "../packages/shared/src/twitch-eventsub.ts";
 import { createOAuthState, createPkceChallenge, createPkceVerifier, digestOAuthState } from "../packages/shared/src/oauth-state.ts";
 import { decryptProviderToken, encryptProviderToken } from "../packages/shared/src/provider-token-vault.ts";
-import { disconnectProvider, ensureFreshTwitchProviderTokens, persistProviderTokens } from "../packages/shared/src/provider-connections.ts";
+import { disconnectProvider, ensureFreshTwitchProviderTokens, persistProviderTokens, readProviderTokens } from "../packages/shared/src/provider-connections.ts";
 import { claimPairingChallenge, createPairingChallenge } from "../packages/shared/src/pairing.ts";
 import { createAuth } from "./auth.ts";
 export { ChatRoom } from "./chat-room.ts";
@@ -463,7 +463,7 @@ export default {
       authorizationUrl.searchParams.set("client_id", env.TWITCH_CLIENT_ID);
       authorizationUrl.searchParams.set("redirect_uri", redirectUri.toString());
       authorizationUrl.searchParams.set("response_type", "code");
-      authorizationUrl.searchParams.set("scope", "user:read:chat user:bot channel:bot");
+      authorizationUrl.searchParams.set("scope", "user:read:chat user:bot channel:bot moderator:read:followers channel:read:subscriptions bits:read");
       authorizationUrl.searchParams.set("state", state);
       return Response.json({ authorizationUrl: authorizationUrl.toString() }, {
         headers: { ...JSON_HEADERS, "set-cookie": twitchStateCookie(state, redirectUri.protocol === "https:") },
@@ -528,7 +528,7 @@ export default {
         const validation = validationPayload as Record<string, unknown>;
         const validationScopes = Array.isArray(validation.scopes) && validation.scopes.every(scope => typeof scope === "string")
           ? validation.scopes as string[] : null;
-        const requiredScopes = ["user:read:chat", "user:bot", "channel:bot"];
+        const requiredScopes = ["user:read:chat", "user:bot", "channel:bot", "moderator:read:followers", "channel:read:subscriptions", "bits:read"];
         if (validation.client_id !== env.TWITCH_CLIENT_ID || typeof validation.user_id !== "string"
           || !validation.user_id || typeof validation.login !== "string" || !validation.login
           || !validationScopes || !requiredScopes.every(scope => validationScopes.includes(scope))) return finish("failed");
@@ -689,7 +689,7 @@ export default {
           || typeof token.refresh_token !== "string" || !token.refresh_token
           || !Number.isFinite(expiresIn) || expiresIn <= 0) return finish("failed");
 
-        const introspectResponse = await fetch("https://id.kick.com/oauth/token/introspect", {
+        const introspectResponse = await fetch("https://api.kick.com/public/v1/token/introspect", {
           method: "POST",
           headers: { authorization: "Bearer " + token.access_token, accept: "application/json" },
         });
@@ -787,29 +787,40 @@ export default {
         const appToken = (appTokenPayload as Record<string, unknown>).access_token;
         if (typeof appToken !== "string" || !appToken) return jsonError(502, "twitch_app_token_failed", "Twitch returned an invalid application token response.", requestId);
 
-        const listUrl = new URL("https://api.twitch.tv/helix/eventsub/subscriptions");
-        listUrl.searchParams.set("type", "channel.chat.message");
+        const subscriptionSpecs = [
+          { type: "channel.chat.message", version: "1", condition: { broadcaster_user_id: connection.externalAccountId, user_id: connection.externalAccountId } },
+          { type: "channel.follow", version: "2", condition: { broadcaster_user_id: connection.externalAccountId, moderator_user_id: connection.externalAccountId } },
+          { type: "channel.subscribe", version: "1", condition: { broadcaster_user_id: connection.externalAccountId } },
+          { type: "channel.subscription.gift", version: "1", condition: { broadcaster_user_id: connection.externalAccountId } },
+          { type: "channel.subscription.message", version: "1", condition: { broadcaster_user_id: connection.externalAccountId } },
+          { type: "channel.cheer", version: "1", condition: { broadcaster_user_id: connection.externalAccountId } },
+        ];
+        let allEnabled = true;
+        for (const spec of subscriptionSpecs) {
+          const listUrl = new URL("https://api.twitch.tv/helix/eventsub/subscriptions");
+          listUrl.searchParams.set("type", spec.type);
+          listUrl.searchParams.set("first", "100");
+          const existingResponse = await fetch(listUrl, {
+            headers: { "Client-Id": env.TWITCH_CLIENT_ID, authorization: "Bearer " + appToken, accept: "application/json" },
+          });
+          if (!existingResponse.ok) return jsonError(502, "twitch_eventsub_lookup_failed", "Could not check existing Twitch EventSub subscriptions.", requestId);
+          const existingPayload: unknown = await existingResponse.json();
+          const existingData = typeof existingPayload === "object" && existingPayload !== null && !Array.isArray(existingPayload)
+            ? (existingPayload as Record<string, unknown>).data : null;
+          const existing = Array.isArray(existingData) ? existingData.find(item => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+            const sub = item as Record<string, unknown>;
+            const condition = typeof sub.condition === "object" && sub.condition !== null ? sub.condition as Record<string, unknown> : {};
+            const transport = typeof sub.transport === "object" && sub.transport !== null ? sub.transport as Record<string, unknown> : {};
+            return sub.type === spec.type && ["enabled", "webhook_callback_verification_pending"].includes(String(sub.status))
+              && Object.entries(spec.condition).every(([key, value]) => condition[key] === value)
+              && transport.method === "webhook" && transport.callback === callbackUrl.toString();
+          }) : null;
 
-        listUrl.searchParams.set("first", "100");
-        const existingResponse = await fetch(listUrl, {
-          headers: { "Client-Id": env.TWITCH_CLIENT_ID, authorization: "Bearer " + appToken, accept: "application/json" },
-        });
-        if (!existingResponse.ok) return jsonError(502, "twitch_eventsub_lookup_failed", "Could not check existing Twitch chat subscriptions.", requestId);
-        const existingPayload: unknown = await existingResponse.json();
-        const existingData = typeof existingPayload === "object" && existingPayload !== null && !Array.isArray(existingPayload)
-          ? (existingPayload as Record<string, unknown>).data : null;
-        const existing = Array.isArray(existingData) ? existingData.find(item => {
-          if (!item || typeof item !== "object" || Array.isArray(item)) return false;
-          const sub = item as Record<string, unknown>;
-          const condition = typeof sub.condition === "object" && sub.condition !== null ? sub.condition as Record<string, unknown> : {};
-          const transport = typeof sub.transport === "object" && sub.transport !== null ? sub.transport as Record<string, unknown> : {};
-          return sub.type === "channel.chat.message" && (sub.status === "enabled" || sub.status === "webhook_callback_verification_pending")
-            && condition.broadcaster_user_id === connection.externalAccountId
-            && condition.user_id === connection.externalAccountId
-            && transport.method === "webhook" && transport.callback === callbackUrl.toString();
-        }) : null;
-
-        if (!existing) {
+          if (existing && typeof existing === "object" && !Array.isArray(existing)) {
+            if ((existing as Record<string, unknown>).status !== "enabled") allEnabled = false;
+            continue;
+          }
           const createResponse = await fetch("https://api.twitch.tv/helix/eventsub/subscriptions", {
             method: "POST",
             headers: {
@@ -819,9 +830,7 @@ export default {
               accept: "application/json",
             },
             body: JSON.stringify({
-              type: "channel.chat.message",
-              version: "1",
-              condition: { broadcaster_user_id: connection.externalAccountId, user_id: connection.externalAccountId },
+              type: spec.type, version: spec.version, condition: spec.condition,
               transport: { method: "webhook", callback: callbackUrl.toString(), secret: env.TWITCH_EVENTSUB_SECRET },
             }),
           });
@@ -829,25 +838,101 @@ export default {
             await env.DB.prepare(
               "UPDATE integration_health SET status = 'degraded', observed_at = ?, detail_code = 'eventsub_subscription_failed' WHERE account_id = ? AND provider = 'twitch'",
             ).bind(new Date().toISOString(), authContext.userId).run();
-            return jsonError(502, "twitch_eventsub_subscription_failed", "Twitch did not accept the chat subscription. Check the requested scopes and callback configuration.", requestId);
+            return jsonError(502, "twitch_eventsub_subscription_failed", "Twitch did not accept every requested event subscription. Reconnect Twitch to grant the required scopes and check the callback configuration.", requestId);
           }
+          allEnabled = false;
         }
 
         const now = new Date().toISOString();
-        if (existing && typeof existing === "object" && !Array.isArray(existing) && (existing as Record<string, unknown>).status === "enabled") {
+        if (allEnabled) {
           const health = await env.DB.prepare(
             "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'twitch', 'healthy', NULL, ?, NULL, NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'healthy', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = NULL, viewer_count_observed_at = NULL",
           ).bind(crypto.randomUUID(), authContext.userId, now).run();
-          if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not update Twitch chat setup status.", requestId);
-          return Response.json({ status: "subscribed", alreadyEnabled: true }, { headers: JSON_HEADERS });
+          if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not update Twitch provider setup status.", requestId);
+          return Response.json({ status: "subscribed", alreadyEnabled: true, subscriptions: subscriptionSpecs.map(spec => spec.type) }, { headers: JSON_HEADERS });
         }
         const health = await env.DB.prepare(
           "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'twitch', 'degraded', NULL, ?, 'eventsub_verification_pending', NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'degraded', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = 'eventsub_verification_pending', viewer_count_observed_at = NULL",
         ).bind(crypto.randomUUID(), authContext.userId, now).run();
-        if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not update Twitch chat setup status.", requestId);
-        return Response.json({ status: "verification_pending", alreadyEnabled: false }, { headers: JSON_HEADERS });
+        if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not update Twitch provider setup status.", requestId);
+        return Response.json({ status: "verification_pending", alreadyEnabled: false, subscriptions: subscriptionSpecs.map(spec => spec.type) }, { headers: JSON_HEADERS });
       } catch {
         return jsonError(502, "twitch_eventsub_setup_failed", "Could not complete Twitch chat setup.", requestId);
+      }
+    }
+
+    if (url.pathname === "/api/v1/providers/kick/webhook/subscribe" && request.method === "POST") {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!isTrustedMutationOrigin(request, env)) return jsonError(403, "untrusted_origin", "Request origin is not trusted.", requestId);
+      if (!env.DB || !env.TOKEN_ENCRYPTION_KEY || !env.APP_BASE_URL) return jsonError(503, "kick_webhook_not_configured", "Kick token storage and app URL must be configured.", requestId);
+      let appUrl: URL;
+      try { appUrl = new URL(env.APP_BASE_URL); } catch { return jsonError(503, "kick_webhook_not_configured", "The app URL is invalid.", requestId); }
+      if (appUrl.protocol !== "https:" || appUrl.username || appUrl.password) {
+        return jsonError(503, "kick_webhook_requires_https", "Kick webhooks require a public HTTPS app URL configured in the Kick developer portal.", requestId);
+      }
+      const connection = await env.DB.prepare(
+        "SELECT external_account_id AS externalAccountId FROM provider_connections WHERE account_id = ? AND provider = 'kick' AND status = 'connected' LIMIT 1",
+      ).bind(authContext.userId).first<{ externalAccountId: string | null }>();
+      if (!connection?.externalAccountId) return jsonError(409, "kick_not_connected", "Connect a Kick account before enabling chat events.", requestId);
+      const stored = await readProviderTokens(env.DB, authContext.userId, "kick", env.TOKEN_ENCRYPTION_KEY);
+      if (!stored.ok) return jsonError(409, "kick_token_unavailable", "Reconnect Kick before enabling chat events.", requestId);
+      if (stored.externalAccountId !== connection.externalAccountId) return jsonError(409, "kick_account_mismatch", "Reconnect the intended Kick account before enabling chat events.", requestId);
+
+      try {
+        const introspectResponse = await fetch("https://api.kick.com/public/v1/token/introspect", {
+          method: "POST",
+          headers: { authorization: "Bearer " + stored.accessToken, accept: "application/json" },
+        });
+        if (!introspectResponse.ok) return jsonError(409, "kick_token_invalid", "Reconnect Kick before enabling chat events.", requestId);
+        const payload: unknown = await introspectResponse.json();
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) return jsonError(502, "kick_token_invalid", "Kick returned an invalid token response.", requestId);
+        const root = payload as Record<string, unknown>;
+        const data = typeof root.data === "object" && root.data !== null && !Array.isArray(root.data) ? root.data as Record<string, unknown> : {};
+        const scopes = typeof data.scope === "string" ? data.scope.split(/\s+/).filter(Boolean) : [];
+        if (data.active !== true || data.client_id !== env.KICK_CLIENT_ID || data.token_type !== "user"
+          || !["user:read", "channel:read", "events:subscribe"].every(scope => scopes.includes(scope))) {
+          return jsonError(409, "kick_scope_mismatch", "Reconnect Kick and grant the required chat-event permissions.", requestId);
+        }
+
+        const subscriptionsUrl = new URL("https://api.kick.com/public/v1/events/subscriptions");
+        subscriptionsUrl.searchParams.set("broadcaster_user_id", connection.externalAccountId);
+        const existingResponse = await fetch(subscriptionsUrl, {
+          headers: { authorization: "Bearer " + stored.accessToken, accept: "application/json" },
+        });
+        if (!existingResponse.ok) return jsonError(502, "kick_subscription_lookup_failed", "Could not check existing Kick subscriptions.", requestId);
+        const existingPayload: unknown = await existingResponse.json();
+        const existingRoot = typeof existingPayload === "object" && existingPayload !== null && !Array.isArray(existingPayload)
+          ? existingPayload as Record<string, unknown> : {};
+        const existingData = Array.isArray(existingRoot.data) ? existingRoot.data : [];
+        const alreadySubscribed = existingData.some(item => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+          const sub = item as Record<string, unknown>;
+          return sub.event === "chat.message.sent" && Number(sub.version) === 1 && sub.method === "webhook";
+        });
+
+        if (!alreadySubscribed) {
+          const createResponse = await fetch("https://api.kick.com/public/v1/events/subscriptions", {
+            method: "POST",
+            headers: { authorization: "Bearer " + stored.accessToken, "content-type": "application/json", accept: "application/json" },
+            body: JSON.stringify({ method: "webhook", events: [{ name: "chat.message.sent", version: 1 }] }),
+          });
+          if (!createResponse.ok) {
+            await env.DB.prepare(
+              "UPDATE integration_health SET status = 'degraded', observed_at = ?, detail_code = 'webhook_subscription_failed' WHERE account_id = ? AND provider = 'kick'",
+            ).bind(new Date().toISOString(), authContext.userId).run();
+            return jsonError(502, "kick_subscription_failed", "Kick did not accept the chat subscription. Check the webhook URL in the Kick developer portal and the events:subscribe permission.", requestId);
+          }
+        }
+
+        const now = new Date().toISOString();
+        const health = await env.DB.prepare(
+          "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'kick', 'degraded', NULL, ?, 'waiting_for_first_event', NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'degraded', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = 'waiting_for_first_event', viewer_count_observed_at = NULL",
+        ).bind(crypto.randomUUID(), authContext.userId, now).run();
+        if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not update Kick chat setup status.", requestId);
+        return Response.json({ status: "subscribed", alreadySubscribed }, { headers: JSON_HEADERS });
+      } catch {
+        return jsonError(502, "kick_subscription_setup_failed", "Could not complete Kick chat setup.", requestId);
       }
     }
 
@@ -954,7 +1039,24 @@ export default {
       const subscription = typeof root.subscription === "object" && root.subscription !== null
         ? root.subscription as Record<string, unknown> : {};
       if (subscription.type !== "channel.chat.message" || subscription.version !== "1") {
-        return Response.json({ status: "ignored", reason: "unsupported_event" }, { status: 202, headers: JSON_HEADERS });
+        const event = normalizePlatformProviderEvent("twitch", String(subscription.type ?? ""), payload, messageId);
+        if (!event) return Response.json({ status: "ignored", reason: "unsupported_event" }, { status: 202, headers: JSON_HEADERS });
+        const connections = await env.DB.prepare(
+          "SELECT account_id FROM provider_connections WHERE provider = 'twitch' AND external_account_id = ? AND status = 'connected'",
+        ).bind(event.channelId).all<{ account_id: string }>();
+        if (!connections.success) return jsonError(503, "provider_connection_lookup_failed", "Could not route the Twitch stream event.", requestId);
+        if (!connections.results?.length) return Response.json({ status: "ignored", reason: "channel_not_connected" }, { status: 202, headers: JSON_HEADERS });
+        let insertedEvents = 0;
+        for (const connection of connections.results) {
+          const stored = await persistNormalizedProviderEvent(env.DB, connection.account_id, event);
+          if (!stored.ok) return jsonError(503, "provider_event_store_unavailable", "Could not store the Twitch stream event.", requestId);
+          if (stored.inserted) { insertedEvents++; await publishProviderEvent(env, connection.account_id, event); }
+          const health = await env.DB.prepare(
+            "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'twitch', 'healthy', NULL, ?, NULL, NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'healthy', observed_at = excluded.observed_at, detail_code = NULL",
+          ).bind(crypto.randomUUID(), connection.account_id, new Date().toISOString()).run();
+          if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not update Twitch provider health.", requestId);
+        }
+        return Response.json({ status: insertedEvents ? "accepted" : "duplicate", insertedEvents, deliveredAccounts: connections.results.length }, { headers: JSON_HEADERS });
       }
       const message = normalizeTwitchChatMessage(payload);
       if (!message) return jsonError(400, "invalid_chat_event", "Twitch chat event is missing required message fields.", requestId);
@@ -1024,7 +1126,27 @@ export default {
       );
       if (!validSignature) return jsonError(401, "invalid_webhook_signature", "Kick webhook signature or timestamp is invalid.", requestId);
       if (eventType !== "chat.message.sent" || eventVersion !== "1") {
-        return Response.json({ status: "ignored", reason: "unsupported_event" }, { status: 202, headers: JSON_HEADERS });
+        let eventPayload: unknown;
+        try { eventPayload = JSON.parse(rawBody) as unknown; }
+        catch { return jsonError(400, "invalid_webhook_json", "Webhook body is not valid JSON.", requestId); }
+        const event = normalizePlatformProviderEvent("kick", eventType, eventPayload, messageId);
+        if (!event || eventVersion !== "1") return Response.json({ status: "ignored", reason: "unsupported_event" }, { status: 202, headers: JSON_HEADERS });
+        const connections = await env.DB.prepare(
+          "SELECT account_id FROM provider_connections WHERE provider = 'kick' AND external_account_id = ? AND status = 'connected'",
+        ).bind(event.channelId).all<{ account_id: string }>();
+        if (!connections.success) return jsonError(503, "provider_connection_lookup_failed", "Could not route the Kick stream event.", requestId);
+        if (!connections.results?.length) return Response.json({ status: "ignored", reason: "channel_not_connected" }, { status: 202, headers: JSON_HEADERS });
+        let insertedEvents = 0;
+        for (const connection of connections.results) {
+          const stored = await persistNormalizedProviderEvent(env.DB, connection.account_id, event);
+          if (!stored.ok) return jsonError(503, "provider_event_store_unavailable", "Could not store the Kick stream event.", requestId);
+          if (stored.inserted) { insertedEvents++; await publishProviderEvent(env, connection.account_id, event); }
+          const health = await env.DB.prepare(
+            "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'kick', 'healthy', NULL, ?, NULL, NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'healthy', observed_at = excluded.observed_at, detail_code = NULL",
+          ).bind(crypto.randomUUID(), connection.account_id, new Date().toISOString()).run();
+          if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not update Kick provider health.", requestId);
+        }
+        return Response.json({ status: insertedEvents ? "accepted" : "duplicate", insertedEvents, deliveredAccounts: connections.results.length }, { headers: JSON_HEADERS });
       }
 
       let payload: unknown;
@@ -1062,12 +1184,138 @@ export default {
       }, { headers: JSON_HEADERS });
     }
 
+    if (url.pathname === "/api/v1/providers/youtube/poll" && request.method === "POST") {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!isTrustedMutationOrigin(request, env)) return jsonError(403, "untrusted_origin", "Request origin is not trusted.", requestId);
+      if (!env.DB || !env.TOKEN_ENCRYPTION_KEY || !env.YOUTUBE_CLIENT_ID || !env.YOUTUBE_CLIENT_SECRET) {
+        return jsonError(503, "youtube_poll_not_configured", "YouTube credentials, token storage, and the database must be configured.", requestId);
+      }
+
+      const current = await readProviderTokens(env.DB, authContext.userId, "youtube", env.TOKEN_ENCRYPTION_KEY);
+      if (!current.ok) return jsonError(409, "youtube_not_connected", "Connect a YouTube channel before polling its live chat.", requestId);
+      let accessToken = current.accessToken;
+      const now = new Date();
+      if (!current.tokenExpiresAt || !Number.isFinite(Date.parse(current.tokenExpiresAt)) || Date.parse(current.tokenExpiresAt) <= now.getTime() + 5 * 60_000) {
+        if (!current.refreshToken) return jsonError(409, "youtube_reconnect_required", "Reconnect YouTube to refresh the expired authorization.", requestId);
+        try {
+          const refreshResponse = await fetch("https://oauth2.googleapis.com/token", {
+            method: "POST",
+            headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+            body: new URLSearchParams({
+              client_id: env.YOUTUBE_CLIENT_ID, client_secret: env.YOUTUBE_CLIENT_SECRET,
+              grant_type: "refresh_token", refresh_token: current.refreshToken,
+            }),
+          });
+          if (!refreshResponse.ok) return jsonError(502, "youtube_token_refresh_failed", "Google could not refresh the YouTube authorization. Reconnect the provider if this continues.", requestId);
+          const refreshPayload: unknown = await refreshResponse.json();
+          if (!refreshPayload || typeof refreshPayload !== "object" || Array.isArray(refreshPayload)) return jsonError(502, "youtube_token_refresh_failed", "Google returned an invalid token response.", requestId);
+          const token = refreshPayload as Record<string, unknown>;
+          if (typeof token.access_token !== "string" || !token.access_token
+            || typeof token.expires_in !== "number" || !Number.isFinite(token.expires_in) || token.expires_in <= 0) {
+            return jsonError(502, "youtube_token_refresh_failed", "Google returned an invalid token response.", requestId);
+          }
+          accessToken = token.access_token;
+          const saved = await persistProviderTokens(env.DB, {
+            accountId: authContext.userId, provider: "youtube", externalAccountId: current.externalAccountId,
+            displayName: current.displayName, accessToken, refreshToken: typeof token.refresh_token === "string" ? token.refresh_token : current.refreshToken,
+            tokenExpiresAt: new Date(now.getTime() + token.expires_in * 1000).toISOString(), scopes: current.scopes, now,
+          }, env.TOKEN_ENCRYPTION_KEY);
+          if (!saved.ok) return jsonError(503, "youtube_token_store_failed", "Could not securely store refreshed YouTube credentials.", requestId);
+        } catch {
+          return jsonError(502, "youtube_token_refresh_failed", "Could not refresh the YouTube authorization.", requestId);
+        }
+      }
+
+      try {
+        const broadcastUrl = new URL("https://www.googleapis.com/youtube/v3/liveBroadcasts");
+        broadcastUrl.searchParams.set("part", "snippet");
+        broadcastUrl.searchParams.set("broadcastStatus", "active");
+        broadcastUrl.searchParams.set("mine", "true");
+        broadcastUrl.searchParams.set("maxResults", "5");
+        const broadcastResponse = await fetch(broadcastUrl, { headers: { authorization: "Bearer " + accessToken, accept: "application/json" } });
+        if (!broadcastResponse.ok) return jsonError(502, "youtube_live_broadcast_lookup_failed", "YouTube could not list the active broadcast. Check API access and quota.", requestId);
+        const broadcastPayload: unknown = await broadcastResponse.json();
+        const broadcastItems = broadcastPayload && typeof broadcastPayload === "object" && !Array.isArray(broadcastPayload)
+          ? (broadcastPayload as Record<string, unknown>).items : null;
+        const broadcast = Array.isArray(broadcastItems) ? broadcastItems.find(item => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+          const snippet = (item as Record<string, unknown>).snippet;
+          return !!snippet && typeof snippet === "object" && !Array.isArray(snippet)
+            && typeof (snippet as Record<string, unknown>).liveChatId === "string";
+        }) as Record<string, unknown> | undefined : undefined;
+        const snippet = broadcast && typeof broadcast.snippet === "object" && broadcast.snippet !== null && !Array.isArray(broadcast.snippet)
+          ? broadcast.snippet as Record<string, unknown> : null;
+        const liveChatId = typeof snippet?.liveChatId === "string" ? snippet.liveChatId : "";
+        if (!liveChatId) {
+          await env.DB.prepare("DELETE FROM youtube_live_chat_cursors WHERE account_id = ?").bind(authContext.userId).run();
+          await env.DB.prepare(
+            "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'youtube', 'degraded', NULL, ?, 'no_active_live_chat', NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'degraded', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = 'no_active_live_chat', viewer_count_observed_at = NULL",
+          ).bind(crypto.randomUUID(), authContext.userId, new Date().toISOString()).run();
+          return Response.json({ status: "not_live", insertedMessages: 0, insertedEvents: 0, pollAfterMs: 15_000 }, { headers: JSON_HEADERS });
+        }
+
+        const cursor = await env.DB.prepare("SELECT live_chat_id AS liveChatId, next_page_token AS nextPageToken FROM youtube_live_chat_cursors WHERE account_id = ? LIMIT 1")
+          .bind(authContext.userId).first<{ liveChatId: string; nextPageToken: string | null }>();
+        const pageToken = cursor?.liveChatId === liveChatId ? cursor.nextPageToken : null;
+        const messagesUrl = new URL("https://www.googleapis.com/youtube/v3/liveChat/messages");
+        messagesUrl.searchParams.set("liveChatId", liveChatId);
+        messagesUrl.searchParams.set("part", "id,snippet,authorDetails");
+        messagesUrl.searchParams.set("maxResults", "200");
+        if (pageToken) messagesUrl.searchParams.set("pageToken", pageToken);
+        const messagesResponse = await fetch(messagesUrl, { headers: { authorization: "Bearer " + accessToken, accept: "application/json" } });
+        if (!messagesResponse.ok) {
+          await env.DB.prepare(
+            "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'youtube', 'degraded', NULL, ?, 'live_chat_api_error', NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'degraded', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = 'live_chat_api_error', viewer_count_observed_at = NULL",
+          ).bind(crypto.randomUUID(), authContext.userId, new Date().toISOString()).run();
+          return jsonError(502, "youtube_live_chat_fetch_failed", "YouTube could not return live chat messages. Check the channel's live-chat availability and API quota.", requestId);
+        }
+        const messagesPayload: unknown = await messagesResponse.json();
+        if (!messagesPayload || typeof messagesPayload !== "object" || Array.isArray(messagesPayload)) return jsonError(502, "youtube_live_chat_invalid_response", "YouTube returned an invalid live-chat response.", requestId);
+        const payload = messagesPayload as Record<string, unknown>;
+        const items = Array.isArray(payload.items) ? payload.items : [];
+        const channelName = current.displayName ?? current.externalAccountId;
+        let insertedMessages = 0;
+        let insertedEvents = 0;
+        const receivedAt = new Date();
+        for (const item of items) {
+          const message = normalizeYouTubeChatMessage(item, channelName, receivedAt);
+          if (message) {
+            const stored = await persistNormalizedChatMessage(env.DB, authContext.userId, message);
+            if (!stored.ok) return jsonError(503, "youtube_chat_store_failed", "Could not store YouTube live chat.", requestId);
+            if (stored.inserted) { insertedMessages++; await publishChatMessage(env, authContext.userId, message); }
+            continue;
+          }
+          const event = normalizeYouTubeProviderEvent(item, current.externalAccountId, channelName, receivedAt);
+          if (event) {
+            const stored = await persistNormalizedProviderEvent(env.DB, authContext.userId, event);
+            if (!stored.ok) return jsonError(503, "youtube_event_store_failed", "Could not store a YouTube stream event.", requestId);
+            if (stored.inserted) { insertedEvents++; await publishProviderEvent(env, authContext.userId, event); }
+          }
+        }
+        const nextPageToken = typeof payload.nextPageToken === "string" && payload.nextPageToken.length <= 2048 ? payload.nextPageToken : null;
+        const savedCursor = await env.DB.prepare(
+          "INSERT INTO youtube_live_chat_cursors (account_id, live_chat_id, next_page_token, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET live_chat_id = excluded.live_chat_id, next_page_token = excluded.next_page_token, updated_at = excluded.updated_at",
+        ).bind(authContext.userId, liveChatId, nextPageToken, receivedAt.toISOString()).run();
+        if (!savedCursor.success) return jsonError(503, "youtube_cursor_store_failed", "Could not save the YouTube live-chat cursor.", requestId);
+        const health = await env.DB.prepare(
+          "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'youtube', 'healthy', NULL, ?, NULL, NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'healthy', observed_at = excluded.observed_at, detail_code = NULL",
+        ).bind(crypto.randomUUID(), authContext.userId, receivedAt.toISOString()).run();
+        if (!health.success) return jsonError(503, "youtube_health_update_failed", "Could not update YouTube provider health.", requestId);
+        const pollingIntervalMillis = typeof payload.pollingIntervalMillis === "number" && Number.isFinite(payload.pollingIntervalMillis)
+          ? Math.max(5_000, Math.min(60_000, payload.pollingIntervalMillis)) : 10_000;
+        return Response.json({ status: "polled", insertedMessages, insertedEvents, pollAfterMs: pollingIntervalMillis }, { headers: JSON_HEADERS });
+      } catch {
+        return jsonError(502, "youtube_poll_failed", "YouTube live-chat polling failed.", requestId);
+      }
+    }
+
     if (url.pathname === "/api/v1/chat/messages" && request.method === "GET") {
       const authContext = await getAuthContext(request, env);
       if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
       if (!env.DB) return jsonError(503, "database_unavailable", "Database binding is not configured.", requestId);
       const result = await env.DB.prepare(
-        "SELECT * FROM (SELECT id, provider, external_message_id AS externalMessageId, channel_id AS channelId, channel_name AS channelName, sender_id AS senderId, sender_name AS senderName, text, sent_at AS sentAt, received_at AS receivedAt, badges_json AS badgesJson FROM chat_messages WHERE account_id = ? UNION ALL SELECT id, provider, external_event_id AS externalMessageId, channel_id AS channelId, channel_name AS channelName, COALESCE(actor_id, 'event') AS senderId, COALESCE(actor_name, 'Stream event') AS senderName, CASE kind WHEN 'follow' THEN 'followed the channel' WHEN 'subscription' THEN 'subscribed' WHEN 'gift' THEN 'sent ' || COALESCE(CASE WHEN quantity IS NOT NULL THEN CAST(quantity AS TEXT) || ' × ' ELSE '' END, '') || COALESCE(item_name, 'a gift') WHEN 'bits' THEN 'cheered ' || COALESCE(CAST(amount AS TEXT), '') || ' Bits' WHEN 'super_chat' THEN 'sent a Super Chat' WHEN 'donation' THEN 'donated ' || COALESCE(currency, '') || COALESCE(CAST(amount AS TEXT), '') WHEN 'like' THEN 'liked the stream' WHEN 'share' THEN 'shared the stream' WHEN 'raid' THEN 'raided the channel' WHEN 'member_join' THEN 'joined the stream' WHEN 'viewer_count' THEN 'Viewer count: ' || COALESCE(CAST(quantity AS TEXT), 'unknown') ELSE kind END || CASE WHEN message IS NOT NULL THEN ': ' || message ELSE '' END AS text, occurred_at AS sentAt, received_at AS receivedAt, '{}' AS badgesJson FROM provider_events WHERE account_id = ?) ORDER BY receivedAt DESC LIMIT 100",
+        "SELECT * FROM (SELECT id, provider, external_message_id AS externalMessageId, channel_id AS channelId, channel_name AS channelName, sender_id AS senderId, sender_name AS senderName, text, sent_at AS sentAt, received_at AS receivedAt, badges_json AS badgesJson FROM chat_messages WHERE account_id = ? UNION ALL SELECT id, provider, external_event_id AS externalMessageId, channel_id AS channelId, channel_name AS channelName, COALESCE(actor_id, 'event') AS senderId, COALESCE(actor_name, 'Stream event') AS senderName, CASE kind WHEN 'follow' THEN 'followed the channel' WHEN 'subscription' THEN 'subscribed' WHEN 'gift' THEN 'sent ' || COALESCE(CASE WHEN quantity IS NOT NULL THEN CAST(quantity AS TEXT) || ' x ' ELSE '' END, '') || COALESCE(item_name, 'a gift') WHEN 'bits' THEN 'cheered ' || COALESCE(CAST(amount AS TEXT), '') || ' Bits' WHEN 'super_chat' THEN 'sent a Super Chat' WHEN 'donation' THEN 'donated ' || COALESCE(currency, '') || COALESCE(CAST(amount AS TEXT), '') WHEN 'like' THEN 'liked the stream' WHEN 'share' THEN 'shared the stream' WHEN 'raid' THEN 'raided the channel' WHEN 'member_join' THEN 'joined the stream' WHEN 'viewer_count' THEN 'Viewer count: ' || COALESCE(CAST(quantity AS TEXT), 'unknown') ELSE kind END || CASE WHEN message IS NOT NULL THEN ': ' || message ELSE '' END AS text, occurred_at AS sentAt, received_at AS receivedAt, '{}' AS badgesJson FROM provider_events WHERE account_id = ?) ORDER BY receivedAt DESC LIMIT 100",
       ).bind(authContext.userId, authContext.userId).all<{
         id: string; provider: string; externalMessageId: string; channelId: string; channelName: string;
         senderId: string; senderName: string; text: string; sentAt: string; receivedAt: string; badgesJson: string;
