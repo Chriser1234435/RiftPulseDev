@@ -16,7 +16,7 @@ The shared contract package is the source of truth for the V1 API vocabulary:
 - `GET /api/v1/version` — V1 modules and API version.
 - `POST /api/v1/pairing/challenges` — validates a mod-generated code, stores an HMAC-SHA-256 digest, and returns a random challenge ID and expiry without echoing the code.
 - `GET /api/v1/pairing/challenges/:id` — reports the challenge status.
-- `POST /api/v1/pairing/claim` — validates the request shape but intentionally returns an explicit not-yet-implemented response until website authentication is implemented. It does not bind a device to a caller-provided account ID.
+- `POST /api/v1/pairing/claim` — validates the request shape and returns 401 until website authentication is implemented. It does not bind a device to a caller-provided account ID.
 
 Pairing challenges expire after five minutes. A device can have at most three active challenges. Expired code digests are cleared so they can no longer be claimed. The five-digit space is small, so this is not sufficient by itself for a production pairing flow: before launch, add authenticated website claiming, robust per-IP/device rate limiting, attempt throttling, collision retries, and security review. Never log raw codes or include them in error telemetry.
 
@@ -28,7 +28,7 @@ Provider access and refresh token columns are placeholders for ciphertext only. 
 
 ## Validation results
 
-- `npm test` passed: strict TypeScript check, 12 unit tests, isolated SQLite schema/constraint test, and Worker build.
+- `npm test` passed: strict TypeScript check, 15 unit tests, isolated SQLite schema/constraint test, and Worker build.
 - Local Wrangler D1 migration `0001_initial.sql` applied successfully; a subsequent migration listing reported no pending migrations.
 - Local schema inventory showed all nine application tables plus Wrangler migration metadata; `PRAGMA foreign_key_check` returned no violations.
 - Local API smoke test verified health/version, challenge creation without echoing the code, and challenge status. Claim remains blocked until website authentication exists.
