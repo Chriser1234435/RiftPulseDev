@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync, sign } from "node:crypto";
+import { createHmac, generateKeyPairSync, sign } from "node:crypto";
 import test from "node:test";
 import { extractKickPublicKey, verifyKickWebhookSignature } from "../../packages/shared/src/kick-webhook.ts";
+import { verifyTwitchEventSubSignature } from "../../packages/shared/src/twitch-eventsub.ts";
 import {
   ChatMessageDeduplicator, aggregateViewerCounts, emptyProviderHealth, normalizeKickChatMessage,
   normalizeTwitchChatMessage, normalizeYouTubeChatMessage, reconnectDelayMs,
@@ -72,16 +73,28 @@ test("viewer aggregation distinguishes unknown, zero, stale, and partial data", 
   assert.equal(aggregateViewerCounts([emptyProviderHealth("twitch", now)], now).total, null);
 });
 
+test("verifies Twitch EventSub HMAC signatures and rejects stale or tampered messages", async () => {
+  const secret = "unit-test-eventsub-secret-32-chars";
+  const messageId = "twitch-event-1";
+  const timestamp = now.toISOString();
+  const rawBody = JSON.stringify({ subscription: { type: "channel.chat.message" }, event: { message_id: "m1" } });
+  const signature = "sha256=" + createHmac("sha256", secret).update(messageId + timestamp + rawBody).digest("hex");
+  const input = { messageId, timestamp, signature, rawBody };
+  assert.equal(await verifyTwitchEventSubSignature(input, secret, now), true);
+  assert.equal(await verifyTwitchEventSubSignature({ ...input, rawBody: rawBody + " " }, secret, now), false);
+  assert.equal(await verifyTwitchEventSubSignature(input, secret, new Date(now.getTime() + 20 * 60_000)), false);
+  assert.equal(await verifyTwitchEventSubSignature({ ...input, signature: "sha256=bad" }, secret, now), false);
+  assert.equal(await verifyTwitchEventSubSignature(input, "short", now), false);
+});
+
 test("verifies Kick webhook signatures and rejects stale or modified payloads", async () => {
   const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   const publicKeyPem = publicKey.export({ type: "spki", format: "pem" }).toString();
   const messageId = "01JTESTMESSAGEID";
   const timestamp = now.toISOString();
   const rawBody = JSON.stringify({ message_id: "kick-message-1", content: "hello" });
-  const signed = messageId + "." + timestamp + "." + rawBody;
-  const signature = sign("RSA-SHA256", Buffer.from(signed), privateKey).toString("base64");
+  const signature = sign("RSA-SHA256", Buffer.from(messageId + "." + timestamp + "." + rawBody), privateKey).toString("base64");
   const input = { messageId, timestamp, signature, rawBody };
-
   assert.equal(extractKickPublicKey(publicKeyPem), publicKeyPem.trim());
   assert.equal(extractKickPublicKey(JSON.stringify({ data: { public_key: publicKeyPem } })), publicKeyPem.trim());
   assert.equal(extractKickPublicKey("not a key"), null);

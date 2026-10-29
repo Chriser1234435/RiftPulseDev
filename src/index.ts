@@ -1,9 +1,10 @@
 import type { Env } from "./env.ts";
 import { API_VERSION, PROVIDERS, SUPPORTED_MODULES, validateCreatePairingChallenge, validateClaimPairing } from "../packages/contracts/src/v1.ts";
 import type { ProviderHealthSnapshot } from "../packages/contracts/src/chat-v1.ts";
-import { aggregateViewerCounts, emptyProviderHealth, normalizeKickChatMessage } from "../packages/shared/src/chat.ts";
+import { aggregateViewerCounts, emptyProviderHealth, normalizeKickChatMessage, normalizeTwitchChatMessage } from "../packages/shared/src/chat.ts";
 import { persistNormalizedChatMessage } from "../packages/shared/src/chat-persistence.ts";
 import { extractKickPublicKey, verifyKickWebhookSignature } from "../packages/shared/src/kick-webhook.ts";
+import { verifyTwitchEventSubSignature } from "../packages/shared/src/twitch-eventsub.ts";
 import { claimPairingChallenge, createPairingChallenge } from "../packages/shared/src/pairing.ts";
 import { createAuth } from "./auth.ts";
 export { ChatRoom } from "./chat-room.ts";
@@ -177,6 +178,107 @@ export default {
       let settings: unknown = {};
       try { settings = JSON.parse(nextSettings); } catch { settings = {}; }
       return Response.json({ moduleKey, enabled: enabled === 1, settings, updatedAt: now }, { headers: JSON_HEADERS });
+    }
+
+    if (url.pathname === "/api/v1/providers/twitch/webhook" && request.method === "POST") {
+      if (!env.DB) return jsonError(503, "database_unavailable", "Database binding is not configured.", requestId);
+      if (!env.TWITCH_EVENTSUB_SECRET || env.TWITCH_EVENTSUB_SECRET.length < 10 || env.TWITCH_EVENTSUB_SECRET.length > 100) {
+        return jsonError(503, "twitch_webhook_not_configured", "Twitch EventSub webhook verification is not configured.", requestId);
+      }
+      const declaredLength = Number(request.headers.get("content-length") ?? "0");
+      if (Number.isFinite(declaredLength) && declaredLength > 65_536) {
+        return jsonError(413, "body_too_large", "Webhook body exceeds 64 KiB.", requestId);
+      }
+      const rawBody = await request.text();
+      if (new TextEncoder().encode(rawBody).byteLength > 65_536) {
+        return jsonError(413, "body_too_large", "Webhook body exceeds 64 KiB.", requestId);
+      }
+      const messageId = request.headers.get("Twitch-Eventsub-Message-Id");
+      const timestamp = request.headers.get("Twitch-Eventsub-Message-Timestamp");
+      const signature = request.headers.get("Twitch-Eventsub-Message-Signature");
+      const messageType = request.headers.get("Twitch-Eventsub-Message-Type");
+      if (!messageId || !timestamp || !signature || !messageType) {
+        return jsonError(400, "webhook_headers_missing", "Required Twitch EventSub headers are missing.", requestId);
+      }
+      const validSignature = await verifyTwitchEventSubSignature(
+        { messageId, timestamp, signature, rawBody }, env.TWITCH_EVENTSUB_SECRET,
+      );
+      if (!validSignature) return jsonError(401, "invalid_webhook_signature", "Twitch EventSub signature or timestamp is invalid.", requestId);
+
+      let payload: unknown;
+      try { payload = JSON.parse(rawBody) as unknown; }
+      catch { return jsonError(400, "invalid_webhook_json", "Webhook body is not valid JSON.", requestId); }
+      const root = typeof payload === "object" && payload !== null && !Array.isArray(payload)
+        ? payload as Record<string, unknown> : null;
+      if (!root) return jsonError(400, "invalid_webhook_json", "Webhook body must be a JSON object.", requestId);
+
+      if (messageType === "webhook_callback_verification") {
+        const challenge = typeof root.challenge === "string" ? root.challenge : "";
+        if (!challenge || challenge.length > 512) return jsonError(400, "invalid_challenge", "Twitch challenge is invalid.", requestId);
+        return new Response(challenge, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+      }
+
+      if (messageType === "revocation") {
+        const subscription = typeof root.subscription === "object" && root.subscription !== null
+          ? root.subscription as Record<string, unknown> : {};
+        const condition = typeof subscription.condition === "object" && subscription.condition !== null
+          ? subscription.condition as Record<string, unknown> : {};
+        const broadcasterId = typeof condition.broadcaster_user_id === "string" ? condition.broadcaster_user_id : "";
+        if (!broadcasterId) return Response.json({ status: "ignored", reason: "missing_broadcaster" }, { status: 202, headers: JSON_HEADERS });
+        const now = new Date().toISOString();
+        const connections = await env.DB.prepare(
+          "SELECT account_id FROM provider_connections WHERE provider = 'twitch' AND external_account_id = ?",
+        ).bind(broadcasterId).all<{ account_id: string }>();
+        if (!connections.success) return jsonError(503, "provider_connection_lookup_failed", "Could not route Twitch revocation.", requestId);
+        for (const connection of connections.results ?? []) {
+          const updatedConnection = await env.DB.prepare(
+            "UPDATE provider_connections SET status = 'degraded', updated_at = ? WHERE account_id = ? AND provider = 'twitch'",
+          ).bind(now, connection.account_id).run();
+          if (!updatedConnection.success) return jsonError(503, "provider_connection_update_failed", "Could not update Twitch connection health.", requestId);
+          const updatedHealth = await env.DB.prepare(
+            "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'twitch', 'degraded', NULL, ?, 'eventsub_revoked', NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'degraded', observed_at = excluded.observed_at, detail_code = 'eventsub_revoked'",
+          ).bind(crypto.randomUUID(), connection.account_id, now).run();
+          if (!updatedHealth.success) return jsonError(503, "provider_health_update_failed", "Could not update Twitch provider health.", requestId);
+        }
+        return Response.json({ status: "revocation_recorded" }, { headers: JSON_HEADERS });
+      }
+
+      if (messageType !== "notification") {
+        return Response.json({ status: "ignored", reason: "unsupported_message_type" }, { status: 202, headers: JSON_HEADERS });
+      }
+      const subscription = typeof root.subscription === "object" && root.subscription !== null
+        ? root.subscription as Record<string, unknown> : {};
+      if (subscription.type !== "channel.chat.message" || subscription.version !== "1") {
+        return Response.json({ status: "ignored", reason: "unsupported_event" }, { status: 202, headers: JSON_HEADERS });
+      }
+      const message = normalizeTwitchChatMessage(payload);
+      if (!message) return jsonError(400, "invalid_chat_event", "Twitch chat event is missing required message fields.", requestId);
+      const connections = await env.DB.prepare(
+        "SELECT account_id FROM provider_connections WHERE provider = 'twitch' AND external_account_id = ? AND status = 'connected'",
+      ).bind(message.channelId).all<{ account_id: string }>();
+      if (!connections.success) return jsonError(503, "provider_connection_lookup_failed", "Could not route the Twitch event.", requestId);
+      if (!connections.results?.length) {
+        return Response.json({ status: "ignored", reason: "channel_not_connected" }, { status: 202, headers: JSON_HEADERS });
+      }
+      let insertedMessages = 0;
+      const now = new Date().toISOString();
+      for (const connection of connections.results) {
+        const persisted = await persistNormalizedChatMessage(env.DB, connection.account_id, message);
+        if (!persisted.ok) return jsonError(503, "chat_store_unavailable", "Could not store the Twitch chat event.", requestId);
+        if (persisted.inserted) {
+          insertedMessages++;
+          await publishChatMessage(env, connection.account_id, message);
+        }
+        const health = await env.DB.prepare(
+          "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'twitch', 'healthy', NULL, ?, NULL, NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'healthy', observed_at = excluded.observed_at, detail_code = NULL",
+        ).bind(crypto.randomUUID(), connection.account_id, now).run();
+        if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not update Twitch provider health.", requestId);
+      }
+      return Response.json({
+        status: insertedMessages > 0 ? "accepted" : "duplicate",
+        deliveredAccounts: connections.results.length,
+        insertedMessages,
+      }, { headers: JSON_HEADERS });
     }
 
     if (url.pathname === "/api/v1/realtime" && request.method === "GET") {

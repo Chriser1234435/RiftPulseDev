@@ -10,11 +10,12 @@ Status: **in progress**. The local chat data model, message normalizers, dedupe/
 - Viewer aggregation includes only fresh counts from connected/degraded providers. Unknown remains `null`, not zero; partial availability is explicit.
 - D1 migration `0003_chat_foundation.sql` adds `chat_messages`, per-account/provider/external-message uniqueness, a recent-message index, and a separate `viewer_count_observed_at` timestamp.
 - A D1 persistence helper stores normalized messages without retaining raw provider payloads.
+- Twitch EventSub webhook verification using the configured HMAC-SHA256 secret, exact raw body, and freshness window; handles signed challenge verification, chat notifications, and revocation status updates.
 - Kick webhook verification using the current official public-key endpoint, RSA-SHA256 signature over the message ID, timestamp, and exact raw body; rejects stale signatures, caps body size, and does not log payloads or signatures.
-- A signed `POST /api/v1/providers/kick/webhook` receiver for version 1 `chat.message.sent` events. It routes only to connected Kick channel mappings, persists idempotently, and updates health without falsely refreshing viewer counts.
+- Signed `POST /api/v1/providers/twitch/webhook` and `POST /api/v1/providers/kick/webhook` receivers. Twitch handles EventSub challenge/notification/revocation messages; Kick handles version 1 `chat.message.sent`. Both route only to mapped connected channels, persist idempotently, and do not falsely refresh viewer counts.
 - Authenticated `GET /api/v1/chat/messages` and `GET /api/v1/integrations/health` endpoints.
 - Per-account Durable Object WebSocket room and authenticated `GET /api/v1/realtime` route with trusted-Origin enforcement.
-- Kick webhook events are forwarded to the account's realtime room after successful idempotent persistence; delivery is best-effort.
+- Valid Twitch and Kick chat events are forwarded to the account's realtime room after successful idempotent persistence; delivery is best-effort.
 - Dashboard Recent chat panel applies incoming realtime events and reconnects after disconnection.
 - Dashboard Provider health panel with honest empty states and unknown viewer counts.
 - The new schema migration is present in the local migration ledger and the local database has the chat table and viewer freshness column.

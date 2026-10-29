@@ -43,6 +43,7 @@ Status: Step 6 local website/auth foundation complete. Step 7 chat/provider foun
 
 ## Step 7 - Chat and providers (in progress)
 - [x] Add shared normalized chat message and provider health contracts.
+- [x] Add signed Twitch EventSub callback handling for challenge verification, chat notifications, and revocation; OAuth/subscription lifecycle remains gated.
 - [x] Add normalizers for Twitch EventSub, YouTube Live Chat, and Kick chat payloads.
 - [x] Add bounded TTL deduplication and full-jitter reconnect backoff helpers.
 - [x] Aggregate only fresh provider viewer counts; unknown stays null and partial data is explicit.

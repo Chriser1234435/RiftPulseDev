@@ -59,6 +59,10 @@ Requires an authenticated account session. Returns up to 100 recent normalized m
 
 Requires an authenticated account session. Returns health snapshots for the four provider keys and a viewer aggregate. Only fresh counts from connected/degraded providers contribute. `total: null` means unknown, not zero; `partial: true` means at least one count is fresh while other providers are missing or stale. The API is a read model; provider ingestion and viewer-count updates are still being implemented.
 
+### `POST /api/v1/providers/twitch/webhook`
+
+Public Twitch EventSub callback. Requires the local-only `TWITCH_EVENTSUB_SECRET` (10–100 characters) and verifies the HMAC-SHA256 signature over message ID + timestamp + exact raw body before processing. Rejects stale messages, caps bodies at 64 KiB, returns the signed challenge for callback verification, handles channel-chat notifications, and marks mapped connections degraded on signed revocation events. OAuth and subscription creation are not implemented yet.
+
 ### `POST /api/v1/providers/kick/webhook`
 
 Public provider callback; it does not use a browser account session. It requires Kick message ID, timestamp, signature, event type, and version headers. The receiver fetches and briefly caches Kick's current public key, verifies the RSA-SHA256 signature over `messageId.timestamp.rawBody`, rejects stale timestamps, caps the body at 64 KiB, accepts version 1 `chat.message.sent` events, and routes only to connected channel mappings. Stored messages are idempotent by account/provider/message ID. Unsupported events and unmapped channels receive a successful ignored response. OAuth and subscription setup remain unfinished.
