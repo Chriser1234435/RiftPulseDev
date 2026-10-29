@@ -239,6 +239,37 @@ function App() {
     };
   }, [user?.id, enabled.chat]);
 
+  // Poll durable chat history as a fallback so messages still appear if realtime delivery is interrupted.
+  useEffect(() => {
+    if (!user?.id || !enabled.chat) return;
+    let active = true;
+    let loading = false;
+    const refreshStoredChat = async () => {
+      if (loading) return;
+      loading = true;
+      try {
+        const response = await fetch("/api/v1/chat/messages", { credentials: "include" });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!active || !Array.isArray(data.messages)) return;
+        setChatMessages(current => {
+          const byId = new Map<string, ChatMessage>();
+          for (const message of current) byId.set(message.id, message);
+          for (const message of data.messages as ChatMessage[]) {
+            if (message && typeof message.id === "string") byId.set(message.id, message);
+          }
+          return [...byId.values()].slice(-100);
+        });
+        setChatError(false);
+      } catch {
+        // Realtime remains available; a later poll will retry history retrieval.
+      } finally {
+        loading = false;
+      }
+    };
+    const timer = window.setInterval(() => { void refreshStoredChat(); }, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [user?.id, enabled.chat]);
   useEffect(() => {
     let alive = true;
     fetch("/api/v1/health").then(r => { if (!r.ok) throw new Error("API unavailable"); return r.json(); })
