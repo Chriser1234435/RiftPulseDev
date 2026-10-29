@@ -17,6 +17,8 @@ accountsUrl.pathname = ingestUrl.pathname.replace(
   "/api/v1/internal/tiktok/accounts",
 );
 if (accountsUrl.pathname === ingestUrl.pathname) throw new Error("Could not derive the internal TikTok account-list URL.");
+const statusUrl = new URL(accountsUrl);
+statusUrl.pathname = statusUrl.pathname.replace("/accounts", "/status");
 const secret = process.env.TIKTOK_CONNECTOR_INGEST_SECRET!;
 if (secret.length < 32) throw new Error("TIKTOK_CONNECTOR_INGEST_SECRET must be at least 32 characters.");
 const pollMs = Math.max(15_000, Number(process.env.TIKTOK_ACCOUNT_POLL_MS) || 30_000);
@@ -56,6 +58,17 @@ class AccountRunner {
     this.runPromise = this.run();
   }
 
+  private reportStatus(status: "connected" | "disconnected" | "error", channelId?: string): void {
+    void fetch(statusUrl, {
+      method: "POST",
+      headers: { authorization: "Bearer " + secret, "content-type": "application/json" },
+      body: JSON.stringify({ accountId: this.accountId, username: this.username, status, ...(channelId ? { channelId } : {}) }),
+      signal: AbortSignal.timeout(5_000),
+    }).then(response => {
+      if (!response.ok) console.warn("TikTok status update was rejected (HTTP " + response.status + ").");
+    }).catch(() => console.warn("TikTok status update failed; the next connection sync will retry."));
+  }
+
   private enqueue(kind: "chat" | "event", payload: unknown, eventName?: string): void {
     if (this.stopped || !this.roomId) return;
     this.queue = this.queue.then(async () => {
@@ -89,6 +102,7 @@ class AccountRunner {
   private requestReconnect(reason: string): void {
     if (this.stopped) return;
     this.roomId = "";
+    this.reportStatus(reason === "connector error" ? "error" : "disconnected");
     this.reconnectRequested = true;
     console.info(`TikTok connection for a configured account ended (${reason}); reconnect scheduled.`);
     this.reconnectWaiter?.();
@@ -102,7 +116,7 @@ class AccountRunner {
         const state = await this.connection.connect();
         const roomId = String(state.roomId ?? "");
         if (!roomId) throw new Error("TikTok connector did not return a room ID.");
-        if (!this.reconnectRequested) this.roomId = roomId;
+        if (!this.reconnectRequested) { this.roomId = roomId; this.reportStatus("connected", roomId); }
         attempt = 0;
         console.info(`TikTok LIVE connected for configured account @${this.username}; room ID hidden.`);
         await new Promise<void>(resolve => {
@@ -112,6 +126,7 @@ class AccountRunner {
         this.reconnectWaiter = null;
       } catch (error) {
         this.roomId = "";
+        this.reportStatus("disconnected");
         console.warn(`TikTok connection attempt failed for @${this.username}; account may be offline or connector unavailable.`, error instanceof Error ? error.message : "unknown error");
       }
       if (this.stopped) break;
@@ -130,6 +145,7 @@ class AccountRunner {
     if (this.stopped) return;
     this.stopped = true;
     this.roomId = "";
+    this.reportStatus("disconnected");
     this.reconnectWaiter?.();
     this.retryWaiter?.();
     try { await this.connection.disconnect(); } catch { /* already disconnected */ }

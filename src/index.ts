@@ -309,6 +309,44 @@ export default {
       return Response.json({ accounts: accounts.slice(0, 50) }, { headers: JSON_HEADERS });
     }
 
+    if (url.pathname === "/api/v1/internal/tiktok/status" && request.method === "POST") {
+      if (!env.DB || !env.TIKTOK_CONNECTOR_INGEST_SECRET) return jsonError(503, "tiktok_connector_not_configured", "TikTok connector is not configured.", requestId);
+      if ((request.headers.get("authorization") ?? "") !== "Bearer " + env.TIKTOK_CONNECTOR_INGEST_SECRET) {
+        return jsonError(401, "internal_auth_required", "Connector authentication is required.", requestId);
+      }
+      let body: unknown;
+      try { body = await request.json(); } catch { return jsonError(400, "invalid_json", "Status payload must be valid JSON.", requestId); }
+      if (!body || typeof body !== "object" || Array.isArray(body)) return jsonError(400, "invalid_status_payload", "Status payload must be an object.", requestId);
+      const value = body as Record<string, unknown>;
+      if (typeof value.accountId !== "string" || !value.accountId || typeof value.username !== "string"
+        || !["connected", "disconnected", "error"].includes(String(value.status))
+        || (value.channelId !== undefined && (typeof value.channelId !== "string" || value.channelId.length > 128))) {
+        return jsonError(400, "invalid_status_payload", "Account, username, and supported status are required.", requestId);
+      }
+      const account = await env.DB.prepare("SELECT id FROM accounts WHERE id = ? LIMIT 1").bind(value.accountId).first<{ id: string }>();
+      if (!account) return jsonError(404, "connector_account_not_found", "The target RiftPulse account does not exist.", requestId);
+      const configured = await env.DB.prepare("SELECT settings_json AS settingsJson FROM provider_settings WHERE account_id = ? AND provider = 'tiktok' LIMIT 1").bind(value.accountId).first<{ settingsJson: string }>();
+      let username = "";
+      try { const settings = configured ? JSON.parse(configured.settingsJson) as Record<string, unknown> : {}; username = typeof settings.username === "string" ? settings.username.trim().replace(/^@/, "") : ""; } catch { username = ""; }
+      const requestedUsername = value.username.trim().replace(/^@/, "");
+      if (value.status !== "disconnected" && (!username || username.toLowerCase() !== requestedUsername.toLowerCase())) {
+        return jsonError(403, "tiktok_account_binding_mismatch", "The status does not match the configured TikTok username.", requestId);
+      }
+      const now = new Date().toISOString();
+      const isConnected = value.status === "connected";
+      const connection = await env.DB.prepare(
+        "INSERT INTO provider_connections (id, account_id, provider, external_account_id, display_name, status, connected_at, updated_at) VALUES (?, ?, 'tiktok', ?, ?, ?, ?, ?) ON CONFLICT(account_id, provider) DO UPDATE SET external_account_id = CASE WHEN excluded.status = 'connected' THEN excluded.external_account_id ELSE provider_connections.external_account_id END, display_name = excluded.display_name, status = excluded.status, connected_at = CASE WHEN excluded.status = 'connected' THEN COALESCE(provider_connections.connected_at, excluded.connected_at) ELSE provider_connections.connected_at END, updated_at = excluded.updated_at",
+      ).bind(crypto.randomUUID(), value.accountId, typeof value.channelId === "string" ? value.channelId : null, requestedUsername, isConnected ? "connected" : value.status === "error" ? "error" : "disconnected", isConnected ? now : null, now).run();
+      if (!connection.success) return jsonError(503, "provider_connection_store_unavailable", "Could not update TikTok connection status.", requestId);
+      const healthStatus = isConnected ? "healthy" : value.status === "error" ? "error" : "disconnected";
+      const detail = isConnected ? null : value.status === "error" ? "connector_error" : "tiktok_stream_offline";
+      const health = await env.DB.prepare(
+        "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'tiktok', ?, NULL, ?, ?, NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = excluded.status, viewer_count = NULL, observed_at = excluded.observed_at, detail_code = excluded.detail_code, viewer_count_observed_at = NULL",
+      ).bind(crypto.randomUUID(), value.accountId, healthStatus, now, detail).run();
+      if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not update TikTok health status.", requestId);
+      return Response.json({ status: healthStatus }, { headers: JSON_HEADERS });
+    }
+
     if (url.pathname === "/api/v1/providers/tiktok/ingest" && request.method === "POST") {
       if (!env.DB || !env.TIKTOK_CONNECTOR_INGEST_SECRET || !env.CHAT_ROOM) {
         return jsonError(503, "tiktok_connector_not_configured", "The isolated TikTok connector bridge is not configured.", requestId);

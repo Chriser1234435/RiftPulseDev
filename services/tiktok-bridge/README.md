@@ -31,3 +31,5 @@ This integration is unofficial, reverse-engineered, and best-effort; TikTok can 
 ### Railway runtime
 
 The Railway development service must stay paused unless an explicitly approved LIVE test is underway. The bridge discovers accounts automatically when running; do not restore the live start command just to test account discovery.
+
+The bridge reports each account's connected, disconnected, or error state through a second secret-protected internal endpoint. The API stores connection status and per-account integration health independently; disconnecting or changing a saved username stops the prior connection and marks it disconnected.
