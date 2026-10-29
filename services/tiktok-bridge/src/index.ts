@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { TikTokLiveConnection, WebcastEvent } from "tiktok-live-connector";
 
-const required = ["RIFTPULSE_INGEST_URL", "TIKTOK_CONNECTOR_INGEST_SECRET"] as const;
+if (process.env.RIFTPULSE_CONNECTOR_DISABLED === "true") {`r`n  console.info("TikTok connector disabled by configuration; no accounts will be connected.");`r`n  await new Promise<void>(() => {});`r`n}`r`n`r`nconst required = ["RIFTPULSE_INGEST_URL", "TIKTOK_CONNECTOR_INGEST_SECRET"] as const;
 for (const key of required) if (!process.env[key]) throw new Error(`Missing required environment variable: ${key}`);
 
 const ingestUrl = new URL(process.env.RIFTPULSE_INGEST_URL!);
