@@ -131,9 +131,8 @@ class AccountRunner {
       }
       if (this.stopped) break;
       attempt++;
-      const capMs = Math.min(60_000, 1_000 * (2 ** Math.min(attempt, 6)));
       await new Promise<void>(resolve => {
-        const timer = setTimeout(() => { this.retryWaiter = null; resolve(); }, Math.floor(capMs / 2 + Math.random() * capMs / 2));
+        const timer = setTimeout(() => { this.retryWaiter = null; resolve(); }, pollMs);
         this.retryWaiter = () => { clearTimeout(timer); this.retryWaiter = null; resolve(); };
       });
       try { await this.connection.disconnect(); } catch { /* already disconnected */ }
