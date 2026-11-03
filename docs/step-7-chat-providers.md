@@ -45,3 +45,14 @@ Twitch OAuth uses the official authorization-code flow and validates the resulti
 - YouTube OAuth and authenticated on-demand live-chat polling are implemented locally but require Google OAuth credentials and a real active broadcast to validate. Polling happens only when the signed-in dashboard is opened/refreshed; there is no always-running local poller. Viewer-count collection remains unfinished. Kick OAuth is implemented locally but requires Kick app credentials; webhook subscription setup and live validation remain unfinished.
 - TikTok uses an isolated unofficial Node.js bridge (`services/tiktok-bridge`), signed HMAC/timestamp-bounded ingestion, normalized chat/event persistence, and realtime event fan-out. It is best-effort; the live connector has not been run against a live stream yet.
 - No production Cloudflare resources, remote D1, DNS, OAuth app registrations, or deployments have been changed.
+
+
+## Verification update — 2026-11-03 (Step 7 remains in progress)
+
+- Re-ran the full `npm test` suite from the local RiftPulseDev checkout: TypeScript typecheck passed; all 41 unit/contract tests passed; the isolated SQLite migration integration test passed; and the Vite worker/client production-mode build completed successfully. The build script removed `.dev.vars` from its output.
+- Re-ran the TikTok bridge TypeScript typecheck (`services/tiktok-bridge`, `npm run typecheck`): passed.
+- Local OAuth configuration audit checked only key presence (no secret values printed): Twitch client ID/secret and EventSub secret, YouTube client ID/secret, Kick client ID/secret, and token encryption key are not configured in `.dev.vars`. Therefore real OAuth, EventSub subscription reconciliation/delivery, YouTube live-chat polling against an authorized live channel, and Kick webhook lifecycle tests remain unverified and cannot be honestly marked complete.
+- Attempted `npm run test:auth:local` against the local Vite server. It failed at signup with HTTP 403 `INVALID_ORIGIN`. The local worker's effective trusted-origin configuration did not accept the smoke-test Origin; this is a test/configuration defect to resolve before claiming the auth integration smoke test passes. The local dev server was stopped after the attempt.
+- No real TikTok LIVE session was available/started in this verification run; bridge payload/reconnect behavior is still only covered by code review and unit-level normalization/signature tests.
+
+**Step 7 acceptance status: IN PROGRESS / BLOCKED on provider app credentials, approved live test channels/stream, and fixing the local auth smoke-test origin setup.** No production deployment, production DNS change, or production resource modification was performed.
