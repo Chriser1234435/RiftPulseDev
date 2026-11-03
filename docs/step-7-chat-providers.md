@@ -56,3 +56,9 @@ Twitch OAuth uses the official authorization-code flow and validates the resulti
 - No real TikTok LIVE session was available/started in this verification run; bridge payload/reconnect behavior is still only covered by code review and unit-level normalization/signature tests.
 
 **Step 7 acceptance status: IN PROGRESS / BLOCKED on provider app credentials, approved live test channels/stream, and fixing the local auth smoke-test origin setup.** No production deployment, production DNS change, or production resource modification was performed.
+
+
+### Follow-up auth integration verification — 2026-11-03
+
+- Re-ran `npm run test:auth:local` with `RIFTPULSE_BASE_URL` set to the isolated Cloudflare development preview (`https://riftpulse-dev.chrismeten0.workers.dev`): **PASS**, exit code 0. Confirmed signup/session issuance, trusted-Origin/CSRF checks, module settings persistence, pairing claim/list/revoke, and sign-out. The test creates a temporary `.invalid` test account in the development environment; it did not touch production.
+- This passes the integration flow on the intended dev preview. The direct localhost invocation still has the noted effective-origin mismatch and should be corrected as a separate local test harness/config item.
