@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   Activity, ArrowDownRight, ArrowRight, ArrowUpRight, AudioLines, Bell, Check, ChevronDown,
-  CircleHelp, Command, ExternalLink, Gamepad2, Headphones, LayoutDashboard,
+  CircleHelp, Command, Download, ExternalLink, Gamepad2, Headphones, LayoutDashboard,
   Link2, LockKeyhole, LogOut, MessageCircle, Monitor, MoreHorizontal, Music2,
   Plus, Radio, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, Sparkles,
   Unplug, Users, WandSparkles, X, Zap,
@@ -576,6 +576,7 @@ function App() {
   const navItems = [
     { label: "Overview", icon: LayoutDashboard },
     { label: "Modules", icon: WandSparkles },
+    { label: "Downloads", icon: Download },
     { label: "Integrations", icon: Link2 },
     { label: "Devices", icon: Gamepad2 },
     { label: "Settings", icon: SlidersHorizontal },
@@ -626,6 +627,7 @@ function App() {
               else if (item.label === "Devices") document.getElementById("devices")?.scrollIntoView({ behavior: "smooth", block: "start" });
               else if (item.label === "Integrations") document.getElementById("integrations")?.scrollIntoView({ behavior: "smooth", block: "start" });
               else if (item.label === "Modules") document.getElementById("modules")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              else if (item.label === "Downloads") document.getElementById("downloads")?.scrollIntoView({ behavior: "smooth", block: "start" });
               else window.scrollTo({ top: 0, behavior: "smooth" });
             }}><Icon size={17} /><span>{item.label}</span>{item.label === "Integrations" && <span className="nav-count">4</span>}</button>;
           })}
@@ -686,6 +688,23 @@ function App() {
               <ModuleCard title="Chat" description="Bring Twitch, YouTube, Kick and TikTok LIVE messages into your game." tag="COMMUNITY" icon={<MessageCircle size={21} />} accent="purple" enabled={enabled.chat} onToggle={() => toggleModule("chat")} onConfigure={() => setModal("settings")} status="Ready to configure" />
               <ModuleCard title="BSR Song Request" description="Let your viewers request Beat Saber tracks with a simple chat command." tag="INTERACTIVE" icon={<Music2 size={21} />} accent="cyan" enabled={enabled["bsr-song-request"]} onToggle={() => toggleModule("bsr-song-request")} onConfigure={() => setModal("settings")} status={`Command: ${command}`} />
             </div>
+          </section>
+
+          <section className="section-block downloads-block" id="downloads">
+            <div className="section-heading"><div><div className="section-overline">TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Bootstrap packages for the pinned Beat Saber 1.40.8 targets.</p></div><span className="settings-badge">v0.1.0 · DEV</span></div>
+            <div className="downloads-grid">
+              <article className="panel-card download-card">
+                <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR · BSIPA</b><small>Windows / Beat Saber 1.40.8</small></div><span className="download-state">DLL built</span></div>
+                <p>Install the bootstrap DLL into your test instance's Plugins folder. Includes a README with installation details.</p>
+                <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr.zip" download><Download size={15} /> Download PCVR ZIP</a>
+              </article>
+              <article className="panel-card download-card">
+                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest · Scotland2</b><small>Standalone / Beat Saber 1.40.8</small></div><span className="download-state">QMOD built</span></div>
+                <p>QMOD package for QuestPatcher/BSManager. Headset install and in-game startup are still awaiting device testing.</p>
+                <a className="primary-button download-link" href="/downloads/RiftPulse.Quest.qmod" download><Download size={15} /> Download Quest QMOD</a>
+              </article>
+            </div>
+            <div className="integration-footnote"><ShieldCheck size={15} /><span>Development bootstrap only: pairing, in-game menu, live chat, realtime event delivery, and BSR request handling are not wired in these binaries yet. Use a test instance; not a release build.</span></div>
           </section>
 
           <section className="section-block integrations-block" id="integrations">

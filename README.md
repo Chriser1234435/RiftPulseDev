@@ -21,7 +21,7 @@ A clean-room RiftPulse project for Beat Saber PCVR and standalone Quest.
 
 ## Current status
 
-- The isolated development preview is deployed at https://riftpulse-dev.chrismeten0.workers.dev.
+- The isolated development preview is deployed at https://riftpulse-dev.chrismeten0.workers.dev. Its Downloads page exposes PCVR and Quest 0.1.0 bootstrap packages; see [development build notes](docs/dev-builds.md) for install and runtime-test limits.
 - The separate Cloudflare D1 database `riftpulse-dev-db` has migrations `0001` through `0007` applied.
 - The Worker health endpoint is responding successfully. No production DNS or production database has been changed.
 - Remote preview authentication is gated by `ALLOW_REMOTE_DEV_AUTH=true`, HTTPS on a `workers.dev` hostname, a single exact trusted origin, and a valid `BETTER_AUTH_SECRET`. Development accounts are temporary and do not use email verification.

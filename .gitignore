@@ -30,3 +30,10 @@ Thumbs.db
 *.log
 *.tmp
 *.temp
+
+# Quest/QPM generated dependencies and local toolchain state
+mods/quest/extern/
+mods/quest/build/
+mods/quest/ndkpath.txt
+mods/quest/mod.json
+mods/quest/RiftPulse.qmod
