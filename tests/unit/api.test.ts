@@ -5,7 +5,7 @@ import type { D1Database, D1PreparedStatement, D1Result, Env } from "../../src/e
 
 type ChallengeRow = {
   id: string; device_id: string; platform: "pcvr" | "quest"; game_version: string;
-  mod_version: string; code_digest: string | null; status: string;
+  mod_version: string; code_digest: string | null; device_credential_digest: string | null; status: string;
   created_at: string; expires_at: string; claimed_at: string | null;
 };
 
@@ -41,10 +41,10 @@ class FakeStatement implements D1PreparedStatement {
   async run<T>(): Promise<D1Result<T>> {
     const q = this.query.toLowerCase();
     if (q.includes("insert into pairing_challenges")) {
-      const [id, device_id, platform, game_version, mod_version, code_digest, created_at, expires_at] =
-        this.values as [string, string, "pcvr" | "quest", string, string, string, string, string];
+      const [id, device_id, platform, game_version, mod_version, code_digest, device_credential_digest, created_at, expires_at] =
+        this.values as [string, string, "pcvr" | "quest", string, string, string, string, string, string];
       this.db.challenges.set(id, {
-        id, device_id, platform, game_version, mod_version, code_digest, status: "pending",
+        id, device_id, platform, game_version, mod_version, code_digest, device_credential_digest, status: "pending",
         created_at, expires_at, claimed_at: null,
       });
       return { success: true, meta: { changes: 1 } };
@@ -87,6 +87,7 @@ test("pairing challenge stores a digest and never returns the raw code", async (
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       code: "04271",
+      deviceCredential: "a".repeat(64),
       deviceId: "550e8400-e29b-41d4-a716-446655440000",
       platform: "quest",
       gameVersion: "1.40.8_7379",
@@ -102,6 +103,9 @@ test("pairing challenge stores a digest and never returns the raw code", async (
   assert.ok(saved);
   assert.notEqual(saved.code_digest, "04271");
   assert.match(saved.code_digest ?? "", /^[0-9a-f]{64}$/);
+  assert.match(saved.device_credential_digest ?? "", /^[0-9a-f]{64}$/);
+  assert.notEqual(saved.device_credential_digest, "a".repeat(64));
+  assert.equal("deviceCredential" in payload, false);
 
   const statusResponse = await call(`/api/v1/pairing/challenges/${payload.challengeId}`, {}, bindings);
   assert.equal(statusResponse.status, 200);
@@ -112,6 +116,7 @@ test("rejects an active code collision and caps active challenges per device", a
   const bindings = env();
   const baseBody = {
     code: "10001",
+    deviceCredential: "b".repeat(64),
     deviceId: "550e8400-e29b-41d4-a716-446655440000",
     platform: "quest",
     gameVersion: "1.40.8_7379",

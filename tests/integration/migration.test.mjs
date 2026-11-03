@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const migrations = ["0001_initial.sql", "0002_auth.sql", "0003_chat_foundation.sql", "0004_provider_oauth_states.sql", "0005_kick_pkce.sql", "0006_provider_events.sql", "0007_youtube_live_chat_cursor.sql"].map(name =>
+const migrations = ["0001_initial.sql", "0002_auth.sql", "0003_chat_foundation.sql", "0004_provider_oauth_states.sql", "0005_kick_pkce.sql", "0006_provider_events.sql", "0007_youtube_live_chat_cursor.sql", "0008_provider_settings.sql", "0009_device_credentials.sql"].map(name =>
   readFileSync(join(root, "migrations", name), "utf8")
 );
 
@@ -27,6 +27,10 @@ test("application, authentication, chat, OAuth-state, and provider-event migrati
     for (const table of expected) assert.equal(tables.has(table), true, `missing table: ${table}`);
     const healthColumns = new Set(db.prepare("PRAGMA table_info(integration_health)").all().map(row => row.name));
     assert.equal(healthColumns.has("viewer_count_observed_at"), true);
+    const deviceColumns = new Set(db.prepare("PRAGMA table_info(devices)").all().map(row => row.name));
+    const pairingColumns = new Set(db.prepare("PRAGMA table_info(pairing_challenges)").all().map(row => row.name));
+    assert.equal(deviceColumns.has("credential_digest"), true);
+    assert.equal(pairingColumns.has("device_credential_digest"), true);
 
     db.prepare("INSERT INTO accounts (id, created_at, updated_at) VALUES (?, ?, ?)").run("acct", "now", "now");
     assert.throws(() => db.prepare(

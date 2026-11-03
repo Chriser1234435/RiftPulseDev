@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 import { createAuth } from "../../src/auth.ts";
 import worker from "../../src/index.ts";
 import { WebSocketServer } from "ws";
@@ -141,15 +142,26 @@ server.on("upgrade", async (req, socket, head) => {
     const origin = req.headers.origin;
     const trusted = (process.env.TRUSTED_ORIGINS || "https://riftpulse-dev.chrismeten0.workers.dev").split(",").map(x => x.trim());
     if (url.pathname !== "/api/v1/realtime" || !origin || !trusted.includes(origin)) return socket.destroy();
-    const auth = createAuth(env);
-    if (!auth) return socket.destroy();
     const headers = new Headers();
     for (const [name, value] of Object.entries(req.headers)) {
       if (Array.isArray(value)) headers.set(name, value.join(", "));
       else if (value !== undefined) headers.set(name, value);
     }
-    const session = await auth.api.getSession({ headers });
-    const accountId = session?.user?.id;
+
+    let accountId = null;
+    const bearer = headers.get("authorization") ?? "";
+    const deviceCredentialMatch = bearer.match(/^Bearer ([0-9a-f]{64})$/i);
+    if (deviceCredentialMatch) {
+      const credentialDigest = createHash("sha256").update(deviceCredentialMatch[1].toLowerCase(), "utf8").digest("hex");
+      accountId = await db.prepare(
+        "SELECT devices.account_id AS accountId FROM devices JOIN accounts ON accounts.id = devices.account_id WHERE devices.credential_digest = ? AND devices.revoked_at IS NULL AND accounts.status = 'active' LIMIT 1",
+      ).bind(credentialDigest).first("accountId");
+    } else {
+      const auth = createAuth(env);
+      if (!auth) return socket.destroy();
+      const session = await auth.api.getSession({ headers });
+      accountId = session?.user?.id ?? null;
+    }
     if (!accountId) return socket.destroy();
     wss.handleUpgrade(req, socket, head, (ws) => {
       if (!socketsByAccount.has(accountId)) socketsByAccount.set(accountId, new Set());

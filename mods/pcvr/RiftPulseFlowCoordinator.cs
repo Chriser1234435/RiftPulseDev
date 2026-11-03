@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -21,7 +22,7 @@ namespace RiftPulse.Pcvr
         private bool _connecting;
 
         [UIValue("pairing-code")]
-        public string PairingCode { get; private set; } = "— — — — —";
+        public string PairingCode { get; private set; } = "â€” â€” â€” â€” â€”";
 
         [UIValue("status-text")]
         public string StatusText { get; private set; } = "Connect your Beat Saber installation to your RiftPulse account.";
@@ -31,8 +32,8 @@ namespace RiftPulse.Pcvr
         {
             if (_connecting) return;
             _connecting = true;
-            PairingCode = "— — — — —";
-            StatusText = "Generating a secure pairing code…";
+            PairingCode = "â€” â€” â€” â€” â€”";
+            StatusText = "Generating a secure pairing codeâ€¦";
             NotifyPropertyChanged(nameof(PairingCode));
             NotifyPropertyChanged(nameof(StatusText));
 
@@ -40,12 +41,13 @@ namespace RiftPulse.Pcvr
             {
                 var code = GenerateFiveDigitCode();
                 var deviceId = LoadOrCreateDeviceId();
+                var deviceCredential = LoadOrCreateDeviceCredential();
                 PairingCode = code;
-                StatusText = "Registering code with RiftPulse…";
+                StatusText = "Registering code with RiftPulseâ€¦";
                 NotifyPropertyChanged(nameof(PairingCode));
                 NotifyPropertyChanged(nameof(StatusText));
 
-                var body = "{\"code\":\"" + code + "\",\"deviceId\":\"" + deviceId +
+                var body = "{\"code\":\"" + code + "\",\"deviceCredential\":\"" + deviceCredential + "\",\"deviceId\":\"" + deviceId +
                     "\",\"platform\":\"pcvr\",\"gameVersion\":\"" + GameVersion +
                     "\",\"modVersion\":\"" + ModVersion + "\"}";
                 using (var request = new HttpRequestMessage(HttpMethod.Post, ApiBase + "/pairing/challenges"))
@@ -109,7 +111,7 @@ namespace RiftPulse.Pcvr
                     var status = statusMatch.Groups[1].Value;
                     if (status == "claimed")
                     {
-                        StatusText = "✓ RiftPulse account linked! Device pairing succeeded.";
+                        StatusText = "âœ“ RiftPulse account linked! Device pairing succeeded.";
                         NotifyPropertyChanged(nameof(StatusText));
                         return;
                     }
@@ -140,9 +142,27 @@ namespace RiftPulse.Pcvr
             return created;
         }
 
+        private static string LoadOrCreateDeviceCredential()
+        {
+            var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RiftPulse");
+            Directory.CreateDirectory(folder);
+            var path = Path.Combine(folder, "pcvr-device-credential.bin");
+            if (File.Exists(path))
+            {
+                var protectedBytes = File.ReadAllBytes(path);
+                var plainBytes = ProtectedData.Unprotect(protectedBytes, null, DataProtectionScope.CurrentUser);
+                return BitConverter.ToString(plainBytes).Replace("-", "").ToLowerInvariant();
+            }
+            var credentialBytes = new byte[32];
+            using (var rng = RandomNumberGenerator.Create()) rng.GetBytes(credentialBytes);
+            var protectedCredential = ProtectedData.Protect(credentialBytes, null, DataProtectionScope.CurrentUser);
+            File.WriteAllBytes(path, protectedCredential);
+            return BitConverter.ToString(credentialBytes).Replace("-", "").ToLowerInvariant();
+        }
+
         private static string GenerateFiveDigitCode()
         {
-            using (var rng = System.Security.Cryptography.RandomNumberGenerator.Create())
+            using (var rng = RandomNumberGenerator.Create())
             {
                 var bytes = new byte[4];
                 rng.GetBytes(bytes);

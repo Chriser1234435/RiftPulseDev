@@ -76,7 +76,10 @@ Implement command parsing, BeatSaver metadata validation, cooldowns, queue rules
 - [x] Compile PCVR adapter against the installed Beat Saber 1.40.8 / BSML assemblies (0 warnings, 0 errors) after pairing integration.
 - [x] Register mod-generated five-digit pairing challenges with the dev API and poll challenge status from the PCVR UI.
 - [x] Display claimed state in the PCVR UI when the account claims the code on the dev website.
-- [ ] Implement authenticated device credential exchange and device-authenticated realtime access.
+- [x] Generate a 32-byte installation credential and protect it locally with Windows DPAPI CurrentUser.
+- [x] Store only the credential SHA-256 digest in D1 and transfer it to the device record when the website claims pairing.
+- [x] Add a Railway API WebSocket bearer credential validation branch restricted to active, non-revoked devices (deployment and runtime test pending).
+- [ ] Deploy the Railway API development update and validate device-authenticated WebSocket connections.
 - [ ] Implement the module dashboard, Chat and BSR toggles, and settings navigation.
 - [ ] Port the same UI flow to Quest.
 - [ ] Runtime-test both targets in actual Beat Saber installations/headsets.

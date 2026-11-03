@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { digestPairingCode } from "../../packages/shared/src/pairing.ts";
+import { digestPairingCode, digestDeviceCredential } from "../../packages/shared/src/pairing.ts";
 
 test("pairing code digest is deterministic for the same key and code", async () => {
   const first = await digestPairingCode("04271", "local-test-key-that-is-long-enough-32chars");
@@ -20,4 +20,12 @@ test("different five-digit codes produce different HMAC digests", async () => {
   const first = await digestPairingCode("04271", "local-test-key-that-is-long-enough-32chars");
   const second = await digestPairingCode("04272", "local-test-key-that-is-long-enough-32chars");
   assert.notEqual(first, second);
+});
+
+test("device credentials are stored as a SHA-256 digest, not the bearer value", async () => {
+  const credential = "c".repeat(64);
+  const digest = await digestDeviceCredential(credential);
+  assert.match(digest, /^[0-9a-f]{64}$/);
+  assert.notEqual(digest, credential);
+  assert.equal(digest, await digestDeviceCredential(credential.toUpperCase()));
 });

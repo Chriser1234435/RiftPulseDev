@@ -17,7 +17,7 @@ test("exports the intended V1 modules and providers", () => {
 
 test("accepts a well-formed five-digit mod-generated pairing challenge", () => {
   const result = validateCreatePairingChallenge({
-    code: "00427", deviceId: "550e8400-e29b-41d4-a716-446655440000",
+    code: "00427", deviceCredential: "ab".repeat(32), deviceId: "550e8400-e29b-41d4-a716-446655440000",
     platform: "quest", gameVersion: "1.40.8_7379", modVersion: "0.1.0-dev",
   });
   assert.equal(result.ok, true);
@@ -32,7 +32,7 @@ test("rejects malformed codes, identifiers, platform names and oversized version
     assert.equal(validateClaimPairing({ code }).ok, false, `rejected code: ${code}`);
   }
   assert.equal(validateCreatePairingChallenge({
-    code: "12345", deviceId: "not-a-uuid", platform: "android",
+    code: "12345", deviceCredential: "not-secret", deviceId: "not-a-uuid", platform: "android",
     gameVersion: "x".repeat(65), modVersion: "",
   }).ok, false);
 });
