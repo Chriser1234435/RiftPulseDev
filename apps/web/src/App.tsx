@@ -691,11 +691,11 @@ function App() {
           </section>
 
           <section className="section-block downloads-block" id="downloads">
-            <div className="section-heading"><div><div className="section-overline">TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Bootstrap packages for the pinned Beat Saber 1.40.8 targets.</p></div><span className="settings-badge">v0.1.0 · DEV</span></div>
+            <div className="section-heading"><div><div className="section-overline">TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Development packages for the pinned Beat Saber 1.40.8 targets. PCVR pairing challenge registration is wired; full device auth and game features remain in development.</p></div><span className="settings-badge">v0.1.0 · DEV</span></div>
             <div className="downloads-grid">
               <article className="panel-card download-card">
                 <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR · BSIPA</b><small>Windows / Beat Saber 1.40.8</small></div><span className="download-state">DLL built</span></div>
-                <p>Install the bootstrap DLL into your test instance's Plugins folder. Includes a README with installation details.</p>
+                <p>Install the PCVR DLL into your test instance's Plugins folder. Includes the in-game menu and API-registered five-digit pairing flow; realtime Chat and BSR are not implemented yet.</p>
                 <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr.zip" download><Download size={15} /> Download PCVR ZIP</a>
               </article>
               <article className="panel-card download-card">
@@ -704,7 +704,7 @@ function App() {
                 <a className="primary-button download-link" href="/downloads/RiftPulse.Quest.qmod" download><Download size={15} /> Download Quest QMOD</a>
               </article>
             </div>
-            <div className="integration-footnote"><ShieldCheck size={15} /><span>Development bootstrap only: pairing, in-game menu, live chat, realtime event delivery, and BSR request handling are not wired in these binaries yet. Use a test instance; not a release build.</span></div>
+            <div className="integration-footnote"><ShieldCheck size={15} /><span>Development build: PCVR in-game menu and website pairing challenge registration are wired. Secure device credentials, live chat, realtime event delivery, BSR, and Quest runtime testing are still pending. Use a test instance; not a release build.</span></div>
           </section>
 
           <section className="section-block integrations-block" id="integrations">
