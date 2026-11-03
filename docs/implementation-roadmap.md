@@ -1,6 +1,6 @@
 # RiftPulseDev - Proposed Roadmap
 
-Status: Step 6 local website/auth foundation complete. Step 7 chat/provider foundation is in progress. Production authentication and deployment remain gated on separate release checks and explicit authorization.
+Status: Step 6 local website/auth foundation complete. Step 7 chat/provider foundation is in progress. Step 9 PCVR menu/pairing UI prototype has begun (compiles); backend pairing and in-game runtime verification remain pending. Production authentication and deployment remain gated on separate release checks and explicit authorization.
 
 ## Step 3 - Architecture and design
 - [x] Define V1 scope: Chat + BSR Song Request only.
@@ -69,8 +69,16 @@ Status: Step 6 local website/auth foundation complete. Step 7 chat/provider foun
 ## Step 8 - BSR Song Request (not started)
 Implement command parsing, BeatSaver metadata validation, cooldowns, queue rules, and explicit error states.
 
-## Step 9 - PCVR and Quest integration (not started)
-Build the in-game pairing flow and UI for each target; test them separately on actual devices.
+## Step 9 - PCVR and Quest integration (in progress)
+- [x] Add a BSIPA RiftPulse button registration for the PCVR main menu.
+- [x] Add a dedicated PCVR FlowCoordinator and BSML pairing-screen prototype.
+- [x] Add a display-only five-digit code generation interaction with explicit preview-only status.
+- [x] Compile PCVR adapter against the installed Beat Saber 1.40.8 / BSML assemblies (0 warnings, 0 errors).
+- [ ] Register a real pairing challenge with the API and implement authenticated device credential exchange.
+- [ ] Complete the connection status / verification / success transition.
+- [ ] Implement the module dashboard, Chat and BSR toggles, and settings navigation.
+- [ ] Port the same UI flow to Quest.
+- [ ] Runtime-test both targets in actual Beat Saber installations/headsets.
 
 ## Step 10 - End-to-end validation and deployment (not started)
 Run security, API, provider-mock, PCVR, and Quest tests. Deploy only to isolated Cloudflare development resources and a development hostname after explicit authorization. Test the actual development domain, not only previews.

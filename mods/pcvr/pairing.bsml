@@ -1,0 +1,15 @@
+<bg>
+  <vertical spacing="2" pad-left="4" pad-right="4" pad-top="3" pad-bottom="3">
+    <text text="RIFTPULSE" font-size="12" align="Center"/>
+    <text text="Connect your Beat Saber installation" font-size="5" align="Center"/>
+    <horizontal bg="round-rect-panel" pad-left="4" pad-right="4" pad-top="3" pad-bottom="3">
+      <vertical spacing="1">
+        <text text="PAIRING CODE" font-size="4" align="Center"/>
+        <text text="pairing-code" font-size="10" align="Center"/>
+      </vertical>
+    </horizontal>
+    <text text="status-text" font-size="4" align="Center"/>
+    <button text="Connect to RiftPulse" on-click="connect-click"/>
+    <text text="Chat and BSR modules will appear here after account pairing." font-size="3.5" align="Center"/>
+  </vertical>
+</bg>

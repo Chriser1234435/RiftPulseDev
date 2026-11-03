@@ -10,9 +10,33 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Plugin.cs" />
+    <Compile Include="RiftPulseFlowCoordinator.cs" />
+    <EmbeddedResource Include="pairing.bsml">
+      <LogicalName>RiftPulse.Pcvr.pairing.bsml</LogicalName>
+    </EmbeddedResource>
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net472" Version="1.0.3" PrivateAssets="All" />
     <Reference Include="IPA.Loader">
       <HintPath>C:\Users\chris\BSManager\BSInstances\1.40.8\Beat Saber_Data\Managed\IPA.Loader.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BSML">
+      <HintPath>C:\Users\chris\BSManager\BSInstances\1.40.8\Plugins\BSML.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="HMUI">
+      <HintPath>C:\Users\chris\BSManager\BSInstances\1.40.8\Beat Saber_Data\Managed\HMUI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BeatSaber.ViewSystem">
+      <HintPath>C:\Users\chris\BSManager\BSInstances\1.40.8\Beat Saber_Data\Managed\BeatSaber.ViewSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Main">
+      <HintPath>C:\Users\chris\BSManager\BSInstances\1.40.8\Beat Saber_Data\Managed\Main.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>C:\Users\chris\BSManager\BSInstances\1.40.8\Beat Saber_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

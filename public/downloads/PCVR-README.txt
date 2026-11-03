@@ -1,6 +1,1 @@
-﻿RiftPulse PCVR Development Bootstrap 0.1.0
-Target: Beat Saber PCVR 1.40.8 (BSIPA)
-
-Install: copy RiftPulse.Pcvr.dll into your Beat Saber instance Plugins folder.
-
-This is a development bootstrap only. It confirms BSIPA plugin compile/startup shape; it does not yet provide the RiftPulse in-game UI, pairing, chat, realtime, or BSR functionality. Install only in a test Beat Saber instance. Runtime loading is not yet verified.
+﻿PCVR UI prototype for Beat Saber 1.40.8. Includes a BSIPA main-menu RiftPulse button and BSML pairing screen. The displayed five-digit code is preview-only and is not registered with the website yet. Device authentication, dashboard, Chat, realtime, and BSR are not implemented. Runtime loading and in-game visual behavior require testing.
