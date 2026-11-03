@@ -10,6 +10,21 @@
     </horizontal>
     <text text="status-text" font-size="4" align="Center"/>
     <button text="Connect to RiftPulse" on-click="connect-click"/>
-    <text text="Chat and BSR modules will appear here after account pairing." font-size="3.5" align="Center"/>
+    <text text="MODULE DASHBOARD PREVIEW" font-size="5" align="Center"/>
+    <horizontal bg="round-rect-panel" pad-left="3" pad-right="3" pad-top="2" pad-bottom="2">
+      <vertical spacing="1">
+        <text text="CHAT" font-size="4"/>
+        <text text="Combined Twitch, YouTube, TikTok LIVE, and Kick chat feed." font-size="3.5"/>
+        <button text="chat-toggle-label" on-click="toggle-chat"/>
+      </vertical>
+    </horizontal>
+    <horizontal bg="round-rect-panel" pad-left="3" pad-right="3" pad-top="2" pad-bottom="2">
+      <vertical spacing="1">
+        <text text="BEAT SABER SONG REQUEST" font-size="4"/>
+        <text text="Let viewers request songs from supported live chats." font-size="3.5"/>
+        <button text="bsr-toggle-label" on-click="toggle-bsr"/>
+      </vertical>
+    </horizontal>
+    <text text="module-preview-status" font-size="3.5" align="Center"/>
   </vertical>
 </bg>

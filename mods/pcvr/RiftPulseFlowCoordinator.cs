@@ -27,6 +27,34 @@ namespace RiftPulse.Pcvr
         [UIValue("status-text")]
         public string StatusText { get; private set; } = "Connect your Beat Saber installation to your RiftPulse account.";
 
+        [UIValue("chat-toggle-label")]
+        public string ChatToggleLabel { get; private set; } = "CHAT MODULE: OFF (UI PREVIEW)";
+
+        [UIValue("bsr-toggle-label")]
+        public string BsrToggleLabel { get; private set; } = "BSR MODULE: OFF (UI PREVIEW)";
+
+        [UIValue("module-preview-status")]
+        public string ModulePreviewStatus { get; private set; } = "These prototype switches are local UI state only; they do not activate services or save settings.";
+
+        private bool _chatPreviewEnabled;
+        private bool _bsrPreviewEnabled;
+
+        [UIAction("toggle-chat")]
+        public void ToggleChatPreview()
+        {
+            _chatPreviewEnabled = !_chatPreviewEnabled;
+            ChatToggleLabel = _chatPreviewEnabled ? "CHAT MODULE: ON (UI PREVIEW)" : "CHAT MODULE: OFF (UI PREVIEW)";
+            NotifyPropertyChanged(nameof(ChatToggleLabel));
+        }
+
+        [UIAction("toggle-bsr")]
+        public void ToggleBsrPreview()
+        {
+            _bsrPreviewEnabled = !_bsrPreviewEnabled;
+            BsrToggleLabel = _bsrPreviewEnabled ? "BSR MODULE: ON (UI PREVIEW)" : "BSR MODULE: OFF (UI PREVIEW)";
+            NotifyPropertyChanged(nameof(BsrToggleLabel));
+        }
+
         [UIAction("connect-click")]
         public async void ConnectClicked()
         {
