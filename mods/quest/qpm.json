@@ -3,10 +3,7 @@
     "version":  "0.1.5",
     "sharedDir":  "shared",
     "dependenciesDir":  "extern",
-    "info":  {
-                 "name":  "RiftPulse",
-                 "id":  "riftpulse",
-                 "version":  "0.1.16",
+    "info":  { "name":  "RiftPulse", "id":  "riftpulse", "version":  "0.1.17",
                  "url":  "https://riftpulse-dev.chrismeten0.workers.dev",
                  "additionalData":  {
                                         "overrideSoName":  "libriftpulse.so",

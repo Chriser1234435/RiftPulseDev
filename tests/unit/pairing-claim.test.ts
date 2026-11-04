@@ -33,7 +33,7 @@ class ClaimStatement implements D1PreparedStatement {
 class ClaimDb implements D1Database {
   challenges = new Map<string, StoredChallenge>();
   accounts = new Set<string>(["account-1"]);
-  devices = new Map<string, { account_id: string; platform: string; credential_digest: string | null }>();
+  devices = new Map<string, { account_id: string; platform: string; credential_digest: string | null; revoked_at: string | null }>();
   prepare(query: string): D1PreparedStatement { return new ClaimStatement(this, query); }
   async batch<T>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]> {
     const [update, insert, cleanup] = statements as ClaimStatement[];
@@ -53,8 +53,13 @@ class ClaimDb implements D1Database {
       insert.values as [string, string, string, string, string];
     const claimed = this.challenges.get(insertId);
     if (claimed && claimed.status === "claimed" && claimed.claimed_account_id === insertAccount &&
-        claimed.claimed_at === insertClaimedAt && !this.devices.has(claimed.device_id)) {
-      this.devices.set(claimed.device_id, { account_id: insertAccount, platform: claimed.platform, credential_digest: claimed.device_credential_digest });
+        claimed.claimed_at === insertClaimedAt && (!existing || existing.account_id === insertAccount)) {
+      this.devices.set(claimed.device_id, {
+        account_id: insertAccount,
+        platform: claimed.platform,
+        credential_digest: claimed.device_credential_digest,
+        revoked_at: null,
+      });
       claimed.device_credential_digest = null;
       void createdAt; void lastSeenAt; void cleanup;
       return [{ success: true, meta: { changes: 1 } }, { success: true, meta: { changes: 1 } }, { success: true, meta: { changes: 1 } }];
@@ -90,6 +95,57 @@ test("claim helper binds a device to an active account once and clears the diges
 
   const replay = await claimPairingChallenge(db, "04271", secret, "account-1", now);
   assert.deepEqual(replay, { ok: false, reason: "invalid_or_expired" });
+});
+
+test("the same RiftPulse account can re-pair a revoked Quest device and rotate its credential", async () => {
+  const db = await seededDb();
+  const first = await claimPairingChallenge(db, "04271", secret, "account-1", now);
+  assert.equal(first.ok, true);
+  const device = db.devices.get("device-1");
+  assert.ok(device);
+  device.revoked_at = now.toISOString();
+
+  db.challenges.set("challenge-2", {
+    ...db.challenges.get("challenge-1")!,
+    id: "challenge-2",
+    code_digest: await digestPairingCode("88888", secret),
+    device_credential_digest: await digestDeviceCredential("d".repeat(64)),
+    status: "pending",
+    expires_at: "2026-10-29T16:05:00.000Z",
+    claimed_at: null,
+    claimed_account_id: null,
+  });
+
+  const second = await claimPairingChallenge(db, "88888", secret, "account-1", now);
+  assert.deepEqual(second, { ok: true, deviceId: "device-1", platform: "quest" });
+  assert.equal(db.devices.get("device-1")?.account_id, "account-1");
+  assert.equal(db.devices.get("device-1")?.credential_digest, await digestDeviceCredential("d".repeat(64)));
+  assert.equal(db.devices.get("device-1")?.revoked_at, null);
+  assert.equal(db.challenges.get("challenge-2")?.device_credential_digest, null);
+});
+
+test("a device already owned by one RiftPulse account cannot be claimed by another", async () => {
+  const db = await seededDb();
+  db.accounts.add("account-2");
+  const first = await claimPairingChallenge(db, "04271", secret, "account-1", now);
+  assert.equal(first.ok, true);
+  const originalCredential = db.devices.get("device-1")?.credential_digest;
+
+  db.challenges.set("challenge-2", {
+    ...db.challenges.get("challenge-1")!,
+    id: "challenge-2",
+    code_digest: await digestPairingCode("77777", secret),
+    device_credential_digest: await digestDeviceCredential("e".repeat(64)),
+    status: "pending",
+    expires_at: "2026-10-29T16:05:00.000Z",
+    claimed_at: null,
+    claimed_account_id: null,
+  });
+
+  const transfer = await claimPairingChallenge(db, "77777", secret, "account-2", now);
+  assert.deepEqual(transfer, { ok: false, reason: "invalid_or_expired" });
+  assert.equal(db.devices.get("device-1")?.account_id, "account-1");
+  assert.equal(db.devices.get("device-1")?.credential_digest, originalCredential);
 });
 
 test("expired challenges cannot be claimed", async () => {

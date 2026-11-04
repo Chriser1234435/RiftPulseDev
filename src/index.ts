@@ -1678,7 +1678,9 @@ export default {
         if (result.reason === "invalid_or_expired") return jsonError(400, "invalid_or_expired_code", "The pairing code is invalid, expired, or already used.", requestId);
         return jsonError(503, "pairing_store_unavailable", "Could not claim this device.", requestId);
       }
-      return Response.json({ status: "claimed", deviceId: result.deviceId, platform: result.platform }, { headers: JSON_HEADERS });
+      return Response.json({
+        status: "claimed", deviceId: result.deviceId, platform: result.platform, accountId: authContext.userId,
+      }, { headers: JSON_HEADERS });
     }
 
     if (url.pathname.startsWith("/api/")) return jsonError(404, "not_found", "API route was not found.", requestId);

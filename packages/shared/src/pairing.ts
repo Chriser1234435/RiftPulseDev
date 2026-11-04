@@ -86,16 +86,27 @@ export async function claimPairingChallenge(
            AND NOT EXISTS (SELECT 1 FROM devices WHERE id = pairing_challenges.device_id AND account_id <> ?)`,
       ).bind(claimTime, accountId, candidate.id, nowIso, accountId, accountId),
       db.prepare(
-        `INSERT INTO devices (id, account_id, platform, game_version, mod_version, credential_digest, created_at, last_seen_at)
-         SELECT device_id, claimed_account_id, platform, game_version, mod_version, device_credential_digest, ?, ?
+        `INSERT INTO devices (id, account_id, platform, game_version, mod_version, credential_digest, created_at, last_seen_at, revoked_at)
+         SELECT device_id, claimed_account_id, platform, game_version, mod_version, device_credential_digest, ?, ?, NULL
          FROM pairing_challenges
          WHERE id = ? AND status = 'claimed' AND claimed_account_id = ? AND claimed_at = ?
-         ON CONFLICT(id) DO NOTHING`,
+         ON CONFLICT(id) DO UPDATE SET
+           platform = excluded.platform,
+           game_version = excluded.game_version,
+           mod_version = excluded.mod_version,
+           credential_digest = excluded.credential_digest,
+           last_seen_at = excluded.last_seen_at,
+           revoked_at = NULL
+         WHERE devices.account_id = excluded.account_id`,
       ).bind(claimTime, claimTime, candidate.id, accountId, claimTime),
       db.prepare("UPDATE pairing_challenges SET device_credential_digest = NULL WHERE id = ? AND status = 'claimed' AND claimed_account_id = ? AND claimed_at = ?")
         .bind(candidate.id, accountId, claimTime),
     ]);
+    if (!results.every(result => result?.success)) return { ok: false, reason: "database_error" };
     if ((results[0]?.meta?.changes ?? 0) !== 1) return { ok: false, reason: "invalid_or_expired" };
+    if ((results[1]?.meta?.changes ?? 0) !== 1 || (results[2]?.meta?.changes ?? 0) !== 1) {
+      return { ok: false, reason: "database_error" };
+    }
     return { ok: true, deviceId: candidate.device_id, platform: candidate.platform };
   } catch {
     return { ok: false, reason: "database_error" };
