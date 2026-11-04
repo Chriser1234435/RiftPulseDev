@@ -15,12 +15,14 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <functional>
 #include <string>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <vector>
 
 using UnityEngine::Networking::UnityWebRequest;
 using UnityEngine::Networking::DownloadHandlerBuffer;
@@ -30,7 +32,7 @@ using UnityEngine::AsyncOperation;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://riftpulse-dev.chrismeten0.workers.dev/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.17";
+static constexpr const char* MOD_VERSION = "0.1.18";
 
 static HMUI::CurvedTextMeshPro* overview = nullptr;
 static UnityEngine::UI::Button* codeButton = nullptr;
@@ -42,6 +44,7 @@ static std::string deviceId;
 static std::string deviceCredential;
 static std::string challengeId;
 static bool requestInFlight = false;
+static std::string requestDiagnostic;
 static bool isPaired = false;
 static bool chatEnabled = true;
 static bool bsrEnabled = true;
@@ -179,30 +182,61 @@ static UnityWebRequest* CreateJsonRequest(const std::string& url,
                                           const std::string& methodName,
                                           const std::string& body,
                                           const std::string& credential = {}) {
+  requestDiagnostic.clear();
   try {
-    const auto* postMethod = FindRequestMethod(
-        "Post",
-        {il2cpp_utils::il2cpp_type_check::il2cpp_no_arg_type<StringW>::get(),
-         il2cpp_utils::il2cpp_type_check::il2cpp_no_arg_type<StringW>::get()});
-    if (!postMethod) return nullptr;
-    auto* request = cordl_internals::RunMethodRethrow<UnityWebRequest*, false>(
-        nullptr, postMethod, StringW(url), StringW(body));
-    if (!request) return nullptr;
+    // Beat Saber 1.40.8 uses Unity 2021.3. Use the explicit request constructor
+    // and UploadHandlerRaw so the body stays raw UTF-8 JSON (not form-encoded).
+    auto* request = UnityWebRequest::New_ctor(StringW(url), StringW(methodName));
+    if (!request) {
+      requestDiagnostic = "UnityWebRequest constructor returned null.";
+      return nullptr;
+    }
 
-    if (methodName != "POST") request->SetCustomMethod(StringW(methodName));
+    auto* uploadHandlerClass =
+        il2cpp_utils::GetClassFromName("UnityEngine.Networking", "UploadHandlerRaw");
+    if (!uploadHandlerClass) {
+      requestDiagnostic = "Unity UploadHandlerRaw class was not found.";
+      request->Dispose();
+      return nullptr;
+    }
+
+    const std::vector<uint8_t> bodyBytes(body.begin(), body.end());
+    const ArrayW<uint8_t> bodyArray(bodyBytes);
+    auto uploadHandler =
+        il2cpp_utils::New<UnityEngine::Networking::UploadHandler*>(
+            uploadHandlerClass, bodyArray);
+    if (!uploadHandler || !*uploadHandler) {
+      requestDiagnostic = "Unity UploadHandlerRaw(byte[]) could not be constructed.";
+      request->Dispose();
+      return nullptr;
+    }
+
+    request->set_uploadHandler(*uploadHandler);
     request->set_downloadHandler(DownloadHandlerBuffer::New_ctor());
-    if (!SetRequestHeader(request, "Content-Type", "application/json") ||
-        !SetRequestHeader(request, "Accept", "application/json")) {
+    request->set_timeout(20);
+
+    if (!SetRequestHeader(request, "Content-Type", "application/json")) {
+      requestDiagnostic = "Unity rejected the Content-Type request header.";
+      request->Dispose();
+      return nullptr;
+    }
+    if (!SetRequestHeader(request, "Accept", "application/json")) {
+      requestDiagnostic = "Unity rejected the Accept request header.";
       request->Dispose();
       return nullptr;
     }
     if (!credential.empty() &&
         !SetRequestHeader(request, "Authorization", "Bearer " + credential)) {
+      requestDiagnostic = "Unity rejected the device authorization header.";
       request->Dispose();
       return nullptr;
     }
     return request;
+  } catch (const std::exception& error) {
+    requestDiagnostic = std::string("Request construction exception: ") + error.what();
+    return nullptr;
   } catch (...) {
+    requestDiagnostic = "Unknown exception while constructing UnityWebRequest.";
     return nullptr;
   }
 }
@@ -249,6 +283,7 @@ static bool SendAsync(UnityWebRequest* request, RequestCompletion completion) {
   auto* downloadHandler = request->get_downloadHandler();
   auto* operation = request->SendWebRequest();
   if (!operation) {
+    requestDiagnostic = "Unity SendWebRequest returned null.";
     request->Dispose();
     return false;
   }
@@ -258,7 +293,11 @@ static bool SendAsync(UnityWebRequest* request, RequestCompletion completion) {
       std::function<void(AsyncOperation*)>(
           [request, downloadHandler, completion](AsyncOperation*) {
             const int64_t responseCode = request->get_responseCode();
-            const std::string responseBody = GetResponseText(downloadHandler);
+            std::string responseBody = GetResponseText(downloadHandler);
+            const std::string nativeError = static_cast<std::string>(request->get_error());
+            if (!nativeError.empty()) {
+              requestDiagnostic = nativeError;
+            }
             request->Dispose();
             if (completion) completion(responseCode, responseBody);
           }));
@@ -282,8 +321,11 @@ static void LoadModuleSettings() {
       std::string(API_BASE) + "/device/settings/modules", deviceCredential);
   if (!request || !SendAsync(request, [](int64_t status, const std::string& body) {
         if (status < 200 || status >= 300) {
-          SetStatus("Account linked. Could not load module settings (HTTP " +
-                    std::to_string(status) + ").");
+          const auto code = JsonString(requestDiagnostic, "code");
+          const auto message = JsonString(requestDiagnostic, "message");
+          SetStatus("Account linked. Module settings failed (HTTP " +
+                    std::to_string(status) + "). " +
+                    (message.empty() ? requestDiagnostic : code + ": " + message));
           return;
         }
         chatEnabled = JsonModuleEnabled(body, "chat", true);
@@ -303,11 +345,14 @@ static void SaveModuleSetting(const std::string& module, bool enabled) {
   auto* request = CreateJsonRequest(
       std::string(API_BASE) + "/device/settings/modules/" + module,
       "PATCH", body, deviceCredential);
-  if (!request || !SendAsync(request, [module, enabled](int64_t status, const std::string&) {
+  if (!request || !SendAsync(request, [module, enabled](int64_t status, const std::string& response) {
         requestInFlight = false;
         if (status < 200 || status >= 300) {
+          const auto code = JsonString(response, "code");
+          const auto message = JsonString(response, "message");
           SetStatus("Could not save " + module + " settings (HTTP " +
-                    std::to_string(status) + ").");
+                    std::to_string(status) + "). " +
+                    (message.empty() ? requestDiagnostic : code + ": " + message));
           if (module == "chat") chatEnabled = !enabled;
           if (module == "bsr-song-request") bsrEnabled = !enabled;
           RefreshModuleButtons();
@@ -350,7 +395,8 @@ static void CheckPairingStatus() {
   if (!request || !SendAsync(request, [](int64_t status, const std::string& body) {
         requestInFlight = false;
         if (status < 200 || status >= 300) {
-          SetStatus("Pairing check failed (HTTP " + std::to_string(status) + ").");
+          SetStatus("Pairing check failed (HTTP " + std::to_string(status) +
+                    "). " + requestDiagnostic);
           return;
         }
         const auto state = JsonString(body, "status");
@@ -409,8 +455,14 @@ static void GeneratePairingCode() {
   if (!request || !SendAsync(request, [](int64_t status, const std::string& response) {
         requestInFlight = false;
         if (status != 201) {
-          SetStatus("RiftPulse could not register the code (HTTP " +
-                    std::to_string(status) + "). Generate a new code and retry.");
+          const auto code = JsonString(response, "code");
+          const auto message = JsonString(response, "message");
+          std::string detail = requestDiagnostic;
+          if (!message.empty()) detail = code + ": " + message;
+          if (detail.size() > 180) detail.resize(180);
+          SetStatus("RiftPulse rejected registration (HTTP " +
+                    std::to_string(status) + "). " + detail +
+                    "\nGenerate a new code and retry.");
           return;
         }
         challengeId = JsonString(response, "challengeId");
@@ -422,7 +474,10 @@ static void GeneratePairingCode() {
         if (checkButton) BSML::Lite::SetButtonText(checkButton, "CHECK PAIRING STATUS");
       })) {
     requestInFlight = false;
-    SetStatus("Could not start the pairing request. Check the Quest internet connection.");
+    const std::string detail = requestDiagnostic.empty()
+        ? "Unity could not create or start the HTTPS request."
+        : requestDiagnostic;
+    SetStatus("Could not start the pairing request.\n" + detail);
   }
 }
 

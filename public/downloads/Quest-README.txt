@@ -1,10 +1,10 @@
-RiftPulse Quest alpha 0.1.17
+RiftPulse Quest alpha 0.1.18
 Beat Saber 1.40.8 standalone (Scotland2)
 
-This build adds Quest-side account pairing against the RiftPulse development API. The Quest client generates a five-digit code and a persistent device identity, registers the pairing challenge, checks whether the website has claimed it, then loads account Chat/BSR module settings. Module switches save through the authenticated device-settings API.
+This build updates Quest pairing request construction. It creates UnityWebRequest with an explicit HTTP method and uploads the payload as raw UTF-8 JSON using UploadHandlerRaw, matching the RiftPulse API's application/json contract. The in-game status panel now reports the request-construction failure stage or the HTTP/server rejection details instead of displaying only a generic internet warning.
 
-To pair: install this QMOD on a Quest running the supported Beat Saber 1.40.8 build, open RiftPulse in the Beat Saber main menu, generate the code, enter it on the RiftPulse development website while signed in, then press CHECK PAIRING STATUS. After the account is linked, use the Chat and BSR buttons to save module-enabled settings.
+To pair: install this QMOD on a Quest running the supported Beat Saber 1.40.8 build, open RiftPulse in the Beat Saber main menu, generate the code, enter that current five-digit code on the RiftPulse development website while signed in, then press CHECK PAIRING STATUS. The game may regenerate a code after a retry; always enter the currently displayed code.
 
-The current Quest UI uses a manual status-check button; it does not yet poll automatically. This alpha has not been installed or runtime-tested on a headset in this build session. Chat service activation, provider event display, combined viewer counts, configurable ChatIntegrations commands, and the BSR song-request queue are not implemented by this client yet. These settings only save account preferences.
+The current Quest UI uses a manual status-check button; it does not yet poll automatically. Chat and BSR switches save account preferences only; live chat/provider events, combined viewer counts, configurable ChatIntegrations command execution, and the BSR song-request queue are not implemented by this client. This build has compiled and been packaged, but still needs a fresh MBF import and headset runtime pairing test.
 
-The QMOD declares Scotland2 and the resolved Beat Saber Hook, BSML, Custom Types, and Paper2 dependencies. Its root mod.json is UTF-8 JSON without a BOM.
+The QMOD targets Beat Saber package 1.40.8_7379 and declares the Scotland2 loader plus Beat Saber Hook, BSML, Custom Types, and Paper2 dependencies.
