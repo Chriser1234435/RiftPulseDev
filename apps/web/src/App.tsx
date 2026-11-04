@@ -691,20 +691,20 @@ function App() {
           </section>
 
           <section className="section-block downloads-block" id="downloads">
-            <div className="section-heading"><div><div className="section-overline">TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Development packages for the pinned Beat Saber 1.40.8 targets. PCVR pairing challenge registration is wired; full device auth and game features remain in development.</p></div><span className="settings-badge">v0.1.0 · DEV</span></div>
+            <div className="section-heading"><div><div className="section-overline">TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Alpha packages for Beat Saber 1.40.8. PCVR pairing registration is available in its test flow; Quest currently has an in-game dashboard preview with local-only toggles and an offline pairing-code preview.</p></div><span className="settings-badge">PCVR v0.1.2 · Quest v0.1.1</span></div>
             <div className="downloads-grid">
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR · BSIPA</b><small>Windows / Beat Saber 1.40.8</small></div><span className="download-state">DLL built</span></div>
-                <p>Install the PCVR DLL into your test instance's Plugins folder. Includes the in-game menu and API-registered five-digit pairing flow; realtime Chat and BSR are not implemented yet.</p>
+                <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR · BSIPA</b><small>Windows / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.2 · DLL built</span></div>
+                <p>Install the PCVR DLL into your test instance's Plugins folder. The in-game pairing challenge flow is wired; realtime Chat and BSR are not implemented yet.</p>
                 <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr.zip" download><Download size={15} /> Download PCVR ZIP</a>
               </article>
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest · Scotland2</b><small>Standalone / Beat Saber 1.40.8</small></div><span className="download-state">QMOD built</span></div>
-                <p>QMOD package for QuestPatcher/BSManager. Headset install and in-game startup are still awaiting device testing.</p>
+                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest · Scotland2</b><small>Standalone / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.1 · QMOD built</span></div>
+                <p>QMOD for QuestPatcher/BSManager with a new BSML side-panel entry, Chat/BSR dashboard toggles, local pairing-code preview, and settings-preview action. Toggles are not persisted; website pairing/API and headset runtime testing remain pending.</p>
                 <a className="primary-button download-link" href="/downloads/RiftPulse.Quest.qmod" download><Download size={15} /> Download Quest QMOD</a>
               </article>
             </div>
-            <div className="integration-footnote"><ShieldCheck size={15} /><span>Development build: PCVR in-game menu and website pairing challenge registration are wired. Secure device credentials, live chat, realtime event delivery, BSR, and Quest runtime testing are still pending. Use a test instance; not a release build.</span></div>
+            <div className="integration-footnote"><ShieldCheck size={15} /><span>Alpha development build: PCVR pairing challenge registration is wired. Quest dashboard switches and code are local previews only. Secure device credentials, live chat, realtime event delivery, BSR, and Quest headset runtime testing are still pending. Use a test instance; not a release build.</span></div>
           </section>
 
           <section className="section-block integrations-block" id="integrations">

@@ -17,7 +17,7 @@ namespace RiftPulse.Pcvr
     {
         private const string ApiBase = "https://riftpulse-dev.chrismeten0.workers.dev/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.1.0-dev";
+        private const string ModVersion = "0.1.13";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 
@@ -39,20 +39,134 @@ namespace RiftPulse.Pcvr
         private bool _chatPreviewEnabled;
         private bool _bsrPreviewEnabled;
 
+        public RiftPulsePairingViewController()
+        {
+            LoadModulePreviewSettings();
+            ChatToggleLabel = _chatPreviewEnabled ? "CHAT MODULE: ON (LOCAL SAVED PREVIEW)" : "CHAT MODULE: OFF (LOCAL SAVED PREVIEW)";
+            BsrToggleLabel = _bsrPreviewEnabled ? "BSR MODULE: ON (LOCAL SAVED PREVIEW)" : "BSR MODULE: OFF (LOCAL SAVED PREVIEW)";
+        }
+
+        private static string SettingsPath
+        {
+            get
+            {
+                var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RiftPulse");
+                Directory.CreateDirectory(folder);
+                return Path.Combine(folder, "pcvr-module-preview-settings.txt");
+            }
+        }
+
+        private void LoadModulePreviewSettings()
+        {
+            try
+            {
+                if (!File.Exists(SettingsPath)) return;
+                var values = File.ReadAllLines(SettingsPath);
+                _chatPreviewEnabled = values.Length > 0 && values[0] == "1";
+                _bsrPreviewEnabled = values.Length > 1 && values[1] == "1";
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        private void SaveModulePreviewSettings()
+        {
+            try
+            {
+                File.WriteAllLines(SettingsPath, new[] { _chatPreviewEnabled ? "1" : "0", _bsrPreviewEnabled ? "1" : "0" });
+                ModulePreviewStatus = "Module switches are saved locally. They are still UI previews and do not activate services or sync to the website.";
+                NotifyPropertyChanged(nameof(ModulePreviewStatus));
+            }
+            catch (IOException)
+            {
+                ModulePreviewStatus = "Could not save preview switches locally. Check RiftPulse folder permissions.";
+                NotifyPropertyChanged(nameof(ModulePreviewStatus));
+            }
+            catch (UnauthorizedAccessException)
+            {
+                ModulePreviewStatus = "Could not save preview switches locally. Check RiftPulse folder permissions.";
+                NotifyPropertyChanged(nameof(ModulePreviewStatus));
+            }
+        }
+
         [UIAction("toggle-chat")]
-        public void ToggleChatPreview()
+        public async void ToggleChatPreview()
         {
             _chatPreviewEnabled = !_chatPreviewEnabled;
-            ChatToggleLabel = _chatPreviewEnabled ? "CHAT MODULE: ON (UI PREVIEW)" : "CHAT MODULE: OFF (UI PREVIEW)";
+            ChatToggleLabel = _chatPreviewEnabled ? "CHAT MODULE: ON (SYNCING)" : "CHAT MODULE: OFF (SYNCING)";
             NotifyPropertyChanged(nameof(ChatToggleLabel));
+            await SaveModuleSetting("chat", _chatPreviewEnabled);
         }
 
         [UIAction("toggle-bsr")]
-        public void ToggleBsrPreview()
+        public async void ToggleBsrPreview()
         {
             _bsrPreviewEnabled = !_bsrPreviewEnabled;
-            BsrToggleLabel = _bsrPreviewEnabled ? "BSR MODULE: ON (UI PREVIEW)" : "BSR MODULE: OFF (UI PREVIEW)";
+            BsrToggleLabel = _bsrPreviewEnabled ? "BSR MODULE: ON (SYNCING)" : "BSR MODULE: OFF (SYNCING)";
             NotifyPropertyChanged(nameof(BsrToggleLabel));
+            await SaveModuleSetting("bsr-song-request", _bsrPreviewEnabled);
+        }
+
+        private async Task SaveModuleSetting(string moduleKey, bool enabled)
+        {
+            try
+            {
+                var credential = LoadOrCreateDeviceCredential();
+                var body = "{\"enabled\":" + (enabled ? "true" : "false") + "}";
+                using (var request = new HttpRequestMessage(new HttpMethod("PATCH"), new Uri(ApiBase + "/device/settings/modules/" + moduleKey)))
+                {
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", credential);
+                    request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                    using (var response = await Http.SendAsync(request))
+                    {
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            ModulePreviewStatus = "Settings sync failed (HTTP " + (int)response.StatusCode + "). Link this device to your account first.";
+                            NotifyPropertyChanged(nameof(ModulePreviewStatus));
+                            return;
+                        }
+                    }
+                }
+                ChatToggleLabel = _chatPreviewEnabled ? "CHAT MODULE: ON (ACCOUNT SYNCED)" : "CHAT MODULE: OFF (ACCOUNT SYNCED)";
+                BsrToggleLabel = _bsrPreviewEnabled ? "BSR MODULE: ON (ACCOUNT SYNCED)" : "BSR MODULE: OFF (ACCOUNT SYNCED)";
+                ModulePreviewStatus = "Module settings saved to your RiftPulse account. Service activation and configuration are separate steps.";
+                NotifyPropertyChanged(nameof(ChatToggleLabel));
+                NotifyPropertyChanged(nameof(BsrToggleLabel));
+                NotifyPropertyChanged(nameof(ModulePreviewStatus));
+            }
+            catch (Exception)
+            {
+                ModulePreviewStatus = "Could not sync module settings. Check connection and confirm this installation is paired.";
+                NotifyPropertyChanged(nameof(ModulePreviewStatus));
+            }
+        }
+
+        private async Task LoadAccountModuleSettings()
+        {
+            try
+            {
+                var credential = LoadOrCreateDeviceCredential();
+                using (var request = new HttpRequestMessage(HttpMethod.Get, ApiBase + "/device/settings/modules"))
+                {
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", credential);
+                    using (var response = await Http.SendAsync(request))
+                    {
+                        if (!response.IsSuccessStatusCode) return;
+                        var payload = await response.Content.ReadAsStringAsync();
+                        var chatMatch = Regex.Match(payload, "\\\"chat\\\"\\s*:\\s*\\{[^}]*\\\"enabled\\\"\\s*:\\s*(true|false)", RegexOptions.Singleline);
+                        var bsrMatch = Regex.Match(payload, "\\\"bsr-song-request\\\"\\s*:\\s*\\{[^}]*\\\"enabled\\\"\\s*:\\s*(true|false)", RegexOptions.Singleline);
+                        if (chatMatch.Success) _chatPreviewEnabled = chatMatch.Groups[1].Value == "true";
+                        if (bsrMatch.Success) _bsrPreviewEnabled = bsrMatch.Groups[1].Value == "true";
+                        ChatToggleLabel = _chatPreviewEnabled ? "CHAT MODULE: ON (ACCOUNT SYNCED)" : "CHAT MODULE: OFF (ACCOUNT SYNCED)";
+                        BsrToggleLabel = _bsrPreviewEnabled ? "BSR MODULE: ON (ACCOUNT SYNCED)" : "BSR MODULE: OFF (ACCOUNT SYNCED)";
+                        ModulePreviewStatus = "Loaded module settings from your RiftPulse account. Services are not activated by these switches yet.";
+                        NotifyPropertyChanged(nameof(ChatToggleLabel));
+                        NotifyPropertyChanged(nameof(BsrToggleLabel));
+                        NotifyPropertyChanged(nameof(ModulePreviewStatus));
+                    }
+                }
+            }
+            catch (Exception) { /* Keep local preview values if account sync cannot be reached. */ }
         }
 
         [UIAction("connect-click")]
@@ -141,17 +255,18 @@ namespace RiftPulse.Pcvr
                     {
                         StatusText = "âœ“ RiftPulse account linked! Device pairing succeeded.";
                         NotifyPropertyChanged(nameof(StatusText));
+                        await LoadAccountModuleSettings();
                         return;
                     }
                     if (status == "expired" || status == "revoked")
                     {
-                        StatusText = "This pairing code expired. Press Connect to generate another.";
+                        StatusText = "This pairing code expired. Press Generate Pairing Code to generate another.";
                         NotifyPropertyChanged(nameof(StatusText));
                         return;
                     }
                 }
             }
-            StatusText = "Pairing timed out. Press Connect to generate a new code.";
+            StatusText = "Pairing timed out. Press Generate Pairing Code to try again.";
             NotifyPropertyChanged(nameof(StatusText));
         }
 

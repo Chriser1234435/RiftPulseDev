@@ -1,0 +1,1 @@
+RiftPulse PCVR 0.1.6`r`nBeat Saber 1.40.8`r`nBSIPA manifest is valid UTF-8 JSON with the archive-root relative file path.

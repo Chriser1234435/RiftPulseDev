@@ -1,6 +1,6 @@
 # RiftPulseDev - Proposed Roadmap
 
-Status: Step 6 local website/auth foundation complete. Step 7 chat/provider foundation is in progress. Step 9 PCVR menu/pairing UI prototype has begun (compiles); backend pairing and in-game runtime verification remain pending. Production authentication and deployment remain gated on separate release checks and explicit authorization.
+Status: Step 6 local website/auth foundation complete. Step 7 chat/provider foundation is in progress. Step 9 PCVR pairing and Quest UI integration are in progress. Quest Alpha 0.1.16 is published to the isolated development site; alpha testers confirmed the package loaded normally as expected. Quest preview remains disconnected from pairing/API, persistent settings, live chat/viewer aggregation, and BSR. PCVR runtime validation and end-to-end pairing remain outstanding. Production authentication and deployment remain gated on separate release checks and explicit authorization.
 
 ## Step 3 - Architecture and design
 - [x] Define V1 scope: Chat + BSR Song Request only.
@@ -81,9 +81,20 @@ Implement command parsing, BeatSaver metadata validation, cooldowns, queue rules
 - [x] Add a Railway API WebSocket bearer credential validation branch restricted to active, non-revoked devices; deployed to the Railway development environment.
 - [ ] Validate a successful device-authenticated WebSocket connection after an account claims a real PCVR pairing code (negative probe returned an HTTP 502 at the public WS endpoint, so end-to-end acceptance remains unconfirmed).
 - [x] Add interactive local-only Chat and BSR module switch previews to the PCVR BSML screen.
-- [ ] Implement persisted module settings, dashboard activation gating, configuration navigation, and backend sync.
+- [x] Persist PCVR Chat/BSR module switch preview state locally under `%LOCALAPPDATA%\\RiftPulse\\pcvr-module-preview-settings.txt`; reload on view construction and save on each toggle. Clearly labeled as local saved preview (no service activation). Compile verified with `dotnet build -c Release --no-restore` (0 warnings, 0 errors; November 4, 2026).
+- [x] Implement dedicated device-credential authenticated module settings GET/PATCH endpoints in the shared API source (credential digest lookup, active/non-revoked device + active account checks, JSON/body validation, module settings persistence); browser-session settings endpoints remain separate. Full project test pipeline passed (42 unit tests, isolated migration test, production build; November 4, 2026). Endpoint-specific device-auth tests still need to be added.
+- [x] Wire PCVR module toggles to PATCH device settings and load account settings after pairing claim; PCVR Release build passed (0 warnings/errors; November 4, 2026). Local preview state remains as fallback when settings sync is unavailable.
+- [ ] Deploy the updated API to Railway development and verify GET/PATCH with a real paired device credential; test invalid, revoked, and inactive-account rejection.
+- [ ] Implement dashboard activation gating and configuration navigation; module settings currently save configuration flags only and do not activate Chat/BSR services.
 - [ ] Port the same UI flow to Quest.
 - [ ] Runtime-test both targets in actual Beat Saber installations/headsets.
+- [x] Correct the Quest QMOD manifest encoding: remove the UTF-8 BOM and use the accepted QMOD schema version 1.2.0.
+- [x] Align Quest release 0.1.8 across the QMOD manifest, template, QPM info.version fields, CMake VERSION definition and tester README, preserving the separate root QPM schema-version fields.
+- [x] Rebuild the Quest ARM64 native library with CMake/Ninja for version 0.1.8 (build exit code 0; native ARM64 binary refreshed).
+- [x] Package Quest 0.1.8 with a root mod.json and libriftpulse.so; explicitly select Scotland2 and declare the four QPM-resolved dependency QMODs; verify UTF-8 JSON, no BOM, dependency URLs, and referenced entries.
+- [x] Run npm test: TypeScript check, 42 contract tests, isolated database migration test, and production build all passed.
+- [x] Deploy Quest 0.1.8 and its README to the isolated Cloudflare development Worker; homepage, QMOD and README returned HTTP 200 and remote QMOD SHA-256 matched local bytes.
+- [x] Alpha tester confirmed the published Quest 0.1.16 QMOD imports/loads normally on Quest and appears to behave as expected at the package-load level (November 4, 2026). Feature-level Quest pairing/API, persisted settings, chat, and BSR are still not implemented; PCVR runtime test remains pending.
 
 ## Step 10 - End-to-end validation and deployment (not started)
 Run security, API, provider-mock, PCVR, and Quest tests. Deploy only to isolated Cloudflare development resources and a development hostname after explicit authorization. Test the actual development domain, not only previews.

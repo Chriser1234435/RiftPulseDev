@@ -1,31 +1,88 @@
 {
-  "sharedDir": "shared",
-  "dependenciesDir": "extern",
-  "version": "0.1.0",
-  "info": {
-    "name": "RiftPulse",
-    "id": "riftpulse",
-    "version": "0.1.0",
-    "url": "https://riftpulse-dev.chrismeten0.workers.dev",
-    "additionalData": {
-      "overrideSoName": "libriftpulse.so",
-      "cmake": true
-    }
-  },
-  "workspace": {
-    "scripts": {
-      "build": ["pwsh ./scripts/build.ps1"],
-      "clean": ["pwsh ./scripts/build.ps1 -clean"],
-      "copy": ["pwsh ./scripts/copy.ps1 $0:?"],
-      "logcat": ["pwsh ./scripts/start-logging.ps1"],
-      "qmod": ["pwsh ./scripts/build.ps1", "pwsh ./scripts/createqmod.ps1"]
-    },
-    "qmodIncludeDirs": ["./build", "./extern/libs"],
-    "qmodOutput": "./RiftPulse.qmod"
-  },
-  "dependencies": [
-    {"id": "beatsaber-hook", "versionRange": "^5.0.0", "additionalData": {}},
-    {"id": "scotland2", "versionRange": "^0.1.4", "additionalData": {"includeQmod": false}},
-    {"id": "paper", "versionRange": "^3.0.0", "additionalData": {}}
-  ]
+    "$schema":  "https://raw.githubusercontent.com/QuestPackageManager/QPM.Package/refs/heads/main/qpm.schema.json",
+    "version":  "0.1.5",
+    "sharedDir":  "shared",
+    "dependenciesDir":  "extern",
+    "info":  {
+                 "name":  "RiftPulse",
+                 "id":  "riftpulse",
+                 "version":  "0.1.16",
+                 "url":  "https://riftpulse-dev.chrismeten0.workers.dev",
+                 "additionalData":  {
+                                        "overrideSoName":  "libriftpulse.so",
+                                        "cmake":  true
+                                    }
+             },
+    "workspace":  {
+                      "scripts":  {
+                                      "build":  [
+                                                    "pwsh ./scripts/build.ps1"
+                                                ],
+                                      "clean":  [
+                                                    "pwsh ./scripts/build.ps1 -clean"
+                                                ],
+                                      "copy":  [
+                                                   "pwsh ./scripts/copy.ps1 $0:?"
+                                               ],
+                                      "logcat":  [
+                                                     "pwsh ./scripts/start-logging.ps1"
+                                                 ],
+                                      "qmod":  [
+                                                   "pwsh ./scripts/build.ps1",
+                                                   "pwsh ./scripts/createqmod.ps1"
+                                               ]
+                                  },
+                      "qmodIncludeDirs":  [
+                                              "./build",
+                                              "./extern/libs"
+                                          ],
+                      "qmodIncludeFiles":  [
+
+                                           ],
+                      "qmodOutput":  "./RiftPulse.qmod"
+                  },
+    "dependencies":  [
+                         {
+                             "id":  "beatsaber-hook",
+                             "versionRange":  "^6.4.0",
+                             "additionalData":  {
+
+                                                }
+                         },
+                         {
+                             "id":  "scotland2",
+                             "versionRange":  "^0.1.6",
+                             "additionalData":  {
+                                                    "includeQmod":  false
+                                                }
+                         },
+                         {
+                             "id":  "bs-cordl",
+                             "versionRange":  "^4008.0.0",
+                             "additionalData":  {
+
+                                                }
+                         },
+                         {
+                             "id":  "bsml",
+                             "versionRange":  "^0.4.51",
+                             "additionalData":  {
+
+                                                }
+                         },
+                         {
+                             "id":  "custom-types",
+                             "versionRange":  "^0.18.2",
+                             "additionalData":  {
+
+                                                }
+                         },
+                         {
+                             "id":  "paper2_scotland2",
+                             "versionRange":  "^4.6.1",
+                             "additionalData":  {
+
+                                                }
+                         }
+                     ]
 }

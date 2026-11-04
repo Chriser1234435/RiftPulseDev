@@ -1,0 +1,25 @@
+{
+    "$schema":  "https://raw.githubusercontent.com/beat-saber-modding-group/BSIPA-MetadataFileSchema/master/Schema.json",
+    "id":  "RiftPulse.Pcvr",
+    "name":  "RiftPulse",
+    "author":  "RiftPulse Team",
+    "version":  "0.1.12",
+    "gameVersion":  "1.40.8",
+    "description":  [
+                        "RiftPulse PCVR adapter for Beat Saber.",
+                        "Provides the RiftPulse pairing entry point and in-game interface prototype."
+                    ],
+    "dependsOn":  {
+                      "BSIPA":  "^4.2.0",
+                      "BeatSaberMarkupLanguage":  "^1.12.5"
+                  },
+    "misc":  {
+                 "plugin-hint":  "RiftPulse.Pcvr.Plugin"
+             },
+    "links":  {
+                  "project-source":  "https://github.com/Chriser1234435/RiftPulseDev"
+              },
+    "files":  [
+                  "Plugins/RiftPulse.Pcvr.dll"
+              ]
+}

@@ -13,10 +13,18 @@ namespace RiftPulse.Pcvr
         [Init]
         public void Initialize()
         {
+            // IPA initialization runs before Beat Saber's Zenject container and
+            // BSML MenuButtons singleton are ready. Defer registration to the
+            // main-menu initialization event; do not touch MenuButtons here.
             MainMenuAwaiter.MainMenuInitializing += OnMainMenuInitializing;
         }
 
         private void OnMainMenuInitializing()
+        {
+            RegisterMenuButton();
+        }
+
+        private void RegisterMenuButton()
         {
             if (_menuButton != null) return;
             _menuButton = new MenuButton("RiftPulse", ShowRiftPulse);

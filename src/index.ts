@@ -64,6 +64,20 @@ async function getAuthContext(request: Request, env: Env): Promise<AuthContext> 
   return { ok: true, userId: session.user.id, auth };
 }
 
+async function getDeviceAuthContext(request: Request, env: Env): Promise<AuthContext> {
+  if (!env.DB) return { ok: false, status: 503, code: "database_unavailable", message: "Device authentication storage is not configured." };
+  const bearer = request.headers.get("authorization") ?? "";
+  const match = bearer.match(/^Bearer ([0-9a-f]{64})$/i);
+  if (!match) return { ok: false, status: 401, code: "device_authentication_required", message: "A valid paired-device credential is required." };
+  const digestBytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(match[1].toLowerCase()));
+  const digest = Array.from(new Uint8Array(digestBytes), byte => byte.toString(16).padStart(2, "0")).join("");
+  const row = await env.DB.prepare(
+    "SELECT devices.account_id AS accountId FROM devices JOIN accounts ON accounts.id = devices.account_id WHERE devices.credential_digest = ? AND devices.revoked_at IS NULL AND accounts.status = 'active' LIMIT 1",
+  ).bind(digest).first<{ accountId: string }>();
+  if (!row?.accountId) return { ok: false, status: 401, code: "device_credential_invalid", message: "The paired-device credential is invalid or revoked." };
+  return { ok: true, userId: row.accountId, auth: null };
+}
+
 async function publishChatMessage(env: Env, accountId: string, message: {
   id: string; provider: "twitch" | "youtube" | "kick" | "tiktok"; externalMessageId: string;
   channelId: string; channelName: string; senderId: string; senderName: string; text: string;
@@ -183,6 +197,67 @@ export default {
       return Response.json({
         service: "riftpulse-api", version: VERSION, apiVersion: API_VERSION, modules: SUPPORTED_MODULES,
       }, { headers: JSON_HEADERS });
+    }
+
+    if (url.pathname === "/api/v1/device/settings/modules" && request.method === "GET") {
+      const authContext = await getDeviceAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      const now = new Date().toISOString();
+      const defaults = await env.DB!.batch(SUPPORTED_MODULES.map(moduleKey => env.DB!.prepare(
+        "INSERT OR IGNORE INTO module_settings (id, account_id, module_key, enabled, settings_json, updated_at) VALUES (?, ?, ?, 1, '{}', ?)",
+      ).bind(crypto.randomUUID(), authContext.userId, moduleKey, now)));
+      if (defaults.some(result => !result.success)) return jsonError(503, "settings_store_unavailable", "Could not initialize module settings.", requestId);
+      const rows = await env.DB!.prepare(
+        "SELECT module_key, enabled, settings_json, updated_at FROM module_settings WHERE account_id = ?",
+      ).bind(authContext.userId).all<{ module_key: string; enabled: number; settings_json: string; updated_at: string }>();
+      if (!rows.success) return jsonError(503, "settings_store_unavailable", "Could not load module settings.", requestId);
+      const modules: Record<string, { enabled: boolean; settings: unknown; updatedAt: string | null }> = {};
+      for (const key of SUPPORTED_MODULES) modules[key] = { enabled: true, settings: {}, updatedAt: null };
+      for (const row of rows.results ?? []) {
+        if (!SUPPORTED_MODULES.includes(row.module_key as typeof SUPPORTED_MODULES[number])) continue;
+        let settings: unknown = {};
+        try { settings = JSON.parse(row.settings_json); } catch { settings = {}; }
+        modules[row.module_key] = { enabled: row.enabled === 1, settings, updatedAt: row.updated_at };
+      }
+      return Response.json({ modules }, { headers: JSON_HEADERS });
+    }
+
+    const deviceModuleSettingsMatch = url.pathname.match(/^\/api\/v1\/device\/settings\/modules\/(chat|bsr-song-request)$/);
+    if (deviceModuleSettingsMatch && request.method === "PATCH") {
+      const authContext = await getDeviceAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!isJson(request)) return jsonError(415, "content_type_required", "Send a JSON request body.", requestId);
+      let body: unknown;
+      try { body = await readJson(request); }
+      catch (error) {
+        const message = error instanceof Error ? error.message : "invalid_json";
+        return message === "body_too_large" ? jsonError(413, "body_too_large", "Request body exceeds 4 KiB.", requestId)
+          : jsonError(400, "invalid_json", "Request body must be valid JSON.", requestId);
+      }
+      if (!body || typeof body !== "object" || Array.isArray(body)) return jsonError(400, "validation_failed", "Settings body must be an object.", requestId);
+      const value = body as Record<string, unknown>;
+      if (Object.keys(value).some(key => key !== "enabled" && key !== "settings")) return jsonError(400, "validation_failed", "Only enabled and settings can be changed.", requestId);
+      if (value.enabled !== undefined && typeof value.enabled !== "boolean") return jsonError(400, "validation_failed", "enabled must be a boolean.", requestId);
+      if (value.settings !== undefined && (!value.settings || typeof value.settings !== "object" || Array.isArray(value.settings))) return jsonError(400, "validation_failed", "settings must be a JSON object.", requestId);
+      const settingsJson = value.settings === undefined ? undefined : JSON.stringify(value.settings);
+      if (settingsJson && settingsJson.length > 3072) return jsonError(413, "settings_too_large", "Settings JSON exceeds 3 KiB.", requestId);
+      const moduleKey = deviceModuleSettingsMatch[1];
+      const now = new Date().toISOString();
+      const initialized = await env.DB!.prepare(
+        "INSERT OR IGNORE INTO module_settings (id, account_id, module_key, enabled, settings_json, updated_at) VALUES (?, ?, ?, 1, '{}', ?)",
+      ).bind(crypto.randomUUID(), authContext.userId, moduleKey, now).run();
+      if (!initialized.success) return jsonError(503, "settings_store_unavailable", "Could not initialize module settings.", requestId);
+      const current = await env.DB!.prepare("SELECT enabled, settings_json FROM module_settings WHERE account_id = ? AND module_key = ? LIMIT 1")
+        .bind(authContext.userId, moduleKey).first<{ enabled: number; settings_json: string }>();
+      if (!current) return jsonError(503, "settings_store_unavailable", "Could not load module settings.", requestId);
+      const enabled = value.enabled === undefined ? current.enabled : value.enabled ? 1 : 0;
+      const nextSettings = settingsJson ?? current.settings_json;
+      const updated = await env.DB!.prepare("UPDATE module_settings SET enabled = ?, settings_json = ?, updated_at = ? WHERE account_id = ? AND module_key = ?")
+        .bind(enabled, nextSettings, now, authContext.userId, moduleKey).run();
+      if (!updated.success) return jsonError(503, "settings_store_unavailable", "Could not save module settings.", requestId);
+      let settings: unknown = {};
+      try { settings = JSON.parse(nextSettings); } catch { settings = {}; }
+      return Response.json({ moduleKey, enabled: enabled === 1, settings, updatedAt: now }, { headers: JSON_HEADERS });
     }
 
     if (url.pathname === "/api/v1/settings/modules" && request.method === "GET") {

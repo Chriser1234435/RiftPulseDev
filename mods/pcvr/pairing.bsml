@@ -1,30 +1,31 @@
 <bg>
-  <vertical spacing="2" pad-left="4" pad-right="4" pad-top="3" pad-bottom="3">
-    <text text="RIFTPULSE" font-size="12" align="Center"/>
-    <text text="Connect your Beat Saber installation" font-size="5" align="Center"/>
+  <vertical spacing="3" pad-left="6" pad-right="6" pad-top="4" pad-bottom="4">
+    <text text="RIFTPULSE" font-size="9" align="Center"/>
+    <text text="STREAM TOOLS FOR BEAT SABER" font-size="4" align="Center"/>
     <horizontal bg="round-rect-panel" pad-left="4" pad-right="4" pad-top="3" pad-bottom="3">
-      <vertical spacing="1">
+      <vertical spacing="2" horizontal-fit="PreferredSize">
         <text text="PAIRING CODE" font-size="4" align="Center"/>
-        <text text="pairing-code" font-size="10" align="Center"/>
+        <text text="{pairing-code}" font-size="8" align="Center"/>
+        <text text="{status-text}" font-size="3.5" align="Center"/>
+        <button text="GENERATE PAIRING CODE" on-click="connect-click"/>
       </vertical>
     </horizontal>
-    <text text="status-text" font-size="4" align="Center"/>
-    <button text="Connect to RiftPulse" on-click="connect-click"/>
-    <text text="MODULE DASHBOARD PREVIEW" font-size="5" align="Center"/>
-    <horizontal bg="round-rect-panel" pad-left="3" pad-right="3" pad-top="2" pad-bottom="2">
-      <vertical spacing="1">
-        <text text="CHAT" font-size="4"/>
-        <text text="Combined Twitch, YouTube, TikTok LIVE, and Kick chat feed." font-size="3.5"/>
-        <button text="chat-toggle-label" on-click="toggle-chat"/>
+    <text text="Enter the 5-digit code on the RiftPulse development website to link this installation." font-size="3.2" align="Center"/>
+    <text text="MODULE PREVIEW" font-size="5" align="Center"/>
+    <horizontal bg="round-rect-panel" pad-left="4" pad-right="4" pad-top="3" pad-bottom="3">
+      <vertical spacing="2">
+        <text text="CHAT" font-size="4" align="Center"/>
+        <text text="Combined Twitch, YouTube, TikTok LIVE, and Kick chat feed." font-size="3.2" align="Center"/>
+        <button text="{chat-toggle-label}" on-click="toggle-chat"/>
       </vertical>
     </horizontal>
-    <horizontal bg="round-rect-panel" pad-left="3" pad-right="3" pad-top="2" pad-bottom="2">
-      <vertical spacing="1">
-        <text text="BEAT SABER SONG REQUEST" font-size="4"/>
-        <text text="Let viewers request songs from supported live chats." font-size="3.5"/>
-        <button text="bsr-toggle-label" on-click="toggle-bsr"/>
+    <horizontal bg="round-rect-panel" pad-left="4" pad-right="4" pad-top="3" pad-bottom="3">
+      <vertical spacing="2">
+        <text text="BEAT SABER SONG REQUEST" font-size="4" align="Center"/>
+        <text text="Let viewers request songs from supported live chats." font-size="3.2" align="Center"/>
+        <button text="{bsr-toggle-label}" on-click="toggle-bsr"/>
       </vertical>
     </horizontal>
-    <text text="module-preview-status" font-size="3.5" align="Center"/>
+    <text text="{module-preview-status}" font-size="3.2" align="Center"/>
   </vertical>
 </bg>

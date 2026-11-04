@@ -6,11 +6,14 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AssemblyName>RiftPulse.Pcvr</AssemblyName>
     <RootNamespace>RiftPulse.Pcvr</RootNamespace>
-    <Version>0.1.0</Version>
+    <Version>0.1.13</Version>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Plugin.cs" />
     <Compile Include="RiftPulseFlowCoordinator.cs" />
+    <EmbeddedResource Include="manifest.json">
+      <LogicalName>RiftPulse.Pcvr.manifest.json</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="pairing.bsml">
       <LogicalName>RiftPulse.Pcvr.pairing.bsml</LogicalName>
     </EmbeddedResource>
