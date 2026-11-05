@@ -3,11 +3,25 @@
 #include "bsml/shared/BSML-Lite.hpp"
 #include "HMUI/CurvedTextMeshPro.hpp"
 #include "UnityEngine/Application.hpp"
-#include "UnityEngine/AsyncOperation.hpp"
-#include "UnityEngine/Networking/UnityWebRequest.hpp"
-#include "UnityEngine/Networking/UnityWebRequestAsyncOperation.hpp"
-#include "UnityEngine/Networking/DownloadHandlerBuffer.hpp"
 #include "System/Action_1.hpp"
+#include "System/Object.hpp"
+#include "System/Uri.hpp"
+#include "System/Collections/Generic/List_1.hpp"
+#include "System/Net/Http/HttpClient.hpp"
+#include "System/Net/Http/HttpRequestMessage.hpp"
+#include "System/Net/Http/HttpResponseMessage.hpp"
+#include "System/Net/Http/HttpMethod.hpp"
+#include "System/Net/Http/HttpCompletionOption.hpp"
+#include "System/Net/Http/ByteArrayContent.hpp"
+#include "System/Net/Http/Headers/HttpRequestHeaders.hpp"
+#include "System/Net/Http/Headers/HttpContentHeaders.hpp"
+#include "System/Net/Http/Headers/AuthenticationHeaderValue.hpp"
+#include "System/Net/Http/Headers/MediaTypeHeaderValue.hpp"
+#include "System/Threading/Tasks/Task_1.hpp"
+#include "System/Threading/Tasks/TaskScheduler.hpp"
+#include "System/Threading/SynchronizationContext.hpp"
+#include "System/Threading/SendOrPostCallback.hpp"
+#include "System/TimeSpan.hpp"
 #include "custom-types/shared/delegate.hpp"
 #include "beatsaber-hook/shared/utils/il2cpp-utils.hpp"
 
@@ -18,21 +32,24 @@
 #include <exception>
 #include <fstream>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <utility>
+#include <vector>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
 
-using UnityEngine::Networking::UnityWebRequest;
-using UnityEngine::Networking::DownloadHandlerBuffer;
-using UnityEngine::Networking::DownloadHandler;
-using UnityEngine::AsyncOperation;
+using HttpResponseTask = System::Threading::Tasks::Task_1<System::Net::Http::HttpResponseMessage*>*;
+using HttpTextTask = System::Threading::Tasks::Task_1<StringW>*;
+using HttpCompletionDelegate = System::Action_1<HttpResponseTask>*;
+using UiDispatchDelegate = System::Threading::SendOrPostCallback*;
+using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.23";
+static constexpr const char* MOD_VERSION = "0.1.24";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -142,94 +159,249 @@ static bool LoadOrCreateIdentity() {
   return true;
 }
 
-static bool SetRequestHeader(UnityWebRequest* request,
-                             const std::string& name,
-                             const std::string& value) {
-  if (!request) {
-    requestDiagnostic = "Unity request object is null.";
-    return false;
+static System::Net::Http::HttpClient* httpClient = nullptr;
+static System::Threading::SynchronizationContext* mainThreadContext = nullptr;
+static UiDispatchDelegate uiDispatchDelegate = nullptr;
+static std::mutex httpStateMutex;
+static RequestCompletion pendingHttpCompletion;
+static int64_t pendingHttpStatus = -1;
+static std::string pendingHttpBody;
+static std::string pendingHttpError;
+static bool pendingHttpReady = false;
+
+static void DispatchPendingHttpResponse(System::Object*) {
+  RequestCompletion completion;
+  int64_t status = -1;
+  std::string body;
+  std::string error;
+  {
+    std::lock_guard<std::mutex> lock(httpStateMutex);
+    if (!pendingHttpReady) return;
+    completion = std::move(pendingHttpCompletion);
+    status = pendingHttpStatus;
+    body = std::move(pendingHttpBody);
+    error = std::move(pendingHttpError);
+    pendingHttpReady = false;
   }
+  requestDiagnostic = error;
+  if (completion) completion(status, body);
+}
+
+static bool EnsureHttpClient() {
   try {
-    // Resolve by method name and parameter count. Unity's IL2CPP string type
-    // metadata differs between generated bindings; exact type matching was brittle.
-    const auto* klass =
-        il2cpp_utils::il2cpp_type_check::il2cpp_no_arg_class<UnityWebRequest*>::get();
-    const auto* method = il2cpp_utils::FindMethodUnsafe(klass, "SetRequestHeader", 2);
-    if (!method) {
-      requestDiagnostic = "Unity could not resolve SetRequestHeader.";
+    if (!httpClient) {
+      httpClient = System::Net::Http::HttpClient::New_ctor();
+      if (!httpClient) {
+        requestDiagnostic = "System.Net.Http.HttpClient could not be created.";
+        return false;
+      }
+      httpClient->set_Timeout(System::TimeSpan::FromSeconds(20.0));
+    }
+    if (!mainThreadContext) {
+      mainThreadContext = System::Threading::SynchronizationContext::get_Current();
+    }
+    if (!mainThreadContext) {
+      requestDiagnostic = "Unity main-thread synchronization context is unavailable.";
       return false;
     }
-    cordl_internals::RunMethodRethrow<void, false>(
-        request, method, StringW(name), StringW(value));
+    if (!uiDispatchDelegate) {
+      uiDispatchDelegate = custom_types::MakeDelegate<UiDispatchDelegate>(
+          std::function<void(System::Object*)>(
+              [](System::Object* state) { DispatchPendingHttpResponse(state); }));
+    }
+    if (!uiDispatchDelegate) {
+      requestDiagnostic = "Could not create the main-thread HTTP callback.";
+      return false;
+    }
     return true;
   } catch (const std::exception& error) {
-    requestDiagnostic = std::string("Unity SetRequestHeader failed: ") + error.what();
+    requestDiagnostic = std::string("HTTP client initialization failed: ") + error.what();
     return false;
   } catch (...) {
-    requestDiagnostic = "Unity SetRequestHeader failed with an unknown runtime exception.";
+    requestDiagnostic = "HTTP client initialization failed.";
     return false;
   }
 }
 
-static UnityWebRequest* CreateGetRequest(const std::string& url,
-                                         const std::string& credential = {}) {
+static System::Net::Http::HttpRequestMessage* CreateHttpRequest(
+    const std::string& method, const std::string& url,
+    const std::string& body = {}, const std::string& credential = {}) {
   requestDiagnostic.clear();
-  auto* request = UnityWebRequest::Get(StringW(url));
-  if (!request) {
-    requestDiagnostic = "UnityWebRequest::Get returned null.";
-    return nullptr;
-  }
-  request->set_downloadHandler(DownloadHandlerBuffer::New_ctor());
-  request->set_timeout(20);
-  // UnityWebRequest rejects the Accept header in this Quest runtime; the API
-  // responds with JSON by default. Do not set Accept or Cache-Control here.
-  if (!credential.empty() &&
-      !SetRequestHeader(request, "Authorization", "Bearer " + credential)) {
-    requestDiagnostic = "Unity rejected the device authorization header.";
-    request->Dispose();
-    return nullptr;
-  }
-  return request;
-}
-
-static UnityWebRequest* CreatePairingChallengeRequest(const std::string& code) {
-  auto* request = CreateGetRequest(std::string(API_BASE) + "/pairing/challenges/create");
-  if (!request) return nullptr;
-
-  // Report the exact header that Unity rejects so alpha diagnostics are actionable.
-  const std::array<std::pair<const char*, std::string>, 6> headers{{
-      {"X-RP-Pairing-Code", code},
-      {"X-RP-Device-Credential", deviceCredential},
-      {"X-RP-Device-Id", deviceId},
-      {"X-RP-Platform", "quest"},
-      {"X-RP-Game-Version", GAME_VERSION},
-      {"X-RP-Mod-Version", MOD_VERSION},
-  }};
-  for (const auto& header : headers) {
-    if (!SetRequestHeader(request, header.first, header.second)) {
-      requestDiagnostic = std::string("Unity rejected pairing header: ") + header.first;
-      request->Dispose();
+  try {
+    auto* httpMethod = method == "GET"
+        ? System::Net::Http::HttpMethod::get_Get()
+        : method == "POST"
+            ? System::Net::Http::HttpMethod::get_Post()
+            : System::Net::Http::HttpMethod::New_ctor(StringW(method));
+    auto* uri = System::Uri::New_ctor(StringW(url));
+    if (!httpMethod || !uri) {
+      requestDiagnostic = "Could not construct the HTTPS method or URI.";
       return nullptr;
     }
-  }
-  return request;
-}
+    auto* request = System::Net::Http::HttpRequestMessage::New_ctor(httpMethod, uri);
+    if (!request) {
+      requestDiagnostic = "HttpRequestMessage construction returned null.";
+      return nullptr;
+    }
 
-static UnityWebRequest* CreateModuleToggleRequest(const std::string& module, bool enabled) {
-  auto* request = CreateGetRequest(
-      std::string(API_BASE) + "/device/settings/modules/" + module, deviceCredential);
-  if (!request) return nullptr;
-  if (!SetRequestHeader(request, "X-RiftPulse-Enabled", enabled ? "true" : "false")) {
-    requestDiagnostic = "Unity rejected the module setting header.";
-    request->Dispose();
+    if (!credential.empty()) {
+      auto* authorization =
+          System::Net::Http::Headers::AuthenticationHeaderValue::New_ctor(
+              StringW("Bearer"), StringW(credential));
+      if (!authorization) {
+        requestDiagnostic = "Could not create the device authorization value.";
+        request->Dispose();
+        return nullptr;
+      }
+      request->get_Headers()->set_Authorization(authorization);
+    }
+
+    if (!body.empty()) {
+      const std::vector<uint8_t> bytes(body.begin(), body.end());
+      const ArrayW<uint8_t> contentBytes(bytes);
+      auto* content = System::Net::Http::ByteArrayContent::New_ctor(contentBytes);
+      if (!content) {
+        requestDiagnostic = "ByteArrayContent construction returned null.";
+        request->Dispose();
+        return nullptr;
+      }
+      auto* contentType =
+          System::Net::Http::Headers::MediaTypeHeaderValue::New_ctor(StringW("application/json"));
+      if (!contentType) {
+        requestDiagnostic = "Could not create JSON Content-Type.";
+        request->Dispose();
+        return nullptr;
+      }
+      content->get_Headers()->set_ContentType(contentType);
+      request->set_Content(content);
+    }
+    return request;
+  } catch (const std::exception& error) {
+    requestDiagnostic = std::string("HTTPS request construction failed: ") + error.what();
+    return nullptr;
+  } catch (...) {
+    requestDiagnostic = "HTTPS request construction failed.";
     return nullptr;
   }
-  return request;
 }
 
-static std::string GetResponseText(DownloadHandler* handler) {
-  if (!handler) return {};
-  return static_cast<std::string>(handler->get_text());
+
+static bool SendAsync(System::Net::Http::HttpRequestMessage* request,
+                      RequestCompletion completion) {
+  if (!request) return false;
+  if (!EnsureHttpClient()) {
+    request->Dispose();
+    return false;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(httpStateMutex);
+    if (pendingHttpReady || pendingHttpCompletion) {
+      requestDiagnostic = "Another HTTPS request is still being processed.";
+      request->Dispose();
+      return false;
+    }
+    pendingHttpCompletion = std::move(completion);
+    pendingHttpStatus = -1;
+    pendingHttpBody.clear();
+    pendingHttpError.clear();
+  }
+
+  try {
+    auto* task = httpClient->SendAsync(
+        request, System::Net::Http::HttpCompletionOption::ResponseContentRead);
+    if (!task) {
+      requestDiagnostic = "HttpClient.SendAsync returned null.";
+      request->Dispose();
+      std::lock_guard<std::mutex> lock(httpStateMutex);
+      pendingHttpCompletion = {};
+      return false;
+    }
+
+    auto continuation = custom_types::MakeDelegate<HttpCompletionDelegate>(
+        std::function<void(HttpResponseTask)>(
+            [request](HttpResponseTask completed) {
+              int64_t status = -1;
+              std::string body;
+              std::string error;
+              System::Net::Http::HttpResponseMessage* response = nullptr;
+              try {
+                if (!completed || completed->get_IsCanceled() || completed->get_IsFaulted()) {
+                  throw std::runtime_error("The HTTPS task was canceled or faulted.");
+                }
+                response = completed->get_Result();
+                if (!response) throw std::runtime_error("The server returned no response object.");
+                status = static_cast<int64_t>(response->get_StatusCode().value__);
+                auto* bodyTask = response->get_Content()->ReadAsStringAsync();
+                if (bodyTask) {
+                  bodyTask->Wait();
+                  body = static_cast<std::string>(bodyTask->get_Result());
+                }
+              } catch (const std::exception& failure) {
+                error = std::string("HTTPS transport failed: ") + failure.what();
+              } catch (...) {
+                error = "HTTPS transport failed with an unknown managed exception.";
+              }
+              if (response) response->Dispose();
+              request->Dispose();
+              {
+                std::lock_guard<std::mutex> lock(httpStateMutex);
+                pendingHttpStatus = status;
+                pendingHttpBody = std::move(body);
+                pendingHttpError = std::move(error);
+                pendingHttpReady = true;
+              }
+              if (mainThreadContext && uiDispatchDelegate) {
+                mainThreadContext->Post(uiDispatchDelegate, nullptr);
+              }
+            }));
+    if (!continuation) {
+      requestDiagnostic = "Could not create the HTTPS completion callback.";
+      request->Dispose();
+      std::lock_guard<std::mutex> lock(httpStateMutex);
+      pendingHttpCompletion = {};
+      return false;
+    }
+    task->ContinueWith(continuation, System::Threading::Tasks::TaskScheduler::get_Default());
+    return true;
+  } catch (const std::exception& error) {
+    requestDiagnostic = std::string("Could not start HTTPS request: ") + error.what();
+    request->Dispose();
+    std::lock_guard<std::mutex> lock(httpStateMutex);
+    pendingHttpCompletion = {};
+    return false;
+  } catch (...) {
+    requestDiagnostic = "Could not start HTTPS request.";
+    request->Dispose();
+    std::lock_guard<std::mutex> lock(httpStateMutex);
+    pendingHttpCompletion = {};
+    return false;
+  }
+}
+
+static System::Net::Http::HttpRequestMessage* CreateGetRequest(
+    const std::string& url, const std::string& credential = {}) {
+  return CreateHttpRequest("GET", url, {}, credential);
+}
+
+static System::Net::Http::HttpRequestMessage* CreatePairingChallengeRequest(
+    const std::string& code) {
+  const std::string body =
+      "{\"code\":\"" + code +
+      "\",\"deviceCredential\":\"" + deviceCredential +
+      "\",\"deviceId\":\"" + deviceId +
+      "\",\"platform\":\"quest\",\"gameVersion\":\"" +
+      GAME_VERSION + "\",\"modVersion\":\"" + MOD_VERSION + "\"}";
+  return CreateHttpRequest("POST", std::string(API_BASE) + "/pairing/challenges", body);
+}
+
+static System::Net::Http::HttpRequestMessage* CreateModuleToggleRequest(
+    const std::string& module, bool enabled) {
+  const std::string body = std::string("{\"enabled\":") +
+                           (enabled ? "true" : "false") + "}";
+  return CreateHttpRequest("PATCH",
+      std::string(API_BASE) + "/device/settings/modules/" + module,
+      body, deviceCredential);
 }
 
 static std::string JsonString(const std::string& json, const std::string& key) {
@@ -262,34 +434,6 @@ static bool JsonModuleEnabled(const std::string& json, const std::string& module
   return fallback;
 }
 
-using RequestCompletion = std::function<void(int64_t, const std::string&)>;
-
-static bool SendAsync(UnityWebRequest* request, RequestCompletion completion) {
-  if (!request) return false;
-  auto* downloadHandler = request->get_downloadHandler();
-  auto* operation = request->SendWebRequest();
-  if (!operation) {
-    requestDiagnostic = "Unity SendWebRequest returned null.";
-    request->Dispose();
-    return false;
-  }
-
-  using CompletionDelegate = System::Action_1<AsyncOperation*>*;
-  auto callback = custom_types::MakeDelegate<CompletionDelegate>(
-      std::function<void(AsyncOperation*)>(
-          [request, downloadHandler, completion](AsyncOperation*) {
-            const int64_t responseCode = request->get_responseCode();
-            std::string responseBody = GetResponseText(downloadHandler);
-            const std::string nativeError = static_cast<std::string>(request->get_error());
-            if (!nativeError.empty()) {
-              requestDiagnostic = nativeError;
-            }
-            request->Dispose();
-            if (completion) completion(responseCode, responseBody);
-          }));
-  operation->add_completed(callback);
-  return true;
-}
 
 static void RefreshModuleButtons() {
   if (chatButton) {
@@ -303,9 +447,12 @@ static void RefreshModuleButtons() {
 }
 
 static void LoadModuleSettings() {
+  if (requestInFlight) return;
+  requestInFlight = true;
   auto* request = CreateGetRequest(
       std::string(API_BASE) + "/device/settings/modules", deviceCredential);
   if (!request || !SendAsync(request, [](int64_t status, const std::string& body) {
+        requestInFlight = false;
         if (status < 200 || status >= 300) {
           const auto code = JsonString(body, "code");
           const auto message = JsonString(body, "message");
@@ -319,7 +466,8 @@ static void LoadModuleSettings() {
         RefreshModuleButtons();
         SetStatus("RIFTPULSE ACCOUNT LINKED\n\nCHAT AND BSR SETTINGS LOADED\n\nUse the module buttons to save changes.");
       })) {
-    SetStatus("Account linked, but the settings request could not start.");
+    requestInFlight = false;
+    SetStatus("Account linked, but the HTTPS settings request could not start. " + requestDiagnostic);
   }
 }
 
@@ -349,6 +497,7 @@ static void SaveModuleSetting(const std::string& module, bool enabled) {
 }
 
 static void ToggleChat() {
+  if (requestInFlight) return;
   if (!isPaired) {
     SetStatus("Link this installation to your RiftPulse account first.");
     return;
@@ -359,6 +508,7 @@ static void ToggleChat() {
 }
 
 static void ToggleBsr() {
+  if (requestInFlight) return;
   if (!isPaired) {
     SetStatus("Link this installation to your RiftPulse account first.");
     return;

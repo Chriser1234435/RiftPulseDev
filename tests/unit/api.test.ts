@@ -166,6 +166,26 @@ test("Quest can save a module toggle with a device-authenticated header request"
   assert.equal(bindings.DB.moduleSettings.get("chat")?.enabled, 0);
 });
 
+test("Quest managed HTTP JSON PATCH saves a module preference with device authorization", async () => {
+  const bindings = env();
+  const credential = "f".repeat(64);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential));
+  bindings.DB.deviceCredentialDigest = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  const response = await call("/api/v1/device/settings/modules/chat", {
+    method: "PATCH",
+    headers: {
+      authorization: "Bearer " + credential,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ enabled: false }),
+  }, bindings);
+  assert.equal(response.status, 200, await response.clone().text());
+  const payload = await response.json();
+  assert.equal(payload.moduleKey, "chat");
+  assert.equal(payload.enabled, false);
+  assert.equal(bindings.DB.moduleSettings.get("chat")?.enabled, 0);
+});
+
 test("Quest module toggle header route rejects unauthenticated or malformed input", async () => {
   const denied = await call("/api/v1/device/settings/modules/chat", {
     method: "GET",

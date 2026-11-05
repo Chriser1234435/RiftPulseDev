@@ -1,0 +1,244 @@
+static System::Net::Http::HttpClient* httpClient = nullptr;
+static System::Threading::SynchronizationContext* mainThreadContext = nullptr;
+static UiDispatchDelegate uiDispatchDelegate = nullptr;
+static std::mutex httpStateMutex;
+static RequestCompletion pendingHttpCompletion;
+static int64_t pendingHttpStatus = -1;
+static std::string pendingHttpBody;
+static std::string pendingHttpError;
+static bool pendingHttpReady = false;
+
+static void DispatchPendingHttpResponse(System::Object*) {
+  RequestCompletion completion;
+  int64_t status = -1;
+  std::string body;
+  std::string error;
+  {
+    std::lock_guard<std::mutex> lock(httpStateMutex);
+    if (!pendingHttpReady) return;
+    completion = std::move(pendingHttpCompletion);
+    status = pendingHttpStatus;
+    body = std::move(pendingHttpBody);
+    error = std::move(pendingHttpError);
+    pendingHttpReady = false;
+  }
+  requestDiagnostic = error;
+  if (completion) completion(status, body);
+}
+
+static bool EnsureHttpClient() {
+  try {
+    if (!httpClient) {
+      httpClient = System::Net::Http::HttpClient::New_ctor();
+      if (!httpClient) {
+        requestDiagnostic = "System.Net.Http.HttpClient could not be created.";
+        return false;
+      }
+      httpClient->set_Timeout(System::TimeSpan::FromSeconds(20.0));
+    }
+    if (!mainThreadContext) {
+      mainThreadContext = System::Threading::SynchronizationContext::get_Current();
+    }
+    if (!mainThreadContext) {
+      requestDiagnostic = "Unity main-thread synchronization context is unavailable.";
+      return false;
+    }
+    if (!uiDispatchDelegate) {
+      uiDispatchDelegate = custom_types::MakeDelegate<UiDispatchDelegate>(
+          std::function<void(System::Object*)>(
+              [](System::Object* state) { DispatchPendingHttpResponse(state); }));
+    }
+    if (!uiDispatchDelegate) {
+      requestDiagnostic = "Could not create the main-thread HTTP callback.";
+      return false;
+    }
+    return true;
+  } catch (const std::exception& error) {
+    requestDiagnostic = std::string("HTTP client initialization failed: ") + error.what();
+    return false;
+  } catch (...) {
+    requestDiagnostic = "HTTP client initialization failed.";
+    return false;
+  }
+}
+
+static System::Net::Http::HttpRequestMessage* CreateHttpRequest(
+    const std::string& method, const std::string& url,
+    const std::string& body = {}, const std::string& credential = {}) {
+  requestDiagnostic.clear();
+  try {
+    auto* httpMethod = method == "GET"
+        ? System::Net::Http::HttpMethod::get_Get()
+        : method == "POST"
+            ? System::Net::Http::HttpMethod::get_Post()
+            : System::Net::Http::HttpMethod::New_ctor(StringW(method));
+    auto* uri = System::Uri::New_ctor(StringW(url));
+    if (!httpMethod || !uri) {
+      requestDiagnostic = "Could not construct the HTTPS method or URI.";
+      return nullptr;
+    }
+    auto* request = System::Net::Http::HttpRequestMessage::New_ctor(httpMethod, uri);
+    if (!request) {
+      requestDiagnostic = "HttpRequestMessage construction returned null.";
+      return nullptr;
+    }
+
+    if (!credential.empty()) {
+      auto* authorization =
+          System::Net::Http::Headers::AuthenticationHeaderValue::New_ctor(
+              StringW("Bearer"), StringW(credential));
+      if (!authorization) {
+        requestDiagnostic = "Could not create the device authorization value.";
+        request->Dispose();
+        return nullptr;
+      }
+      request->get_Headers()->set_Authorization(authorization);
+    }
+
+    if (!body.empty()) {
+      const std::vector<uint8_t> bytes(body.begin(), body.end());
+      const ArrayW<uint8_t> contentBytes(bytes);
+      auto* content = System::Net::Http::ByteArrayContent::New_ctor(contentBytes);
+      if (!content) {
+        requestDiagnostic = "ByteArrayContent construction returned null.";
+        request->Dispose();
+        return nullptr;
+      }
+      auto* contentType =
+          System::Net::Http::Headers::MediaTypeHeaderValue::New_ctor(StringW("application/json"));
+      if (!contentType) {
+        requestDiagnostic = "Could not create JSON Content-Type.";
+        request->Dispose();
+        return nullptr;
+      }
+      content->get_Headers()->set_ContentType(contentType);
+      request->set_Content(content);
+    }
+    return request;
+  } catch (const std::exception& error) {
+    requestDiagnostic = std::string("HTTPS request construction failed: ") + error.what();
+    return nullptr;
+  } catch (...) {
+    requestDiagnostic = "HTTPS request construction failed.";
+    return nullptr;
+  }
+}
+
+
+static bool SendAsync(System::Net::Http::HttpRequestMessage* request,
+                      RequestCompletion completion) {
+  if (!request) return false;
+  if (!EnsureHttpClient()) {
+    request->Dispose();
+    return false;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(httpStateMutex);
+    if (pendingHttpReady || pendingHttpCompletion) {
+      requestDiagnostic = "Another HTTPS request is still being processed.";
+      request->Dispose();
+      return false;
+    }
+    pendingHttpCompletion = std::move(completion);
+    pendingHttpStatus = -1;
+    pendingHttpBody.clear();
+    pendingHttpError.clear();
+  }
+
+  try {
+    auto* task = httpClient->SendAsync(
+        request, System::Net::Http::HttpCompletionOption::ResponseContentRead);
+    if (!task) {
+      requestDiagnostic = "HttpClient.SendAsync returned null.";
+      request->Dispose();
+      std::lock_guard<std::mutex> lock(httpStateMutex);
+      pendingHttpCompletion = {};
+      return false;
+    }
+
+    auto continuation = custom_types::MakeDelegate<HttpCompletionDelegate>(
+        std::function<void(HttpResponseTask)>(
+            [request](HttpResponseTask completed) {
+              int64_t status = -1;
+              std::string body;
+              std::string error;
+              System::Net::Http::HttpResponseMessage* response = nullptr;
+              try {
+                if (!completed || completed->get_IsCanceled() || completed->get_IsFaulted()) {
+                  throw std::runtime_error("The HTTPS task was canceled or faulted.");
+                }
+                response = completed->get_Result();
+                if (!response) throw std::runtime_error("The server returned no response object.");
+                status = static_cast<int64_t>(response->get_StatusCode().value__);
+                auto* bodyTask = response->get_Content()->ReadAsStringAsync();
+                if (bodyTask) {
+                  bodyTask->Wait();
+                  body = static_cast<std::string>(bodyTask->get_Result());
+                }
+              } catch (const std::exception& failure) {
+                error = std::string("HTTPS transport failed: ") + failure.what();
+              } catch (...) {
+                error = "HTTPS transport failed with an unknown managed exception.";
+              }
+              if (response) response->Dispose();
+              request->Dispose();
+              {
+                std::lock_guard<std::mutex> lock(httpStateMutex);
+                pendingHttpStatus = status;
+                pendingHttpBody = std::move(body);
+                pendingHttpError = std::move(error);
+                pendingHttpReady = true;
+              }
+              if (mainThreadContext && uiDispatchDelegate) {
+                mainThreadContext->Post(uiDispatchDelegate, nullptr);
+              }
+            }));
+    if (!continuation) {
+      requestDiagnostic = "Could not create the HTTPS completion callback.";
+      request->Dispose();
+      std::lock_guard<std::mutex> lock(httpStateMutex);
+      pendingHttpCompletion = {};
+      return false;
+    }
+    task->ContinueWith(continuation, System::Threading::Tasks::TaskScheduler::get_Default());
+    return true;
+  } catch (const std::exception& error) {
+    requestDiagnostic = std::string("Could not start HTTPS request: ") + error.what();
+    request->Dispose();
+    std::lock_guard<std::mutex> lock(httpStateMutex);
+    pendingHttpCompletion = {};
+    return false;
+  } catch (...) {
+    requestDiagnostic = "Could not start HTTPS request.";
+    request->Dispose();
+    std::lock_guard<std::mutex> lock(httpStateMutex);
+    pendingHttpCompletion = {};
+    return false;
+  }
+}
+
+static System::Net::Http::HttpRequestMessage* CreateGetRequest(
+    const std::string& url, const std::string& credential = {}) {
+  return CreateHttpRequest("GET", url, {}, credential);
+}
+
+static System::Net::Http::HttpRequestMessage* CreatePairingChallengeRequest(
+    const std::string& code) {
+  const std::string body =
+      "{\"code\":\"" + code +
+      "\",\"deviceCredential\":\"" + deviceCredential +
+      "\",\"deviceId\":\"" + deviceId +
+      "\",\"platform\":\"quest\",\"gameVersion\":\"" +
+      GAME_VERSION + "\",\"modVersion\":\"" + MOD_VERSION + "\"}";
+  return CreateHttpRequest("POST", std::string(API_BASE) + "/pairing/challenges", body);
+}
+
+static System::Net::Http::HttpRequestMessage* CreateModuleToggleRequest(
+    const std::string& module, bool enabled) {
+  const std::string body = std::string("{\"enabled\":") +
+                           (enabled ? "true" : "false") + "}";
+  return CreateHttpRequest("PATCH",
+      std::string(API_BASE) + "/device/settings/modules/" + module,
+      body, deviceCredential);
+}
