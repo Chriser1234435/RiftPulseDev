@@ -420,3 +420,14 @@ Date: 2026-11-04
 - Updated website Quest card, QMOD, and Quest README. README documents BOM fix and outstanding runtime validation.
 - Deployed public Worker `riftpulse` with Wrangler config `wrangler.production.jsonc`; Worker Version ID `de4a8fc2-b5fc-4b95-8380-d5258866537a`. Existing D1 and bindings were preserved.
 - Verified both `https://riftpulse.me` and `https://app.riftpulse.me`: QMOD and README HTTP 200; QMOD download exactly 235,665 bytes and SHA-256 matched local (`01279B2D1CF7CEFAEB0823114E47770BFBA978C202FDA651EB0E2244ECE976B8`); README reports 0.1.22; homepage HTTP 200 and serves refreshed client bundle.
+
+
+## QuestPatcher/MBF QMOD manifest BOM fix — alpha 0.1.22 (November 5, 2026)
+
+- Tester import error: `Parsing manifest Caused by: expected value at line 1 column 1`. Diagnosis: packaged `mod.json` began with UTF-8 BOM bytes `EF BB BF`, which the QuestPatcher manifest parser rejects even though PowerShell JSON conversion tolerates it.
+- Removed BOM from Quest source manifests and wrote them as UTF-8 without BOM. Rebuilt Quest ARM64 Scotland2 package for Beat Saber `1.40.8_7379`, version 0.1.22.
+- Verified archive contains exactly `mod.json` and `libriftpulse.so`; manifest starts with byte `7B` (`{`), parses as JSON, version is 0.1.22 and target game version is correct. QMOD size 235,665 bytes, SHA-256 `01279B2D1CF7CEFAEB0823114E47770BFBA978C202FDA651EB0E2244ECE976B8`.
+- `npm test` passed: 49 unit/contract tests, isolated migration test, TypeScript check and Vite build.
+- Production Cloudflare Worker deployed, Version ID `87d2bc0b-c75b-4d47-a5ea-717b7661ec30`.
+- Public download verification: QMOD HTTP 200, hash matched local, embedded manifest first byte `7B` and version 0.1.22; README HTTP 200; homepage HTTP 200 and refreshed JS asset confirmed.
+- Actual QuestPatcher/MBF import and headset pairing are still untested after deployment and require alpha tester confirmation.
