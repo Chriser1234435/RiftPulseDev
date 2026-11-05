@@ -1,9 +1,7 @@
-# RiftPulse Quest adapter — alpha 0.1.22
+# RiftPulse Quest alpha 0.1.23
 
-Native ARM64 Scotland2 client for Beat Saber 1.40.8 (`1.40.8_7379`). This alpha generates a five-digit pairing code, registers the pairing challenge with the RiftPulse API, checks website claim status, and after linking loads and saves the account's Chat and BSR module preferences.
+For Beat Saber Quest 1.40.8 (`1.40.8_7379`), Scotland2 ARM64.
 
-Fix in 0.1.22: corrected the QMOD manifest encoding. The embedded `mod.json` is UTF-8 without a BOM and begins directly with `{`, as expected by QuestPatcher/MBF import. It also includes the previous UnityWebRequest pairing fix removing the rejected `Accept` header.
+This build includes the previous UnityWebRequest `Accept` header removal and now logs the exact pairing header name Unity rejects, rather than only a generic secure-header failure. This diagnostics-only update will help identify whether the failure occurs on pairing-code, device credential, device ID, platform, game-version, or mod-version header assignment.
 
-Pairing status is checked manually using CHECK PAIRING STATUS after entering the code on https://app.riftpulse.me. The Quest menu's pairing information and action buttons are arranged in one aligned column.
-
-This is an alpha candidate. Headset installation, menu layout, pairing and preference-save runtime validation remain for testers. Module switches persist preferences only; actual live provider chat/events, combined viewer counts, ChatIntegrations command execution, and BSR song-request fulfillment are not yet implemented.
+Import the QMOD using QuestPatcher/MBF and try the Connect / pairing request again. If it still fails, capture the diagnostic text displayed by the RiftPulse menu; it should now name the specific header. The API pairing behavior and full live module integrations remain subject to alpha testing.

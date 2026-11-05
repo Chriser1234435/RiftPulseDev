@@ -19,6 +19,7 @@
 #include <fstream>
 #include <functional>
 #include <string>
+#include <utility>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -31,7 +32,7 @@ using UnityEngine::AsyncOperation;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.22";
+static constexpr const char* MOD_VERSION = "0.1.23";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -190,17 +191,21 @@ static UnityWebRequest* CreatePairingChallengeRequest(const std::string& code) {
   auto* request = CreateGetRequest(std::string(API_BASE) + "/pairing/challenges/create");
   if (!request) return nullptr;
 
-  const bool headersOk =
-      SetRequestHeader(request, "X-RP-Pairing-Code", code) &&
-      SetRequestHeader(request, "X-RP-Device-Credential", deviceCredential) &&
-      SetRequestHeader(request, "X-RP-Device-Id", deviceId) &&
-      SetRequestHeader(request, "X-RP-Platform", "quest") &&
-      SetRequestHeader(request, "X-RP-Game-Version", GAME_VERSION) &&
-      SetRequestHeader(request, "X-RP-Mod-Version", MOD_VERSION);
-  if (!headersOk) {
-    requestDiagnostic = "Unity rejected one of the secure pairing headers.";
-    request->Dispose();
-    return nullptr;
+  // Report the exact header that Unity rejects so alpha diagnostics are actionable.
+  const std::array<std::pair<const char*, std::string>, 6> headers{{
+      {"X-RP-Pairing-Code", code},
+      {"X-RP-Device-Credential", deviceCredential},
+      {"X-RP-Device-Id", deviceId},
+      {"X-RP-Platform", "quest"},
+      {"X-RP-Game-Version", GAME_VERSION},
+      {"X-RP-Mod-Version", MOD_VERSION},
+  }};
+  for (const auto& header : headers) {
+    if (!SetRequestHeader(request, header.first, header.second)) {
+      requestDiagnostic = std::string("Unity rejected pairing header: ") + header.first;
+      request->Dispose();
+      return nullptr;
+    }
   }
   return request;
 }
