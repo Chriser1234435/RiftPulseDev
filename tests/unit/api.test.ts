@@ -36,6 +36,14 @@ class FakeStatement implements D1PreparedStatement {
       const found = this.db.challenges.get(id);
       return found ? ({ status: found.status, expires_at: found.expires_at, claimed_at: found.claimed_at } as T) : null;
     }
+    if (q.includes("select devices.account_id as accountid from devices")) {
+      const [digest] = this.values as [string];
+      return digest === this.db.deviceCredentialDigest ? ({ accountId: this.db.deviceAccountId } as T) : null;
+    }
+    if (q.includes("select enabled, settings_json from module_settings")) {
+      const [, moduleKey] = this.values as [string, string];
+      return (this.db.moduleSettings.get(moduleKey) ?? null) as T | null;
+    }
     return null;
   }
   async run<T>(): Promise<D1Result<T>> {
@@ -52,6 +60,16 @@ class FakeStatement implements D1PreparedStatement {
     if (q.startsWith("update pairing_challenges")) {
       return { success: true, meta: { changes: 0 } };
     }
+    if (q.startsWith("insert or ignore into module_settings")) {
+      const [, accountId, moduleKey] = this.values as [string, string, string, string];
+      if (!this.db.moduleSettings.has(moduleKey)) this.db.moduleSettings.set(moduleKey, { enabled: 1, settings_json: "{}" });
+      return { success: true, meta: { changes: 1 } };
+    }
+    if (q.startsWith("update module_settings set enabled")) {
+      const [enabled, settingsJson, , , moduleKey] = this.values as [number, string, string, string, string];
+      this.db.moduleSettings.set(moduleKey, { enabled, settings_json: settingsJson });
+      return { success: true, meta: { changes: 1 } };
+    }
     return { success: true, meta: { changes: 0 } };
   }
   async all<T>(): Promise<D1Result<T>> { return { success: true, results: [] }; }
@@ -59,6 +77,9 @@ class FakeStatement implements D1PreparedStatement {
 
 class FakeD1 implements D1Database {
   readonly challenges = new Map<string, ChallengeRow>();
+  deviceCredentialDigest: string | null = null;
+  deviceAccountId = "test-account";
+  readonly moduleSettings = new Map<string, { enabled: number; settings_json: string }>();
   prepare(query: string): D1PreparedStatement { return new FakeStatement(this, query); }
   async batch<T>(_statements: D1PreparedStatement[]): Promise<D1Result<T>[]> { return []; }
 }
@@ -88,6 +109,78 @@ test("redirects insecure RiftPulse browser origins to HTTPS before auth or asset
   const aliasResponse = await worker.fetch(new Request("http://riftpulse.me/"), env());
   assert.equal(aliasResponse.status, 308);
   assert.equal(aliasResponse.headers.get("location"), "https://riftpulse.me/");
+});
+
+test("Quest can register a pairing challenge without a Unity upload handler or URL secrets", async () => {
+  const bindings = env();
+  const deviceId = "550e8400-e29b-41d4-a716-446655440000";
+  const credential = "c".repeat(64);
+  const response = await call("/api/v1/pairing/challenges/create", {
+    method: "GET",
+    headers: {
+      "x-rp-pairing-code": "48126",
+      "x-rp-device-credential": credential,
+      "x-rp-device-id": deviceId,
+      "x-rp-platform": "quest",
+      "x-rp-game-version": "1.40.8_7379",
+      "x-rp-mod-version": "0.1.20",
+    },
+  }, bindings);
+  assert.equal(response.status, 201, await response.clone().text());
+  const payload = await response.json();
+  assert.equal(payload.status, "pending");
+  assert.equal(typeof payload.challengeId, "string");
+  assert.equal("code" in payload, false);
+  assert.equal("deviceCredential" in payload, false);
+  const saved = bindings.DB.challenges.get(payload.challengeId);
+  assert.ok(saved);
+  assert.equal(saved.device_id, deviceId);
+  assert.notEqual(saved.code_digest, "48126");
+  assert.notEqual(saved.device_credential_digest, credential);
+});
+
+test("Quest pairing header route rejects missing or malformed secure headers", async () => {
+  const response = await call("/api/v1/pairing/challenges/create", {
+    method: "GET",
+    headers: { "x-rp-pairing-code": "12x45" },
+  });
+  assert.equal(response.status, 400);
+});
+
+test("Quest can save a module toggle with a device-authenticated header request", async () => {
+  const bindings = env();
+  const credential = "d".repeat(64);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential));
+  bindings.DB.deviceCredentialDigest = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  const response = await call("/api/v1/device/settings/modules/chat", {
+    method: "GET",
+    headers: {
+      authorization: "Bearer " + credential,
+      "x-riftpulse-enabled": "false",
+    },
+  }, bindings);
+  assert.equal(response.status, 200, await response.clone().text());
+  const payload = await response.json();
+  assert.equal(payload.moduleKey, "chat");
+  assert.equal(payload.enabled, false);
+  assert.equal(bindings.DB.moduleSettings.get("chat")?.enabled, 0);
+});
+
+test("Quest module toggle header route rejects unauthenticated or malformed input", async () => {
+  const denied = await call("/api/v1/device/settings/modules/chat", {
+    method: "GET",
+    headers: { "x-riftpulse-enabled": "true" },
+  });
+  assert.equal(denied.status, 401);
+  const bindings = env();
+  const credential = "e".repeat(64);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential));
+  bindings.DB.deviceCredentialDigest = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  const malformed = await call("/api/v1/device/settings/modules/chat", {
+    method: "GET",
+    headers: { authorization: "Bearer " + credential, "x-riftpulse-enabled": "maybe" },
+  }, bindings);
+  assert.equal(malformed.status, 400);
 });
 
 test("pairing challenge stores a digest and never returns the raw code", async () => {

@@ -22,7 +22,6 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <vector>
 
 using UnityEngine::Networking::UnityWebRequest;
 using UnityEngine::Networking::DownloadHandlerBuffer;
@@ -32,8 +31,10 @@ using UnityEngine::AsyncOperation;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.19";
+static constexpr const char* MOD_VERSION = "0.1.20";
 
+static HMUI::CurvedTextMeshPro* heading = nullptr;
+static HMUI::CurvedTextMeshPro* instructions = nullptr;
 static HMUI::CurvedTextMeshPro* overview = nullptr;
 static UnityEngine::UI::Button* codeButton = nullptr;
 static UnityEngine::UI::Button* checkButton = nullptr;
@@ -166,79 +167,58 @@ static bool SetRequestHeader(UnityWebRequest* request,
 
 static UnityWebRequest* CreateGetRequest(const std::string& url,
                                          const std::string& credential = {}) {
+  requestDiagnostic.clear();
   auto* request = UnityWebRequest::Get(StringW(url));
-  if (!request) return nullptr;
+  if (!request) {
+    requestDiagnostic = "UnityWebRequest::Get returned null.";
+    return nullptr;
+  }
   request->set_downloadHandler(DownloadHandlerBuffer::New_ctor());
-  SetRequestHeader(request, "Accept", "application/json");
+  request->set_timeout(20);
+  if (!SetRequestHeader(request, "Accept", "application/json")) {
+    requestDiagnostic = "Unity rejected the Accept request header.";
+    request->Dispose();
+    return nullptr;
+  }
   if (!credential.empty() &&
       !SetRequestHeader(request, "Authorization", "Bearer " + credential)) {
+    requestDiagnostic = "Unity rejected the device authorization header.";
+    request->Dispose();
+    return nullptr;
+  }
+  SetRequestHeader(request, "Cache-Control", "no-store");
+  return request;
+}
+
+static UnityWebRequest* CreatePairingChallengeRequest(const std::string& code) {
+  auto* request = CreateGetRequest(std::string(API_BASE) + "/pairing/challenges/create");
+  if (!request) return nullptr;
+
+  const bool headersOk =
+      SetRequestHeader(request, "X-RP-Pairing-Code", code) &&
+      SetRequestHeader(request, "X-RP-Device-Credential", deviceCredential) &&
+      SetRequestHeader(request, "X-RP-Device-Id", deviceId) &&
+      SetRequestHeader(request, "X-RP-Platform", "quest") &&
+      SetRequestHeader(request, "X-RP-Game-Version", GAME_VERSION) &&
+      SetRequestHeader(request, "X-RP-Mod-Version", MOD_VERSION);
+  if (!headersOk) {
+    requestDiagnostic = "Unity rejected one of the secure pairing headers.";
     request->Dispose();
     return nullptr;
   }
   return request;
 }
 
-static UnityWebRequest* CreateJsonRequest(const std::string& url,
-                                          const std::string& methodName,
-                                          const std::string& body,
-                                          const std::string& credential = {}) {
-  requestDiagnostic.clear();
-  try {
-    // Beat Saber 1.40.8 uses Unity 2021.3. Use the explicit request constructor
-    // and UploadHandlerRaw so the body stays raw UTF-8 JSON (not form-encoded).
-    auto* request = UnityWebRequest::New_ctor(StringW(url), StringW(methodName));
-    if (!request) {
-      requestDiagnostic = "UnityWebRequest constructor returned null.";
-      return nullptr;
-    }
-
-    auto* uploadHandlerClass =
-        il2cpp_utils::GetClassFromName("UnityEngine.Networking", "UploadHandlerRaw");
-    if (!uploadHandlerClass) {
-      requestDiagnostic = "Unity UploadHandlerRaw class was not found.";
-      request->Dispose();
-      return nullptr;
-    }
-
-    const std::vector<uint8_t> bodyBytes(body.begin(), body.end());
-    const ArrayW<uint8_t> bodyArray(bodyBytes);
-    auto uploadHandler =
-        il2cpp_utils::New<UnityEngine::Networking::UploadHandler*>(
-            uploadHandlerClass, bodyArray);
-    if (!uploadHandler || !*uploadHandler) {
-      requestDiagnostic = "Unity UploadHandlerRaw(byte[]) could not be constructed.";
-      request->Dispose();
-      return nullptr;
-    }
-
-    request->set_uploadHandler(*uploadHandler);
-    request->set_downloadHandler(DownloadHandlerBuffer::New_ctor());
-    request->set_timeout(20);
-
-    if (!SetRequestHeader(request, "Content-Type", "application/json")) {
-      requestDiagnostic = "Unity rejected the Content-Type request header.";
-      request->Dispose();
-      return nullptr;
-    }
-    if (!SetRequestHeader(request, "Accept", "application/json")) {
-      requestDiagnostic = "Unity rejected the Accept request header.";
-      request->Dispose();
-      return nullptr;
-    }
-    if (!credential.empty() &&
-        !SetRequestHeader(request, "Authorization", "Bearer " + credential)) {
-      requestDiagnostic = "Unity rejected the device authorization header.";
-      request->Dispose();
-      return nullptr;
-    }
-    return request;
-  } catch (const std::exception& error) {
-    requestDiagnostic = std::string("Request construction exception: ") + error.what();
-    return nullptr;
-  } catch (...) {
-    requestDiagnostic = "Unknown exception while constructing UnityWebRequest.";
+static UnityWebRequest* CreateModuleToggleRequest(const std::string& module, bool enabled) {
+  auto* request = CreateGetRequest(
+      std::string(API_BASE) + "/device/settings/modules/" + module, deviceCredential);
+  if (!request) return nullptr;
+  if (!SetRequestHeader(request, "X-RiftPulse-Enabled", enabled ? "true" : "false")) {
+    requestDiagnostic = "Unity rejected the module setting header.";
+    request->Dispose();
     return nullptr;
   }
+  return request;
 }
 
 static std::string GetResponseText(DownloadHandler* handler) {
@@ -321,8 +301,8 @@ static void LoadModuleSettings() {
       std::string(API_BASE) + "/device/settings/modules", deviceCredential);
   if (!request || !SendAsync(request, [](int64_t status, const std::string& body) {
         if (status < 200 || status >= 300) {
-          const auto code = JsonString(requestDiagnostic, "code");
-          const auto message = JsonString(requestDiagnostic, "message");
+          const auto code = JsonString(body, "code");
+          const auto message = JsonString(body, "message");
           SetStatus("Account linked. Module settings failed (HTTP " +
                     std::to_string(status) + "). " +
                     (message.empty() ? requestDiagnostic : code + ": " + message));
@@ -340,11 +320,7 @@ static void LoadModuleSettings() {
 static void SaveModuleSetting(const std::string& module, bool enabled) {
   if (!isPaired || requestInFlight) return;
   requestInFlight = true;
-  const std::string body = std::string("{\"enabled\":") +
-                           (enabled ? "true" : "false") + "}";
-  auto* request = CreateJsonRequest(
-      std::string(API_BASE) + "/device/settings/modules/" + module,
-      "PATCH", body, deviceCredential);
+  auto* request = CreateModuleToggleRequest(module, enabled);
   if (!request || !SendAsync(request, [module, enabled](int64_t status, const std::string& response) {
         requestInFlight = false;
         if (status < 200 || status >= 300) {
@@ -443,15 +419,7 @@ static void GeneratePairingCode() {
   if (codeButton) BSML::Lite::SetButtonText(codeButton, code);
   SetStatus("Registering your five-digit code with RiftPulse...");
 
-  const std::string body =
-      "{\"code\":\"" + code +
-      "\",\"deviceCredential\":\"" + deviceCredential +
-      "\",\"deviceId\":\"" + deviceId +
-      "\",\"platform\":\"quest\",\"gameVersion\":\"" +
-      GAME_VERSION + "\",\"modVersion\":\"" + MOD_VERSION + "\"}";
-
-  auto* request = CreateJsonRequest(
-      std::string(API_BASE) + "/pairing/challenges", "POST", body);
+  auto* request = CreatePairingChallengeRequest(code);
   if (!request || !SendAsync(request, [](int64_t status, const std::string& response) {
         requestInFlight = false;
         if (status != 201) {
@@ -488,29 +456,39 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
   if (!firstActivation) return;
   auto root = viewController->get_transform();
 
+  heading = BSML::Lite::CreateText(
+      root, "RIFTPULSE", 4.0f,
+      {0.0f, 15.5f}, {58.0f, 7.0f});
+
+  instructions = BSML::Lite::CreateText(
+      root, "QUEST CONNECTION  •  BEAT SABER 1.40.8",
+      2.4f, {0.0f, 9.0f}, {58.0f, 5.0f});
+
   overview = BSML::Lite::CreateText(
       root,
-      "RIFTPULSE\nSTREAM TOOLS FOR BEAT SABER\n\nGenerate a secure pairing code to link this Quest installation.",
-      2.7f, {0.0f, 9.0f}, {58.0f, 24.0f});
+      "Generate a secure code to link this headset.\nEnter it on app.riftpulse.me, then check pairing status.",
+      2.4f, {0.0f, 0.5f}, {58.0f, 12.0f});
 
+  // Keep every action in the same visible column as the pairing information.
+  // The old x=0 button anchors were rendered far left by the PracticeButton template.
   codeButton = BSML::Lite::CreateUIButton(
       root, "GENERATE PAIRING CODE", "PracticeButton",
-      UnityEngine::Vector2({0.0f, -7.0f}), UnityEngine::Vector2({34.0f, 6.5f}),
+      UnityEngine::Vector2({22.0f, -9.0f}), UnityEngine::Vector2({42.0f, 5.5f}),
       []() { GeneratePairingCode(); });
 
   checkButton = BSML::Lite::CreateUIButton(
       root, "CHECK PAIRING STATUS", "PracticeButton",
-      UnityEngine::Vector2({0.0f, -14.0f}), UnityEngine::Vector2({34.0f, 6.5f}),
+      UnityEngine::Vector2({22.0f, -15.5f}), UnityEngine::Vector2({42.0f, 5.5f}),
       []() { CheckPairingStatus(); });
 
   chatButton = BSML::Lite::CreateUIButton(
       root, "CHAT MODULE: LOCKED", "PracticeButton",
-      UnityEngine::Vector2({0.0f, -21.0f}), UnityEngine::Vector2({34.0f, 6.0f}),
+      UnityEngine::Vector2({22.0f, -22.0f}), UnityEngine::Vector2({42.0f, 5.5f}),
       []() { ToggleChat(); });
 
   bsrButton = BSML::Lite::CreateUIButton(
       root, "BSR MODULE: LOCKED", "PracticeButton",
-      UnityEngine::Vector2({0.0f, -27.5f}), UnityEngine::Vector2({34.0f, 6.0f}),
+      UnityEngine::Vector2({22.0f, -28.5f}), UnityEngine::Vector2({42.0f, 5.5f}),
       []() { ToggleBsr(); });
 }
 

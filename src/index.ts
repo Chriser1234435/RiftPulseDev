@@ -78,6 +78,32 @@ async function getDeviceAuthContext(request: Request, env: Env): Promise<AuthCon
   return { ok: true, userId: row.accountId, auth: null };
 }
 
+async function registerPairingChallenge(input: unknown, env: Env, requestId: string): Promise<Response> {
+  if (!env.DB) return jsonError(503, "database_unavailable", "Local database binding is not configured.", requestId);
+  if (!env.PAIRING_HMAC_KEY || env.PAIRING_HMAC_KEY.length < 32) {
+    return jsonError(503, "pairing_not_configured", "Pairing security is not configured.", requestId);
+  }
+  const parsed = validateCreatePairingChallenge(input);
+  if (!parsed.ok) return Response.json({
+    error: { code: "validation_failed", message: "Pairing challenge fields are invalid.", requestId },
+    issues: parsed.issues,
+  }, { status: 400, headers: JSON_HEADERS });
+
+  const result = await createPairingChallenge(env.DB, {
+    ...parsed.value, challengeId: crypto.randomUUID(), now: new Date(),
+  }, env.PAIRING_HMAC_KEY);
+  if (!result.ok) {
+    if (result.reason === "code_conflict") return jsonError(409, "code_collision", "Choose a new five-digit code and retry.", requestId);
+    if (result.reason === "too_many_active") return jsonError(429, "too_many_active_challenges", "Too many active challenges for this device.", requestId);
+    return jsonError(503, "pairing_store_unavailable", "Could not store the pairing challenge.", requestId);
+  }
+
+  // Deliberately do not echo the code, device credential, or their digests.
+  return Response.json({
+    challengeId: result.challengeId, status: "pending", expiresAt: result.expiresAt, pollAfterMs: 1500,
+  }, { status: 201, headers: JSON_HEADERS });
+}
+
 async function publishChatMessage(env: Env, accountId: string, message: {
   id: string; provider: "twitch" | "youtube" | "kick" | "tiktok"; externalMessageId: string;
   channelId: string; channelName: string; senderId: string; senderName: string; text: string;
@@ -237,19 +263,30 @@ export default {
     }
 
     const deviceModuleSettingsMatch = url.pathname.match(/^\/api\/v1\/device\/settings\/modules\/(chat|bsr-song-request)$/);
-    if (deviceModuleSettingsMatch && request.method === "PATCH") {
+    if (deviceModuleSettingsMatch && (request.method === "PATCH" || request.method === "GET")) {
       const authContext = await getDeviceAuthContext(request, env);
       if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
-      if (!isJson(request)) return jsonError(415, "content_type_required", "Send a JSON request body.", requestId);
-      let body: unknown;
-      try { body = await readJson(request); }
-      catch (error) {
-        const message = error instanceof Error ? error.message : "invalid_json";
-        return message === "body_too_large" ? jsonError(413, "body_too_large", "Request body exceeds 4 KiB.", requestId)
-          : jsonError(400, "invalid_json", "Request body must be valid JSON.", requestId);
+      let value: Record<string, unknown>;
+      if (request.method === "GET") {
+        // Unity's Quest runtime has the request body upload class stripped. A device-authenticated
+        // header update keeps module toggles functional without putting credentials in the URL.
+        const enabledHeader = request.headers.get("x-riftpulse-enabled");
+        if (enabledHeader !== "true" && enabledHeader !== "false") {
+          return jsonError(400, "validation_failed", "X-RiftPulse-Enabled must be true or false.", requestId);
+        }
+        value = { enabled: enabledHeader === "true" };
+      } else {
+        if (!isJson(request)) return jsonError(415, "content_type_required", "Send a JSON request body.", requestId);
+        let body: unknown;
+        try { body = await readJson(request); }
+        catch (error) {
+          const message = error instanceof Error ? error.message : "invalid_json";
+          return message === "body_too_large" ? jsonError(413, "body_too_large", "Request body exceeds 4 KiB.", requestId)
+            : jsonError(400, "invalid_json", "Request body must be valid JSON.", requestId);
+        }
+        if (!body || typeof body !== "object" || Array.isArray(body)) return jsonError(400, "validation_failed", "Settings body must be an object.", requestId);
+        value = body as Record<string, unknown>;
       }
-      if (!body || typeof body !== "object" || Array.isArray(body)) return jsonError(400, "validation_failed", "Settings body must be an object.", requestId);
-      const value = body as Record<string, unknown>;
       if (Object.keys(value).some(key => key !== "enabled" && key !== "settings")) return jsonError(400, "validation_failed", "Only enabled and settings can be changed.", requestId);
       if (value.enabled !== undefined && typeof value.enabled !== "boolean") return jsonError(400, "validation_failed", "enabled must be a boolean.", requestId);
       if (value.settings !== undefined && (!value.settings || typeof value.settings !== "object" || Array.isArray(value.settings))) return jsonError(400, "validation_failed", "settings must be a JSON object.", requestId);
@@ -1653,6 +1690,19 @@ export default {
       return Response.json({
         challengeId: result.challengeId, status: "pending", expiresAt: result.expiresAt, pollAfterMs: 1500,
       }, { status: 201, headers: JSON_HEADERS });
+    }
+
+    // Quest's stripped Unity runtime does not include UploadHandlerRaw. Its native client
+    // sends the validated fields as HTTPS headers so sensitive data is never placed in a URL.
+    if (url.pathname === "/api/v1/pairing/challenges/create" && request.method === "GET") {
+      return registerPairingChallenge({
+        code: request.headers.get("x-rp-pairing-code") ?? "",
+        deviceCredential: request.headers.get("x-rp-device-credential") ?? "",
+        deviceId: request.headers.get("x-rp-device-id") ?? "",
+        platform: request.headers.get("x-rp-platform") ?? "",
+        gameVersion: request.headers.get("x-rp-game-version") ?? "",
+        modVersion: request.headers.get("x-rp-mod-version") ?? "",
+      }, env, requestId);
     }
 
     const statusMatch = url.pathname.match(/^\/api\/v1\/pairing\/challenges\/([0-9a-f-]{36})$/i);
