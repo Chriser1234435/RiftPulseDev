@@ -16,6 +16,6 @@ The reset token expires after 60 minutes, is single use, and Better Auth revokes
 1. In Resend, confirm the `riftpulse.me` domain is verified and that the sender mailbox is authorized.
 2. Create an API key with sending permissions. Copy it once and store it securely.
 3. Railway dashboard → RiftPulseDev project → `riftpulse-api` service → Variables. Confirm `RESEND_API_KEY` is set and `RESEND_FROM_EMAIL` is `RiftPulse <no-reply@riftpulse.me>`. The application passes both values to the Resend sender.
-4. Send a reset request from https://riftpulse.me and check the destination inbox (including spam). Verify the link opens the production app and the password change succeeds.
+4. Send a reset request from https://app.riftpulse.me and check the destination inbox (including spam). Verify the link opens the production app and the password change succeeds.
 
 The Resend API key remains a Railway secret; never paste it into chat or commit it to source.

@@ -6,7 +6,7 @@
                    "dependenciesDir":  "extern",
                    "info":  {
                                 "name":  "RiftPulse", "id":  "riftpulse", "version":  "0.1.19",
-                                "url":  "https://riftpulse.me",
+                                "url":  "https://app.riftpulse.me",
                                 "additionalData":  {
                                                        "overrideSoName":  "libriftpulse.so",
                                                        "cmake":  true

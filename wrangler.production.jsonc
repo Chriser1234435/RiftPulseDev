@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "riftpulse",
+  "compatibility_date": "2026-10-29",
+  "main": "./src/index.ts",
+  "upload_source_maps": true,
+  "observability": { "enabled": true },
+  "vars": {
+    "APP_BASE_URL": "https://app.riftpulse.me",
+    "RAILWAY_API_URL": "https://riftpulse-api-development.up.railway.app",
+    "TRUSTED_ORIGINS": "https://app.riftpulse.me,https://riftpulse.me",
+    "ALLOW_REMOTE_DEV_AUTH": "false"
+  },
+  "durable_objects": { "bindings": [{ "name": "CHAT_ROOM", "class_name": "ChatRoom" }] },
+  "migrations": [{ "tag": "v1-chat-room", "new_sqlite_classes": ["ChatRoom"] }],
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "riftpulse-dev-db",
+      "database_id": "1ebf28ca-fcc5-4cb6-8be3-92d889ffc090",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

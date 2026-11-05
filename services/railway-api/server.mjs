@@ -87,8 +87,8 @@ const env = {
   TOKEN_ENCRYPTION_KEY: process.env.TOKEN_ENCRYPTION_KEY,
   TIKTOK_CONNECTOR_INGEST_SECRET: process.env.TIKTOK_CONNECTOR_INGEST_SECRET,
   ALLOW_REMOTE_DEV_AUTH: process.env.ALLOW_REMOTE_DEV_AUTH || "false",
-  APP_BASE_URL: process.env.APP_BASE_URL || "https://riftpulse.me",
-  TRUSTED_ORIGINS: process.env.TRUSTED_ORIGINS || "https://riftpulse.me",
+  APP_BASE_URL: process.env.APP_BASE_URL || "https://app.riftpulse.me",
+  TRUSTED_ORIGINS: process.env.TRUSTED_ORIGINS || "https://app.riftpulse.me,https://riftpulse.me",
   TWITCH_CLIENT_ID: process.env.TWITCH_CLIENT_ID,
   TWITCH_CLIENT_SECRET: process.env.TWITCH_CLIENT_SECRET,
   TWITCH_REDIRECT_URI: process.env.TWITCH_REDIRECT_URI,
@@ -110,13 +110,17 @@ const server = createServer(async (req, res) => {
       else if (value !== undefined) headers.set(name, value);
     }
     if (req.method === "OPTIONS") {
-      res.writeHead(204, {
-        "access-control-allow-origin": process.env.TRUSTED_ORIGINS || "https://riftpulse.me",
+      const allowedOrigins = (process.env.TRUSTED_ORIGINS || "https://app.riftpulse.me,https://riftpulse.me")
+        .split(",").map(value => value.trim()).filter(Boolean);
+      const origin = req.headers.origin;
+      const corsHeaders = {
         "access-control-allow-credentials": "true",
         "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
         "access-control-allow-headers": "content-type,authorization",
         "vary": "Origin",
-      });
+      };
+      if (origin && allowedOrigins.includes(origin)) corsHeaders["access-control-allow-origin"] = origin;
+      res.writeHead(204, corsHeaders);
       return res.end();
     }
     const init = { method: req.method, headers };
@@ -124,7 +128,7 @@ const server = createServer(async (req, res) => {
     const response = await worker.fetch(new Request(requestUrl, init), env);
     const responseHeaders = new Headers(response.headers);
     const origin = req.headers.origin;
-    const trusted = (process.env.TRUSTED_ORIGINS || "https://riftpulse.me").split(",").map(x => x.trim());
+    const trusted = (process.env.TRUSTED_ORIGINS || "https://app.riftpulse.me,https://riftpulse.me").split(",").map(x => x.trim());
     if (origin && trusted.includes(origin)) {
       responseHeaders.set("access-control-allow-origin", origin);
       responseHeaders.set("access-control-allow-credentials", "true");
@@ -145,7 +149,7 @@ server.on("upgrade", async (req, socket, head) => {
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
     const origin = req.headers.origin;
-    const trusted = (process.env.TRUSTED_ORIGINS || "https://riftpulse.me").split(",").map(x => x.trim());
+    const trusted = (process.env.TRUSTED_ORIGINS || "https://app.riftpulse.me,https://riftpulse.me").split(",").map(x => x.trim());
     if (url.pathname !== "/api/v1/realtime" || !origin || !trusted.includes(origin)) return socket.destroy();
     const headers = new Headers();
     for (const [name, value] of Object.entries(req.headers)) {

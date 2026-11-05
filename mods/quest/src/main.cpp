@@ -30,7 +30,7 @@ using UnityEngine::Networking::DownloadHandler;
 using UnityEngine::AsyncOperation;
 
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
-static constexpr const char* API_BASE = "https://riftpulse.me/api/v1";
+static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
 static constexpr const char* MOD_VERSION = "0.1.19";
 
