@@ -171,7 +171,12 @@ function App() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const token = params.get("token");
+    // Better Auth may put the reset token in the /reset-password/:token path,
+    // while other configured links use ?token=. Accept both link formats.
+    const pathSegments = window.location.pathname.split("/").filter(Boolean);
+    const resetPathIndex = pathSegments.findIndex(segment => segment.toLowerCase() === "reset-password");
+    const pathToken = resetPathIndex >= 0 ? pathSegments[resetPathIndex + 1] : null;
+    const token = params.get("token") ?? (pathToken ? decodeURIComponent(pathToken) : null);
     if (token) {
       setResetToken(token);
       setAuthMode("reset-password");
