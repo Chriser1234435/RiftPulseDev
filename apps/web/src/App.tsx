@@ -88,6 +88,7 @@ function App() {
   const [authLoaded, setAuthLoaded] = useState(false);
   const [authMode, setAuthMode] = useState<"signin" | "signup" | "request-reset" | "reset-password">("signin");
   const [resetToken, setResetToken] = useState("");
+  const [resetEmailSent, setResetEmailSent] = useState(false);
   const [authName, setAuthName] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -565,8 +566,8 @@ function App() {
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.message ?? data.error?.message ?? "Could not request a password reset.");
-        flash("If that email belongs to a preview account, a reset link has been sent.");
-        setAuthMode("signin");
+        setResetEmailSent(true);
+        setAuthError("");
       } else if (authMode === "reset-password") {
         if (!resetToken) throw new Error("This password reset link is missing its token. Request a new link.");
         const response = await fetch("/api/auth/reset-password", {
@@ -626,7 +627,7 @@ function App() {
 
   if (!authLoaded) return <div className="auth-loading"><div className="brand-mark"><AudioLines size={25}/></div><span className="loading-ring"/><small>INITIALIZING RIFTPULSE</small></div>;
 
-  if (!user) return (
+  if (!user || authMode === "reset-password" || authMode === "request-reset") return (
     <main className="auth-shell">
       <header className="auth-top"><div className="auth-brand"><div className="brand-mark"><AudioLines size={22}/></div><span>RIFTPULSE</span><small>V1</small></div><span className="auth-secure"><ShieldCheck size={14}/> LOCAL DEVELOPMENT</span></header>
       <section className="auth-layout">
@@ -635,7 +636,8 @@ function App() {
           {(authMode === "signin" || authMode === "signup") && <div className="auth-tabs"><button type="button" className={authMode === "signin" ? "active" : ""} onClick={() => {setAuthMode("signin");setAuthError("");}}>Sign in</button><button type="button" className={authMode === "signup" ? "active" : ""} onClick={() => {setAuthMode("signup");setAuthError("");}}>Create account</button></div>}
           <form className="auth-form" onSubmit={submitAuth}>
             {authMode === "signup" && <label>Display name<input autoComplete="name" value={authName} onChange={e=>setAuthName(e.target.value)} minLength={2} maxLength={64} placeholder="What should we call you?" required/></label>}
-            {authMode !== "reset-password" && <label>Email address<input type="email" autoComplete="email" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} maxLength={254} placeholder="you@example.com" required/></label>}
+            {authMode !== "reset-password" && <label>Email address<input type="email" autoComplete="email" value={authEmail} onChange={e=>{setAuthEmail(e.target.value);setResetEmailSent(false);}} maxLength={254} placeholder="you@example.com" required/></label>}
+            {authMode === "request-reset" && resetEmailSent && <div className="auth-success"><ShieldCheck size={16}/><span><b>Go check your email inbox.</b><small>If the address matches an account, you should receive a password reset link. Check your spam folder too.</small></span></div>}
             {authMode !== "request-reset" && <label>{authMode === "reset-password" ? "New password" : "Password"}<input type="password" autoComplete={authMode === "signin" ? "current-password" : "new-password"} value={authPassword} onChange={e=>setAuthPassword(e.target.value)} minLength={8} maxLength={128} placeholder={authMode === "signin" ? "Enter your password" : "At least 8 characters"} required/></label>}
             {authError && <div className="auth-error"><X size={15}/>{authError}</div>}
             <button className="primary-button auth-submit" disabled={authBusy}>{authBusy ? <><RefreshCw size={16} className="spin"/> Working…</> : <>{authMode === "signin" ? "Sign in to RiftPulse" : authMode === "signup" ? "Create account" : authMode === "request-reset" ? "Send reset link" : "Set new password"}<ArrowRight size={16}/></>}</button>
