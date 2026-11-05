@@ -10,7 +10,7 @@ import { verifyTwitchEventSubSignature } from "../packages/shared/src/twitch-eve
 import { createOAuthState, createPkceChallenge, createPkceVerifier, digestOAuthState } from "../packages/shared/src/oauth-state.ts";
 import { decryptProviderToken, encryptProviderToken } from "../packages/shared/src/provider-token-vault.ts";
 import { disconnectProvider, ensureFreshTwitchProviderTokens, persistProviderTokens, readProviderTokens } from "../packages/shared/src/provider-connections.ts";
-import { claimPairingChallenge, createPairingChallenge } from "../packages/shared/src/pairing.ts";
+import { claimPairingChallenge, createPairingChallenge, digestDeviceCredential } from "../packages/shared/src/pairing.ts";
 import { createAuth } from "./auth.ts";
 export { ChatRoom } from "./chat-room.ts";
 
@@ -1703,6 +1703,49 @@ export default {
         gameVersion: request.headers.get("x-rp-game-version") ?? "",
         modVersion: request.headers.get("x-rp-mod-version") ?? "",
       }, env, requestId);
+    }
+
+    if (url.pathname === "/api/v1/pairing/resume" && request.method === "POST") {
+      if (!isJson(request)) return jsonError(415, "content_type_required", "Send a JSON request body.", requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Pairing storage is not configured.", requestId);
+      let body: unknown;
+      try { body = await readJson(request); }
+      catch { return jsonError(400, "invalid_json", "Request body must be valid JSON.", requestId); }
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return jsonError(400, "validation_failed", "Resume body must be an object.", requestId);
+      }
+      const value = body as Record<string, unknown>;
+      if (Object.keys(value).some(key => key !== "deviceId" && key !== "deviceCredential")
+        || typeof value.deviceId !== "string" || !/^[0-9a-f-]{36}$/i.test(value.deviceId)
+        || typeof value.deviceCredential !== "string" || !/^[0-9a-f]{64}$/i.test(value.deviceCredential)) {
+        return jsonError(400, "validation_failed", "A valid device ID and credential are required.", requestId);
+      }
+      const credentialDigest = await digestDeviceCredential(value.deviceCredential);
+      const now = new Date().toISOString();
+      const challenge = await env.DB.prepare(
+        `SELECT pairing_challenges.id, pairing_challenges.status, pairing_challenges.expires_at
+         FROM pairing_challenges
+         WHERE pairing_challenges.device_id = ? AND (
+           (pairing_challenges.status = 'pending'
+             AND pairing_challenges.device_credential_digest = ?
+             AND pairing_challenges.expires_at > ?)
+           OR (pairing_challenges.status = 'claimed' AND EXISTS (
+             SELECT 1 FROM devices
+             WHERE devices.id = pairing_challenges.device_id
+               AND devices.credential_digest = ?
+               AND devices.revoked_at IS NULL
+           ))
+         )
+         ORDER BY CASE WHEN pairing_challenges.status = 'pending' THEN 0 ELSE 1 END, pairing_challenges.created_at DESC LIMIT 1`,
+      ).bind(value.deviceId, credentialDigest, now, credentialDigest)
+        .first<{ id: string; status: string; expires_at: string }>();
+      if (!challenge) return jsonError(404, "pairing_session_not_found", "No active pairing session was found for this installation.", requestId);
+      return Response.json({
+        challengeId: challenge.id,
+        status: challenge.status,
+        expiresAt: challenge.expires_at,
+        pollAfterMs: 1500,
+      }, { headers: JSON_HEADERS });
     }
 
     const statusMatch = url.pathname.match(/^\/api\/v1\/pairing\/challenges\/([0-9a-f-]{36})$/i);

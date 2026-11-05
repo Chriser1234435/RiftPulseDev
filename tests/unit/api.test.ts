@@ -31,6 +31,17 @@ class FakeStatement implements D1PreparedStatement {
       );
       return found ? ({ id: found.id } as T) : null;
     }
+    if (q.includes("select pairing_challenges.id, pairing_challenges.status, pairing_challenges.expires_at")) {
+      const [deviceId, pendingDigest, now, claimedDigest] = this.values as [string, string, string, string];
+      const found = [...this.db.challenges.values()]
+        .filter(row => row.device_id === deviceId && (
+          (row.status === "pending" && row.device_credential_digest === pendingDigest && row.expires_at > now)
+          || (row.status === "claimed" && this.db.deviceCredentialDigest === claimedDigest)
+        ))
+        .sort((a, b) => (a.status === "pending" ? 0 : 1) - (b.status === "pending" ? 0 : 1)
+          || b.created_at.localeCompare(a.created_at))[0];
+      return found ? ({ id: found.id, status: found.status, expires_at: found.expires_at } as T) : null;
+    }
     if (q.includes("select status, expires_at, claimed_at from pairing_challenges")) {
       const [id] = this.values as [string];
       const found = this.db.challenges.get(id);
@@ -233,6 +244,70 @@ test("pairing challenge stores a digest and never returns the raw code", async (
   const statusResponse = await call(`/api/v1/pairing/challenges/${payload.challengeId}`, {}, bindings);
   assert.equal(statusResponse.status, 200);
   assert.equal((await statusResponse.json()).status, "pending");
+});
+
+test("Quest can resume pending and claimed pairing sessions after a restart", async () => {
+  const bindings = env();
+  const deviceId = "550e8400-e29b-41d4-a716-446655440000";
+  const credential = "a".repeat(64);
+  const digestBytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential));
+  const credentialDigest = Array.from(new Uint8Array(digestBytes), byte => byte.toString(16).padStart(2, "0")).join("");
+
+  const created = await call("/api/v1/pairing/challenges", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      code: "48261", deviceCredential: credential, deviceId, platform: "quest",
+      gameVersion: "1.40.8_7379", modVersion: "0.1.25",
+    }),
+  }, bindings);
+  assert.equal(created.status, 201);
+  const createdPayload = await created.json() as { challengeId: string };
+
+  const resumeBody = JSON.stringify({ deviceId, deviceCredential: credential });
+  const pending = await call("/api/v1/pairing/resume", {
+    method: "POST", headers: { "content-type": "application/json" }, body: resumeBody,
+  }, bindings);
+  assert.equal(pending.status, 200, await pending.clone().text());
+  assert.deepEqual(await pending.json(), {
+    challengeId: createdPayload.challengeId,
+    status: "pending",
+    expiresAt: bindings.DB.challenges.get(createdPayload.challengeId)?.expires_at,
+    pollAfterMs: 1500,
+  });
+
+  const saved = bindings.DB.challenges.get(createdPayload.challengeId)!;
+  saved.status = "claimed";
+  saved.device_credential_digest = null;
+  saved.claimed_at = new Date().toISOString();
+  bindings.DB.deviceCredentialDigest = credentialDigest;
+  const claimed = await call("/api/v1/pairing/resume", {
+    method: "POST", headers: { "content-type": "application/json" }, body: resumeBody,
+  }, bindings);
+  assert.equal(claimed.status, 200, await claimed.clone().text());
+  assert.equal((await claimed.json()).status, "claimed");
+
+  const nextCreated = await call("/api/v1/pairing/challenges", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      code: "48262", deviceCredential: credential, deviceId, platform: "quest",
+      gameVersion: "1.40.8_7379", modVersion: "0.1.25",
+    }),
+  }, bindings);
+  assert.equal(nextCreated.status, 201);
+  const nextPayload = await nextCreated.json() as { challengeId: string };
+  const latest = await call("/api/v1/pairing/resume", {
+    method: "POST", headers: { "content-type": "application/json" }, body: resumeBody,
+  }, bindings);
+  assert.equal(latest.status, 200);
+  const latestPayload = await latest.json();
+  assert.equal(latestPayload.status, "pending");
+  assert.equal(latestPayload.challengeId, nextPayload.challengeId);
+
+  const denied = await call("/api/v1/pairing/resume", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ deviceId, deviceCredential: "f".repeat(64) }),
+  }, bindings);
+  assert.equal(denied.status, 404);
 });
 
 test("rejects an active code collision and caps active challenges per device", async () => {

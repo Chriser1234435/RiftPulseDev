@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   Activity, ArrowDownRight, ArrowRight, ArrowUpRight, AudioLines, Bell, Check, ChevronDown,
@@ -778,7 +778,7 @@ function App() {
           </section>
 
           <section className="section-block downloads-block" id="downloads">
-            <div className="section-heading"><div><div className="section-overline">ALPHA TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Alpha packages for Beat Saber 1.40.8. Quest pairing and settings now use managed System.Net.Http JSON requests instead of UnityWebRequest custom headers and upload handlers. Physical headset runtime validation is still needed.</p></div><span className="settings-badge">PCVR v0.1.14 Â· Quest v0.1.24</span></div>
+            <div className="section-heading"><div><div className="section-overline">ALPHA TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Alpha packages for Beat Saber 1.40.8. Quest pairing now restores pending or claimed sessions after restarts, persists challenge state securely, and recovers from stalled HTTPS callbacks. Alpha headset validation is still required.</p></div><span className="settings-badge">PCVR v0.1.14 Â· Quest v0.1.25</span></div>
             <div className="downloads-grid">
               <article className="panel-card download-card">
                 <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR Â· BSIPA</b><small>Windows / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.14 Â· DLL built</span></div>
@@ -786,7 +786,7 @@ function App() {
                 <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr.zip" download><Download size={15} /> Download PCVR ZIP</a>
               </article>
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest Â· Scotland2</b><small>Standalone / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.24 Â· QMOD built</span></div>
+                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest Â· Scotland2</b><small>Standalone / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.25 Â· QMOD built</span></div>
                 <p>Native ARM64 Scotland2 QMOD. Creates a five-digit pairing challenge through the RiftPulse API and syncs Chat/BSR module preferences after account linking. Headset runtime validation is pending; live provider chat/events and BSR request fulfillment are not implemented yet.</p>
                 <a className="primary-button download-link" href="/downloads/RiftPulse.Quest.qmod" download><Download size={15} /> Download Quest QMOD</a>
               </article>

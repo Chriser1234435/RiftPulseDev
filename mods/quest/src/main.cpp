@@ -26,6 +26,7 @@
 #include "beatsaber-hook/shared/utils/il2cpp-utils.hpp"
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -49,7 +50,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.24";
+static constexpr const char* MOD_VERSION = "0.1.25";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -62,6 +63,7 @@ static UnityEngine::UI::Button* bsrButton = nullptr;
 static std::string deviceId;
 static std::string deviceCredential;
 static std::string challengeId;
+static std::string pairingCode;
 static bool requestInFlight = false;
 static std::string requestDiagnostic;
 static bool isPaired = false;
@@ -159,6 +161,49 @@ static bool LoadOrCreateIdentity() {
   return true;
 }
 
+static std::string PairingStatePath() {
+  const std::string dataDir = static_cast<std::string>(UnityEngine::Application::get_persistentDataPath());
+  return dataDir.empty() ? std::string{} : dataDir + "/riftpulse-pairing-state.dat";
+}
+
+static bool SavePairingState(const std::string& code, const std::string& savedChallengeId) {
+  const auto path = PairingStatePath();
+  if (path.empty()) return false;
+  const auto temporaryPath = path + ".tmp";
+  {
+    std::ofstream output(temporaryPath, std::ios::binary | std::ios::trunc);
+    if (!output) return false;
+    output << code << std::endl << savedChallengeId << std::endl;
+    output.flush();
+    if (!output.good()) return false;
+  }
+  chmod(temporaryPath.c_str(), S_IRUSR | S_IWUSR);
+  if (rename(temporaryPath.c_str(), path.c_str()) != 0) {
+    unlink(temporaryPath.c_str());
+    return false;
+  }
+  chmod(path.c_str(), S_IRUSR | S_IWUSR);
+  return true;
+}
+
+static bool LoadPairingState(std::string& savedCode, std::string& savedChallengeId) {
+  savedCode.clear();
+  savedChallengeId.clear();
+  const auto path = PairingStatePath();
+  if (path.empty()) return false;
+  std::ifstream input(path, std::ios::binary);
+  if (!input) return false;
+  input >> savedCode >> savedChallengeId;
+  if (!savedCode.empty() && savedCode.size() != 5) savedCode.clear();
+  if (!savedChallengeId.empty() && savedChallengeId.size() != 36) savedChallengeId.clear();
+  return !savedCode.empty() || !savedChallengeId.empty();
+}
+
+static void ClearPairingState() {
+  const auto path = PairingStatePath();
+  if (!path.empty()) unlink(path.c_str());
+}
+
 static System::Net::Http::HttpClient* httpClient = nullptr;
 static System::Threading::SynchronizationContext* mainThreadContext = nullptr;
 static UiDispatchDelegate uiDispatchDelegate = nullptr;
@@ -168,6 +213,30 @@ static int64_t pendingHttpStatus = -1;
 static std::string pendingHttpBody;
 static std::string pendingHttpError;
 static bool pendingHttpReady = false;
+static std::chrono::steady_clock::time_point pendingHttpStartedAt{};
+static uint64_t pendingHttpGeneration = 0;
+
+static void RecoverStaleHttpRequest() {
+  bool recovered = false;
+  {
+    std::lock_guard<std::mutex> lock(httpStateMutex);
+    if ((pendingHttpReady || pendingHttpCompletion)
+        && pendingHttpStartedAt.time_since_epoch().count() != 0
+        && std::chrono::steady_clock::now() - pendingHttpStartedAt > std::chrono::seconds(30)) {
+      pendingHttpCompletion = {};
+      pendingHttpReady = false;
+      pendingHttpBody.clear();
+      pendingHttpError.clear();
+      pendingHttpStartedAt = {};
+      ++pendingHttpGeneration;
+      recovered = true;
+    }
+  }
+  if (recovered) {
+    requestInFlight = false;
+    requestDiagnostic = "The previous HTTPS request timed out. You can safely retry.";
+  }
+}
 
 static void DispatchPendingHttpResponse(System::Object*) {
   RequestCompletion completion;
@@ -182,6 +251,7 @@ static void DispatchPendingHttpResponse(System::Object*) {
     body = std::move(pendingHttpBody);
     error = std::move(pendingHttpError);
     pendingHttpReady = false;
+    pendingHttpStartedAt = {};
   }
   requestDiagnostic = error;
   if (completion) completion(status, body);
@@ -289,23 +359,36 @@ static System::Net::Http::HttpRequestMessage* CreateHttpRequest(
 static bool SendAsync(System::Net::Http::HttpRequestMessage* request,
                       RequestCompletion completion) {
   if (!request) return false;
+  RecoverStaleHttpRequest();
   if (!EnsureHttpClient()) {
     request->Dispose();
     return false;
   }
 
+  uint64_t requestGeneration = 0;
   {
     std::lock_guard<std::mutex> lock(httpStateMutex);
     if (pendingHttpReady || pendingHttpCompletion) {
-      requestDiagnostic = "Another HTTPS request is still being processed.";
+      requestDiagnostic = "Another HTTPS request is still being processed. Wait briefly or retry after the timeout.";
       request->Dispose();
       return false;
     }
+    requestGeneration = ++pendingHttpGeneration;
+    pendingHttpStartedAt = std::chrono::steady_clock::now();
     pendingHttpCompletion = std::move(completion);
     pendingHttpStatus = -1;
     pendingHttpBody.clear();
     pendingHttpError.clear();
   }
+
+  auto releaseRequestSlot = [requestGeneration]() {
+    std::lock_guard<std::mutex> lock(httpStateMutex);
+    if (requestGeneration == pendingHttpGeneration) {
+      pendingHttpCompletion = {};
+      pendingHttpReady = false;
+      pendingHttpStartedAt = {};
+    }
+  };
 
   try {
     auto* task = httpClient->SendAsync(
@@ -313,14 +396,13 @@ static bool SendAsync(System::Net::Http::HttpRequestMessage* request,
     if (!task) {
       requestDiagnostic = "HttpClient.SendAsync returned null.";
       request->Dispose();
-      std::lock_guard<std::mutex> lock(httpStateMutex);
-      pendingHttpCompletion = {};
+      releaseRequestSlot();
       return false;
     }
 
     auto continuation = custom_types::MakeDelegate<HttpCompletionDelegate>(
         std::function<void(HttpResponseTask)>(
-            [request](HttpResponseTask completed) {
+            [request, requestGeneration](HttpResponseTask completed) {
               int64_t status = -1;
               std::string body;
               std::string error;
@@ -344,22 +426,31 @@ static bool SendAsync(System::Net::Http::HttpRequestMessage* request,
               }
               if (response) response->Dispose();
               request->Dispose();
+
+              bool shouldDispatch = false;
               {
                 std::lock_guard<std::mutex> lock(httpStateMutex);
-                pendingHttpStatus = status;
-                pendingHttpBody = std::move(body);
-                pendingHttpError = std::move(error);
-                pendingHttpReady = true;
+                // Ignore late completions from requests that a watchdog already retired.
+                if (requestGeneration == pendingHttpGeneration && pendingHttpCompletion) {
+                  pendingHttpStatus = status;
+                  pendingHttpBody = std::move(body);
+                  pendingHttpError = std::move(error);
+                  pendingHttpReady = true;
+                  shouldDispatch = true;
+                }
               }
-              if (mainThreadContext && uiDispatchDelegate) {
-                mainThreadContext->Post(uiDispatchDelegate, nullptr);
+              if (shouldDispatch && mainThreadContext && uiDispatchDelegate) {
+                try {
+                  mainThreadContext->Post(uiDispatchDelegate, nullptr);
+                } catch (...) {
+                  // The watchdog retires this request if Unity never services the post.
+                }
               }
             }));
     if (!continuation) {
       requestDiagnostic = "Could not create the HTTPS completion callback.";
       request->Dispose();
-      std::lock_guard<std::mutex> lock(httpStateMutex);
-      pendingHttpCompletion = {};
+      releaseRequestSlot();
       return false;
     }
     task->ContinueWith(continuation, System::Threading::Tasks::TaskScheduler::get_Default());
@@ -367,14 +458,12 @@ static bool SendAsync(System::Net::Http::HttpRequestMessage* request,
   } catch (const std::exception& error) {
     requestDiagnostic = std::string("Could not start HTTPS request: ") + error.what();
     request->Dispose();
-    std::lock_guard<std::mutex> lock(httpStateMutex);
-    pendingHttpCompletion = {};
+    releaseRequestSlot();
     return false;
   } catch (...) {
     requestDiagnostic = "Could not start HTTPS request.";
     request->Dispose();
-    std::lock_guard<std::mutex> lock(httpStateMutex);
-    pendingHttpCompletion = {};
+    releaseRequestSlot();
     return false;
   }
 }
@@ -393,6 +482,13 @@ static System::Net::Http::HttpRequestMessage* CreatePairingChallengeRequest(
       "\",\"platform\":\"quest\",\"gameVersion\":\"" +
       GAME_VERSION + "\",\"modVersion\":\"" + MOD_VERSION + "\"}";
   return CreateHttpRequest("POST", std::string(API_BASE) + "/pairing/challenges", body);
+}
+
+static System::Net::Http::HttpRequestMessage* CreatePairingResumeRequest() {
+  const std::string body =
+      "{\"deviceId\":\"" + deviceId +
+      "\",\"deviceCredential\":\"" + deviceCredential + "\"}";
+  return CreateHttpRequest("POST", std::string(API_BASE) + "/pairing/resume", body);
 }
 
 static System::Net::Http::HttpRequestMessage* CreateModuleToggleRequest(
@@ -447,6 +543,7 @@ static void RefreshModuleButtons() {
 }
 
 static void LoadModuleSettings() {
+  RecoverStaleHttpRequest();
   if (requestInFlight) return;
   requestInFlight = true;
   auto* request = CreateGetRequest(
@@ -472,6 +569,7 @@ static void LoadModuleSettings() {
 }
 
 static void SaveModuleSetting(const std::string& module, bool enabled) {
+  RecoverStaleHttpRequest();
   if (!isPaired || requestInFlight) return;
   requestInFlight = true;
   auto* request = CreateModuleToggleRequest(module, enabled);
@@ -497,6 +595,7 @@ static void SaveModuleSetting(const std::string& module, bool enabled) {
 }
 
 static void ToggleChat() {
+  RecoverStaleHttpRequest();
   if (requestInFlight) return;
   if (!isPaired) {
     SetStatus("Link this installation to your RiftPulse account first.");
@@ -508,6 +607,7 @@ static void ToggleChat() {
 }
 
 static void ToggleBsr() {
+  RecoverStaleHttpRequest();
   if (requestInFlight) return;
   if (!isPaired) {
     SetStatus("Link this installation to your RiftPulse account first.");
@@ -518,14 +618,90 @@ static void ToggleBsr() {
   SaveModuleSetting("bsr-song-request", bsrEnabled);
 }
 
+static void ResumePairing() {
+  RecoverStaleHttpRequest();
+  if (requestInFlight) return;
+  if (!LoadOrCreateIdentity()) {
+    SetStatus("Could not load this headset's secure RiftPulse identity.");
+    return;
+  }
+
+  std::string savedCode;
+  std::string savedChallengeId;
+  LoadPairingState(savedCode, savedChallengeId);
+  pairingCode = savedCode;
+  challengeId = savedChallengeId;
+  if (codeButton && !pairingCode.empty()) {
+    BSML::Lite::SetButtonText(codeButton, pairingCode);
+  }
+
+  requestInFlight = true;
+  SetStatus("Restoring this headset's pairing with RiftPulse...");
+  auto* request = CreatePairingResumeRequest();
+  if (!request || !SendAsync(request, [](int64_t status, const std::string& body) {
+        requestInFlight = false;
+        if (status == 404) {
+          challengeId.clear();
+          pairingCode.clear();
+          isPaired = false;
+          ClearPairingState();
+          if (codeButton) BSML::Lite::SetButtonText(codeButton, "GENERATE PAIRING CODE");
+          if (checkButton) BSML::Lite::SetButtonText(checkButton, "CHECK PAIRING STATUS");
+          if (chatButton) BSML::Lite::SetButtonText(chatButton, "CHAT MODULE: LOCKED");
+          if (bsrButton) BSML::Lite::SetButtonText(bsrButton, "BSR MODULE: LOCKED");
+          SetStatus("No active pairing session was found. Generate a new five-digit code to connect this headset.");
+          return;
+        }
+        if (status < 200 || status >= 300) {
+          const auto message = JsonString(body, "message");
+          SetStatus("Could not restore pairing (HTTP " + std::to_string(status) +
+                    "). " + (message.empty() ? requestDiagnostic : message) +
+                    "\nPress CHECK PAIRING STATUS to retry.");
+          return;
+        }
+
+        challengeId = JsonString(body, "challengeId");
+        const auto state = JsonString(body, "status");
+        if (challengeId.empty() || (state != "pending" && state != "claimed")) {
+          SetStatus("RiftPulse returned an invalid pairing recovery response. Generate a new code and retry.");
+          return;
+        }
+        SavePairingState(pairingCode, challengeId);
+        if (state == "claimed") {
+          isPaired = true;
+          if (checkButton) BSML::Lite::SetButtonText(checkButton, "ACCOUNT LINKED");
+          SetStatus("ACCOUNT LINK CONFIRMED\n\nLoading your Chat and BSR settings...");
+          LoadModuleSettings();
+        } else {
+          isPaired = false;
+          if (checkButton) BSML::Lite::SetButtonText(checkButton, "CHECK PAIRING STATUS");
+          SetStatus("PAIRING SESSION RESTORED\n\nYour five-digit code is ready. Enter it on app.riftpulse.me, then check pairing status.");
+        }
+      })) {
+    requestInFlight = false;
+    SetStatus("Could not start pairing recovery. " + requestDiagnostic +
+              "\nPress CHECK PAIRING STATUS to retry.");
+  }
+}
+
 static void CheckPairingStatus() {
-  if (challengeId.empty() || requestInFlight) return;
+  RecoverStaleHttpRequest();
+  if (requestInFlight) return;
+  if (challengeId.empty()) {
+    ResumePairing();
+    return;
+  }
   requestInFlight = true;
   SetStatus("Checking whether the website has linked this installation...");
   auto* request = CreateGetRequest(
       std::string(API_BASE) + "/pairing/challenges/" + challengeId);
   if (!request || !SendAsync(request, [](int64_t status, const std::string& body) {
         requestInFlight = false;
+        if (status == 404) {
+          challengeId.clear();
+          ResumePairing();
+          return;
+        }
         if (status < 200 || status >= 300) {
           SetStatus("Pairing check failed (HTTP " + std::to_string(status) +
                     "). " + requestDiagnostic);
@@ -533,12 +709,16 @@ static void CheckPairingStatus() {
         }
         const auto state = JsonString(body, "status");
         if (state == "claimed") {
+          SavePairingState(pairingCode, challengeId);
           isPaired = true;
           if (checkButton) BSML::Lite::SetButtonText(checkButton, "ACCOUNT LINKED");
           SetStatus("ACCOUNT LINK CONFIRMED\n\nLoading your Chat and BSR settings...");
           LoadModuleSettings();
         } else if (state == "expired" || state == "revoked") {
           challengeId.clear();
+          pairingCode.clear();
+          ClearPairingState();
+          if (codeButton) BSML::Lite::SetButtonText(codeButton, "GENERATE PAIRING CODE");
           SetStatus("This pairing code expired. Generate a new code to try again.");
         } else if (state == "pending") {
           SetStatus("Waiting for website confirmation. Enter the five-digit code on RiftPulse, then check again.");
@@ -547,11 +727,12 @@ static void CheckPairingStatus() {
         }
       })) {
     requestInFlight = false;
-    SetStatus("Could not start the pairing status request.");
+    SetStatus("Could not start the pairing status request. " + requestDiagnostic);
   }
 }
 
 static void GeneratePairingCode() {
+  RecoverStaleHttpRequest();
   if (requestInFlight) return;
   requestInFlight = true;
   challengeId.clear();
@@ -566,34 +747,39 @@ static void GeneratePairingCode() {
     return;
   }
 
-  const std::string code = MakePairingCode();
-  if (code.empty()) {
+  pairingCode = MakePairingCode();
+  if (pairingCode.empty()) {
     requestInFlight = false;
     SetStatus("Secure random number generation failed. Please restart Beat Saber and try again.");
     return;
   }
-  if (codeButton) BSML::Lite::SetButtonText(codeButton, code);
+  challengeId.clear();
+  SavePairingState(pairingCode, {});
+  if (codeButton) BSML::Lite::SetButtonText(codeButton, pairingCode);
   SetStatus("Registering your five-digit code with RiftPulse...");
 
+  const auto code = pairingCode;
   auto* request = CreatePairingChallengeRequest(code);
-  if (!request || !SendAsync(request, [](int64_t status, const std::string& response) {
+  if (!request || !SendAsync(request, [code](int64_t status, const std::string& response) {
         requestInFlight = false;
         if (status != 201) {
-          const auto code = JsonString(response, "code");
+          const auto errorCode = JsonString(response, "code");
           const auto message = JsonString(response, "message");
           std::string detail = requestDiagnostic;
-          if (!message.empty()) detail = code + ": " + message;
+          if (!message.empty()) detail = errorCode + ": " + message;
           if (detail.size() > 180) detail.resize(180);
-          SetStatus("RiftPulse rejected registration (HTTP " +
+          SetStatus("RiftPulse registration response (HTTP " +
                     std::to_string(status) + "). " + detail +
-                    "\nGenerate a new code and retry.");
+                    "\nPress CHECK PAIRING STATUS to recover or generate a new code.");
           return;
         }
         challengeId = JsonString(response, "challengeId");
         if (challengeId.empty()) {
-          SetStatus("RiftPulse returned an invalid pairing response. Generate a new code and retry.");
+          SetStatus("RiftPulse registered the code but did not return its challenge ID. Checking for the saved session...");
+          ResumePairing();
           return;
         }
+        SavePairingState(code, challengeId);
         SetStatus("PAIRING CODE REGISTERED\n\nEnter the five-digit code shown above on the RiftPulse website. Then press CHECK PAIRING STATUS.");
         if (checkButton) BSML::Lite::SetButtonText(checkButton, "CHECK PAIRING STATUS");
       })) {
@@ -601,7 +787,8 @@ static void GeneratePairingCode() {
     const std::string detail = requestDiagnostic.empty()
         ? "Unity could not create or start the HTTPS request."
         : requestDiagnostic;
-    SetStatus("Could not start the pairing request.\n" + detail);
+    SetStatus("Could not start the pairing request.\n" + detail +
+              "\nYou can retry with CHECK PAIRING STATUS.");
   }
 }
 
@@ -646,6 +833,9 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
       root, "BSR MODULE: LOCKED", "PracticeButton",
       UnityEngine::Vector2({22.0f, -28.5f}), UnityEngine::Vector2({42.0f, 5.5f}),
       []() { ToggleBsr(); });
+
+  // Recover pending or already-linked sessions as soon as the menu opens.
+  ResumePairing();
 }
 
 MOD_EXTERN_FUNC void setup(CModInfo *info) noexcept {
