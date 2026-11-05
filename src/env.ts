@@ -21,6 +21,12 @@ export interface Env {
   PAIRING_HMAC_KEY?: string;
   /** Separate Better Auth signing key. Never reuse the pairing key. */
   BETTER_AUTH_SECRET?: string;
+  /** Cloudflare account ID used by Cloudflare Email Service REST sending. */
+  CF_EMAIL_ACCOUNT_ID?: string;
+  /** Cloudflare API token with Email Sending: Edit. Configure as a Railway secret. */
+  CF_EMAIL_API_TOKEN?: string;
+  /** Verified sender address onboarded in Cloudflare Email Service. */
+  CF_EMAIL_FROM?: string;
   /** Explicit opt-in for temporary authentication on the isolated HTTPS workers.dev preview only. */
   ALLOW_REMOTE_DEV_AUTH?: string;
   /** Twitch OAuth application client ID. */

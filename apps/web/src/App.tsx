@@ -86,7 +86,8 @@ function App() {
   const [apiStatus, setApiStatus] = useState<"checking" | "online" | "offline">("checking");
   const [user, setUser] = useState<User | null>(null);
   const [authLoaded, setAuthLoaded] = useState(false);
-  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [authMode, setAuthMode] = useState<"signin" | "signup" | "request-reset" | "reset-password">("signin");
+  const [resetToken, setResetToken] = useState("");
   const [authName, setAuthName] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -165,6 +166,16 @@ function App() {
     if (response.ok) {
       const data = await response.json();
       setDevices(Array.isArray(data.devices) ? data.devices : []);
+    }
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("token");
+    if (token) {
+      setResetToken(token);
+      setAuthMode("reset-password");
+      setAuthEmail(params.get("email") ?? "");
     }
   }, []);
 
@@ -541,23 +552,49 @@ function App() {
     setAuthBusy(true);
     setAuthError("");
     try {
-      const endpoint = authMode === "signin" ? "sign-in" : "sign-up";
-      const payload = authMode === "signin"
-        ? { email: authEmail.trim(), password: authPassword }
-        : { name: authName.trim(), email: authEmail.trim(), password: authPassword };
-      const response = await fetch(`/api/auth/${endpoint}/email`, {
-        method: "POST", credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.message ?? data.error?.message ?? "Could not authenticate. Check your details and try again.");
-      const sessionResponse = await fetch("/api/auth/get-session", { credentials: "include" });
-      const session = await sessionResponse.json();
-      if (!session?.user) throw new Error("The server did not create a valid session.");
-      setUser(session.user as User);
-      setAuthPassword("");
-      flash(authMode === "signin" ? "Signed in to RiftPulse." : "RiftPulse account created.");
+      if (authMode === "request-reset") {
+        const response = await fetch("/api/auth/request-password-reset", {
+          method: "POST", credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ email: authEmail.trim(), redirectTo: window.location.origin + "/?reset=1" }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.message ?? data.error?.message ?? "Could not request a password reset.");
+        flash("If that email belongs to a preview account, a reset link has been sent.");
+        setAuthMode("signin");
+      } else if (authMode === "reset-password") {
+        if (!resetToken) throw new Error("This password reset link is missing its token. Request a new link.");
+        const response = await fetch("/api/auth/reset-password", {
+          method: "POST", credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token: resetToken, newPassword: authPassword }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.message ?? data.error?.message ?? "Could not reset password. The link may have expired.");
+        setAuthPassword("");
+        setResetToken("");
+        window.history.replaceState({}, "", "/");
+        setAuthMode("signin");
+        flash("Password reset. Sign in using your new password.");
+      } else {
+        const endpoint = authMode === "signin" ? "sign-in" : "sign-up";
+        const payload = authMode === "signin"
+          ? { email: authEmail.trim(), password: authPassword }
+          : { name: authName.trim(), email: authEmail.trim(), password: authPassword };
+        const response = await fetch(`/api/auth/${endpoint}/email`, {
+          method: "POST", credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.message ?? data.error?.message ?? "Could not authenticate. Check your details and try again.");
+        const sessionResponse = await fetch("/api/auth/get-session", { credentials: "include" });
+        const session = await sessionResponse.json();
+        if (!session?.user) throw new Error("The server did not create a valid session.");
+        setUser(session.user as User);
+        setAuthPassword("");
+        flash(authMode === "signin" ? "Signed in to RiftPulse." : "RiftPulse account created.");
+      }
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Authentication failed.");
     } finally {
@@ -589,16 +626,18 @@ function App() {
       <header className="auth-top"><div className="auth-brand"><div className="brand-mark"><AudioLines size={22}/></div><span>RIFTPULSE</span><small>V1</small></div><span className="auth-secure"><ShieldCheck size={14}/> LOCAL DEVELOPMENT</span></header>
       <section className="auth-layout">
         <div className="auth-copy"><div className="eyebrow"><span className="eyebrow-line"/> YOUR STREAMING COMMAND CENTER</div><h1>Your stream.<br/><em>Your rules.</em></h1><p>Bring your live chat, song requests, and Beat Saber setup into one clean control center.</p><div className="auth-features"><div><MessageCircle/><span><b>Chat, all in one place</b><small>Bring supported platforms into the game.</small></span></div><div><Music2/><span><b>Song requests, under control</b><small>Configure commands and queue behavior.</small></span></div><div><Gamepad2/><span><b>PCVR + Quest</b><small>One account. Separate game adapters.</small></span></div></div></div>
-        <div className="auth-card"><div className="auth-card-heading"><div className="auth-card-icon"><Sparkles size={20}/></div><div><h2>{authMode === "signin" ? "Welcome back" : "Create your account"}</h2><p>{authMode === "signin" ? "Sign in to manage your RiftPulse setup." : "Start building your streaming setup."}</p></div></div>
-          <div className="auth-tabs"><button type="button" className={authMode === "signin" ? "active" : ""} onClick={() => {setAuthMode("signin");setAuthError("");}}>Sign in</button><button type="button" className={authMode === "signup" ? "active" : ""} onClick={() => {setAuthMode("signup");setAuthError("");}}>Create account</button></div>
+        <div className="auth-card"><div className="auth-card-heading"><div className="auth-card-icon"><Sparkles size={20}/></div><div><h2>{authMode === "signin" ? "Welcome back" : authMode === "signup" ? "Create your account" : authMode === "request-reset" ? "Recover your account" : "Choose a new password"}</h2><p>{authMode === "signin" ? "Sign in to manage your RiftPulse setup." : authMode === "signup" ? "Start building your streaming setup." : authMode === "request-reset" ? "We’ll email a secure password reset link." : "The link is time-limited and can only be used once."}</p></div></div>
+          {(authMode === "signin" || authMode === "signup") && <div className="auth-tabs"><button type="button" className={authMode === "signin" ? "active" : ""} onClick={() => {setAuthMode("signin");setAuthError("");}}>Sign in</button><button type="button" className={authMode === "signup" ? "active" : ""} onClick={() => {setAuthMode("signup");setAuthError("");}}>Create account</button></div>}
           <form className="auth-form" onSubmit={submitAuth}>
             {authMode === "signup" && <label>Display name<input autoComplete="name" value={authName} onChange={e=>setAuthName(e.target.value)} minLength={2} maxLength={64} placeholder="What should we call you?" required/></label>}
-            <label>Email address<input type="email" autoComplete="email" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} maxLength={254} placeholder="you@example.com" required/></label>
-            <label>Password<input type="password" autoComplete={authMode === "signin" ? "current-password" : "new-password"} value={authPassword} onChange={e=>setAuthPassword(e.target.value)} minLength={8} maxLength={128} placeholder={authMode === "signin" ? "Enter your password" : "At least 8 characters"} required/></label>
+            {authMode !== "reset-password" && <label>Email address<input type="email" autoComplete="email" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} maxLength={254} placeholder="you@example.com" required/></label>}
+            {authMode !== "request-reset" && <label>{authMode === "reset-password" ? "New password" : "Password"}<input type="password" autoComplete={authMode === "signin" ? "current-password" : "new-password"} value={authPassword} onChange={e=>setAuthPassword(e.target.value)} minLength={8} maxLength={128} placeholder={authMode === "signin" ? "Enter your password" : "At least 8 characters"} required/></label>}
             {authError && <div className="auth-error"><X size={15}/>{authError}</div>}
-            <button className="primary-button auth-submit" disabled={authBusy}>{authBusy ? <><RefreshCw size={16} className="spin"/> Working…</> : <>{authMode === "signin" ? "Sign in to RiftPulse" : "Create account"}<ArrowRight size={16}/></>}</button>
+            <button className="primary-button auth-submit" disabled={authBusy}>{authBusy ? <><RefreshCw size={16} className="spin"/> Working…</> : <>{authMode === "signin" ? "Sign in to RiftPulse" : authMode === "signup" ? "Create account" : authMode === "request-reset" ? "Send reset link" : "Set new password"}<ArrowRight size={16}/></>}</button>
           </form>
-          <div className="auth-foot"><ShieldCheck size={15}/><span>Local development only. Email verification and production sign-in remain disabled until a mail provider and production origin are configured.</span></div>
+          {authMode === "signin" && <p className="auth-switch"><button type="button" onClick={() => {setAuthMode("request-reset");setAuthError("");}}>Forgot password?</button></p>}
+          {(authMode === "request-reset" || authMode === "reset-password") && <p className="auth-switch"><button type="button" onClick={() => {setAuthMode("signin");setAuthError("");}}>Back to sign in</button></p>}
+          <div className="auth-foot"><ShieldCheck size={15}/><span>RiftPulse preview account. Password reset links expire after one hour.</span></div>
         </div>
       </section>
       <footer className="auth-footer"><span>© 2026 RiftPulse</span><span>CHAT · BSR SONG REQUEST</span><span>LOCAL DEVELOPMENT BUILD</span></footer>
