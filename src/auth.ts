@@ -6,27 +6,24 @@ type AuthInstance = any;
 const cache = new WeakMap<object, AuthInstance>();
 
 async function sendPasswordResetEmail(env: Env, to: string, resetUrl: string): Promise<void> {
-  if (!env.CF_EMAIL_ACCOUNT_ID || !env.CF_EMAIL_API_TOKEN || !env.CF_EMAIL_FROM) {
+  if (!env.RESEND_API_KEY || !env.RESEND_FROM_EMAIL) {
     throw new Error("Password-reset email delivery is not configured for this preview.");
   }
   const safeUrl = resetUrl.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(env.CF_EMAIL_ACCOUNT_ID)}/email/sending/send`,
-    {
-      method: "POST",
-      headers: { authorization: `Bearer ${env.CF_EMAIL_API_TOKEN}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        to,
-        from: env.CF_EMAIL_FROM,
-        subject: "Reset your RiftPulse preview password",
-        text: `A password reset was requested for your RiftPulse account. Use this one-time link to choose a new password: ${resetUrl}\n\nIf you did not request this, ignore this email.`,
-        html: `<p>A password reset was requested for your RiftPulse preview account.</p><p><a href="${safeUrl}">Choose a new password</a></p><p>If you did not request this, ignore this email.</p>`,
-      }),
-    },
-  );
-  const payload = await response.json().catch(() => null) as { success?: boolean; errors?: { message?: string }[] } | null;
-  if (!response.ok || payload?.success !== true) {
-    throw new Error(payload?.errors?.[0]?.message || `Cloudflare Email Service rejected the message (HTTP ${response.status}).`);
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      from: env.RESEND_FROM_EMAIL,
+      to: [to],
+      subject: "Reset your RiftPulse preview password",
+      text: `A password reset was requested for your RiftPulse account. Use this one-time link to choose a new password: ${resetUrl}\n\nIf you did not request this, ignore this email.`,
+      html: `<p>A password reset was requested for your RiftPulse preview account.</p><p><a href="${safeUrl}">Choose a new password</a></p><p>If you did not request this, ignore this email.</p>`,
+    }),
+  });
+  const payload = await response.json().catch(() => null) as { id?: string; message?: string; name?: string } | null;
+  if (!response.ok || !payload?.id) {
+    throw new Error(payload?.message || payload?.name || `Resend rejected the message (HTTP ${response.status}).`);
   }
 }
 
@@ -37,9 +34,6 @@ export function createAuth(env: Env): AuthInstance | null {
   const isLocal = baseURL.startsWith("http://localhost:") || baseURL.startsWith("http://127.0.0.1:");
   const configuredOrigins = (env.TRUSTED_ORIGINS ?? baseURL).split(",").map(value => value.trim()).filter(Boolean);
 
-  // Remote sign-up is allowed only for an explicitly enabled, HTTPS workers.dev
-  // preview. This is a development-only account system, not production auth:
-  // email verification delivery and a production-domain review are still required.
   let isAllowedRemotePreview = false;
   try {
     const origin = new URL(baseURL);
@@ -76,8 +70,6 @@ export function createAuth(env: Env): AuthInstance | null {
       enabled: true,
       minPasswordLength: 8,
       maxPasswordLength: 128,
-      // Remote preview accounts are temporary test accounts. Production must
-      // enable verification and configure a real verification-email delivery path.
       requireEmailVerification: false,
       resetPasswordTokenExpiresIn: 60 * 60,
       revokeSessionsOnPasswordReset: true,
