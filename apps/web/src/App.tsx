@@ -94,6 +94,7 @@ function App() {
   const [authPassword, setAuthPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
+  const [authSuccessMessage, setAuthSuccessMessage] = useState("");
   const [devices, setDevices] = useState<Device[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(true);
@@ -599,7 +600,8 @@ function App() {
         setResetToken("");
         window.history.replaceState({}, "", "/");
         setAuthMode("signin");
-        flash("Password updated successfully. Sign in with your new password.");
+        setAuthError("");
+        setAuthSuccessMessage("Sign in using your new password.");
       } else {
         const endpoint = authMode === "signin" ? "sign-in" : "sign-up";
         const payload = authMode === "signin"
@@ -660,6 +662,7 @@ function App() {
       <section className="auth-layout">
         <div className="auth-copy"><div className="eyebrow"><span className="eyebrow-line"/> YOUR STREAMING COMMAND CENTER</div><h1>Your stream.<br/><em>Your rules.</em></h1><p>Bring your live chat, song requests, and Beat Saber setup into one clean control center.</p><div className="auth-features"><div><MessageCircle/><span><b>Chat, all in one place</b><small>Bring supported platforms into the game.</small></span></div><div><Music2/><span><b>Song requests, under control</b><small>Configure commands and queue behavior.</small></span></div><div><Gamepad2/><span><b>PCVR + Quest</b><small>One account. Separate game adapters.</small></span></div></div></div>
         <div className="auth-card"><div className="auth-card-heading"><div className="auth-card-icon"><Sparkles size={20}/></div><div><h2>{authMode === "signin" ? "Welcome back" : authMode === "signup" ? "Create your account" : authMode === "request-reset" ? "Recover your account" : "Choose a new password"}</h2><p>{authMode === "signin" ? "Sign in to manage your RiftPulse setup." : authMode === "signup" ? "Start building your streaming setup." : authMode === "request-reset" ? "We’ll email a secure password reset link." : "The link is time-limited and can only be used once."}</p></div></div>
+          {authMode === "signin" && authSuccessMessage && <div className="auth-success"><ShieldCheck size={16}/><span><b>Password updated successfully.</b><small>{authSuccessMessage}</small></span></div>}
           {(authMode === "signin" || authMode === "signup") && <div className="auth-tabs"><button type="button" className={authMode === "signin" ? "active" : ""} onClick={() => {setAuthMode("signin");setAuthError("");}}>Sign in</button><button type="button" className={authMode === "signup" ? "active" : ""} onClick={() => {setAuthMode("signup");setAuthError("");}}>Create account</button></div>}
           <form className="auth-form" onSubmit={submitAuth}>
             {authMode === "signup" && <label>Display name<input autoComplete="name" value={authName} onChange={e=>setAuthName(e.target.value)} minLength={2} maxLength={64} placeholder="What should we call you?" required/></label>}
