@@ -772,13 +772,13 @@ function App() {
           <section className="section-block" id="modules">
             <div className="section-heading"><div><div className="section-overline">YOUR TOOLKIT</div><h3>Modules <span className="subtle-count">02</span></h3><p>Small tools. Big stream energy.</p></div><button className="text-button" onClick={() => setActiveTab("Modules")}>Manage modules <ArrowUpRight size={15} /></button></div>
             <div className="module-grid">
-              <ModuleCard title="Chat" description="Bring Twitch, YouTube, Kick and TikTok LIVE messages into your game." tag="COMMUNITY" icon={<MessageCircle size={21} />} accent="purple" enabled={enabled.chat} onToggle={() => toggleModule("chat")} onConfigure={() => setModal("settings")} status="Ready to configure" />
-              <ModuleCard title="BSR Song Request" description="Let your viewers request Beat Saber tracks with a simple chat command." tag="INTERACTIVE" icon={<Music2 size={21} />} accent="cyan" enabled={enabled["bsr-song-request"]} onToggle={() => toggleModule("bsr-song-request")} onConfigure={() => setModal("settings")} status={`Command: ${command}`} />
+              <ModuleCard title="Chat" description="Bring Twitch, YouTube, Kick and TikTok LIVE messages into your game." tag="COMMUNITY" icon={<MessageCircle size={21} />} accent="purple" onConfigure={() => { setActiveTab("Integrations"); document.getElementById("chat-feed")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} status="Chat & Events" />
+              <ModuleCard title="BSR Song Request" description="Let your viewers request Beat Saber tracks with a simple chat command." tag="INTERACTIVE" icon={<Music2 size={21} />} accent="cyan" onConfigure={() => setModal("settings")} status={`Command: ${command}`} />
             </div>
           </section>
 
           <section className="section-block downloads-block" id="downloads">
-            <div className="section-heading"><div><div className="section-overline">ALPHA TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Alpha packages for Beat Saber 1.40.8. Quest pairing now restores pending or claimed sessions after restarts, persists challenge state securely, and recovers from stalled HTTPS callbacks. Alpha headset validation is still required.</p></div><span className="settings-badge">PCVR v0.1.14 Â· Quest v0.1.25</span></div>
+            <div className="section-heading"><div><div className="section-overline">ALPHA TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Alpha packages for Beat Saber 1.40.8. Quest v0.1.26 fixes stuck HTTPS request locks and restores pending or claimed pairing sessions after restarts. Headset runtime validation is still required.</p></div><span className="settings-badge">PCVR v0.1.14 Â· Quest v0.1.26</span></div>
             <div className="downloads-grid">
               <article className="panel-card download-card">
                 <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR Â· BSIPA</b><small>Windows / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.14 Â· DLL built</span></div>
@@ -786,7 +786,7 @@ function App() {
                 <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr.zip" download><Download size={15} /> Download PCVR ZIP</a>
               </article>
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest Â· Scotland2</b><small>Standalone / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.25 Â· QMOD built</span></div>
+                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest Â· Scotland2</b><small>Standalone / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.26 Â· QMOD built</span></div>
                 <p>Native ARM64 Scotland2 QMOD. Creates a five-digit pairing challenge through the RiftPulse API and syncs Chat/BSR module preferences after account linking. Headset runtime validation is pending; live provider chat/events and BSR request fulfillment are not implemented yet.</p>
                 <a className="primary-button download-link" href="/downloads/RiftPulse.Quest.qmod" download><Download size={15} /> Download Quest QMOD</a>
               </article>
@@ -809,7 +809,7 @@ function App() {
 
           <section className="section-block chat-feed-block" id="chat-feed">
             <div className="section-heading">
-              <div><div className="section-overline">COMMUNITY PULSE</div><h3>Recent chat <span className="subtle-count">{chatMessages.length.toString().padStart(2, "0")}</span></h3><p>Normalized messages from your connected platforms.</p></div>
+              <div><div className="section-overline">COMMUNITY PULSE</div><h3>Chat & Events <span className="subtle-count">{chatMessages.length.toString().padStart(2, "0")}</span></h3><p>Live messages and normalized stream events from connected platforms.</p></div>
               <button className="outline-button" onClick={() => { void refreshChat(); void refreshProviderHealth(); }} disabled={chatLoading && healthLoading}><RefreshCw size={14} /> Refresh status</button>
             </div>
             <div className="chat-feed-panel">
@@ -892,8 +892,8 @@ function MetricCard({ icon, label, value, detail, muted = false }: { icon: React
   return <div className={`metric-card ${muted ? "metric-muted" : ""}`}><div className="metric-top"><span className="metric-icon">{icon}</span><span className="metric-label">{label}</span></div><div className="metric-value">{value}</div><div className="metric-detail">{detail}</div></div>;
 }
 
-function ModuleCard({ title, description, tag, icon, accent, enabled, onToggle, onConfigure, status }: { title: string; description: string; tag: string; icon: React.ReactNode; accent: string; enabled: boolean; onToggle: () => void; onConfigure: () => void; status: string }) {
-  return <article className={`module-card ${!enabled ? "module-disabled" : ""}`}><div className={`module-card-accent ${accent}`} /><div className="module-card-top"><div className={`module-icon ${accent}`}>{icon}</div><button className={`toggle ${enabled ? "on" : ""}`} role="switch" aria-checked={enabled} aria-label={`Toggle ${title}`} onClick={onToggle}><span /></button></div><div className="module-tag">{tag}</div><h4>{title}</h4><p>{description}</p><div className="module-card-bottom"><span className={`module-status ${enabled ? "ready" : ""}`}><i />{enabled ? status : "Module disabled"}</span><button className="configure-button" onClick={onConfigure}>Configure <ArrowUpRight size={14} /></button></div></article>;
+function ModuleCard({ title, description, tag, icon, accent, onConfigure, status }: { title: string; description: string; tag: string; icon: React.ReactNode; accent: string; onConfigure: () => void; status: string }) {
+  return <article className="module-card"><div className={`module-card-accent ${accent}`} /><div className="module-card-top"><div className={`module-icon ${accent}`}>{icon}</div></div><div className="module-tag">{tag}</div><h4>{title}</h4><p>{description}</p><div className="module-card-bottom"><span className="module-status ready"><i />{status}</span><button className="configure-button" onClick={onConfigure}>Configure <ArrowUpRight size={14} /></button></div></article>;
 }
 
 export default App;

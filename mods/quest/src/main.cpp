@@ -50,7 +50,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.25";
+static constexpr const char* MOD_VERSION = "0.1.26";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -247,6 +247,9 @@ static void DispatchPendingHttpResponse(System::Object*) {
     std::lock_guard<std::mutex> lock(httpStateMutex);
     if (!pendingHttpReady) return;
     completion = std::move(pendingHttpCompletion);
+    // A moved-from std::function is valid but unspecified; clear it so the
+    // request-busy guard cannot mistake a completed callback for an active request.
+    pendingHttpCompletion = {};
     status = pendingHttpStatus;
     body = std::move(pendingHttpBody);
     error = std::move(pendingHttpError);

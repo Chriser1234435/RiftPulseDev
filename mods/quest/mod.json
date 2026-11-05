@@ -5,7 +5,7 @@
     "id":  "riftpulse",
     "modloader":  "Scotland2",
     "author":  "RiftPulseDev",
-    "version":  "0.1.25",
+    "version":  "0.1.26",
     "packageId":  "com.beatgames.beatsaber",
     "packageVersion":  "1.40.8_7379",
     "description":  "RiftPulse Quest client with account pairing and Chat/BSR module settings for Beat Saber 1.40.8",
