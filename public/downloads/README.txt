@@ -1,1 +1,3 @@
-RiftPulse PCVR 0.1.6`r`nBeat Saber 1.40.8`r`nBSIPA manifest is valid UTF-8 JSON with the archive-root relative file path.
+RiftPulse PCVR 0.1.14
+Beat Saber 1.40.8
+The PCVR package now pairs through https://riftpulse.me and uses the current production website API.

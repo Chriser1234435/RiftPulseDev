@@ -81,12 +81,14 @@ const env = {
   CF_EMAIL_ACCOUNT_ID: process.env.CF_EMAIL_ACCOUNT_ID,
   CF_EMAIL_API_TOKEN: process.env.CF_EMAIL_API_TOKEN,
   CF_EMAIL_FROM: process.env.CF_EMAIL_FROM,
+  RESEND_API_KEY: process.env.RESEND_API_KEY,
+  RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL,
   PAIRING_HMAC_KEY: process.env.PAIRING_HMAC_KEY,
   TOKEN_ENCRYPTION_KEY: process.env.TOKEN_ENCRYPTION_KEY,
   TIKTOK_CONNECTOR_INGEST_SECRET: process.env.TIKTOK_CONNECTOR_INGEST_SECRET,
-  ALLOW_REMOTE_DEV_AUTH: process.env.ALLOW_REMOTE_DEV_AUTH || "true",
-  APP_BASE_URL: process.env.APP_BASE_URL || "https://riftpulse-dev.chrismeten0.workers.dev",
-  TRUSTED_ORIGINS: process.env.TRUSTED_ORIGINS || "https://riftpulse-dev.chrismeten0.workers.dev",
+  ALLOW_REMOTE_DEV_AUTH: process.env.ALLOW_REMOTE_DEV_AUTH || "false",
+  APP_BASE_URL: process.env.APP_BASE_URL || "https://riftpulse.me",
+  TRUSTED_ORIGINS: process.env.TRUSTED_ORIGINS || "https://riftpulse.me",
   TWITCH_CLIENT_ID: process.env.TWITCH_CLIENT_ID,
   TWITCH_CLIENT_SECRET: process.env.TWITCH_CLIENT_SECRET,
   TWITCH_REDIRECT_URI: process.env.TWITCH_REDIRECT_URI,
@@ -109,7 +111,7 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "OPTIONS") {
       res.writeHead(204, {
-        "access-control-allow-origin": process.env.TRUSTED_ORIGINS || "https://riftpulse-dev.chrismeten0.workers.dev",
+        "access-control-allow-origin": process.env.TRUSTED_ORIGINS || "https://riftpulse.me",
         "access-control-allow-credentials": "true",
         "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
         "access-control-allow-headers": "content-type,authorization",
@@ -122,7 +124,7 @@ const server = createServer(async (req, res) => {
     const response = await worker.fetch(new Request(requestUrl, init), env);
     const responseHeaders = new Headers(response.headers);
     const origin = req.headers.origin;
-    const trusted = (process.env.TRUSTED_ORIGINS || "https://riftpulse-dev.chrismeten0.workers.dev").split(",").map(x => x.trim());
+    const trusted = (process.env.TRUSTED_ORIGINS || "https://riftpulse.me").split(",").map(x => x.trim());
     if (origin && trusted.includes(origin)) {
       responseHeaders.set("access-control-allow-origin", origin);
       responseHeaders.set("access-control-allow-credentials", "true");
@@ -143,7 +145,7 @@ server.on("upgrade", async (req, socket, head) => {
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
     const origin = req.headers.origin;
-    const trusted = (process.env.TRUSTED_ORIGINS || "https://riftpulse-dev.chrismeten0.workers.dev").split(",").map(x => x.trim());
+    const trusted = (process.env.TRUSTED_ORIGINS || "https://riftpulse.me").split(",").map(x => x.trim());
     if (url.pathname !== "/api/v1/realtime" || !origin || !trusted.includes(origin)) return socket.destroy();
     const headers = new Headers();
     for (const [name, value] of Object.entries(req.headers)) {

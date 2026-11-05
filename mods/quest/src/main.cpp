@@ -30,9 +30,9 @@ using UnityEngine::Networking::DownloadHandler;
 using UnityEngine::AsyncOperation;
 
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
-static constexpr const char* API_BASE = "https://riftpulse-dev.chrismeten0.workers.dev/api/v1";
+static constexpr const char* API_BASE = "https://riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.18";
+static constexpr const char* MOD_VERSION = "0.1.19";
 
 static HMUI::CurvedTextMeshPro* overview = nullptr;
 static UnityEngine::UI::Button* codeButton = nullptr;

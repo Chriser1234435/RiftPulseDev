@@ -7,7 +7,7 @@ const cache = new WeakMap<object, AuthInstance>();
 
 async function sendPasswordResetEmail(env: Env, to: string, resetUrl: string): Promise<void> {
   if (!env.RESEND_API_KEY || !env.RESEND_FROM_EMAIL) {
-    throw new Error("Password-reset email delivery is not configured for this preview.");
+    throw new Error("Password-reset email delivery is not configured for this environment.");
   }
   const safeUrl = resetUrl.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   const response = await fetch("https://api.resend.com/emails", {
@@ -16,9 +16,9 @@ async function sendPasswordResetEmail(env: Env, to: string, resetUrl: string): P
     body: JSON.stringify({
       from: env.RESEND_FROM_EMAIL,
       to: [to],
-      subject: "Reset your RiftPulse preview password",
+      subject: "Reset your RiftPulse password",
       text: `A password reset was requested for your RiftPulse account. Use this one-time link to choose a new password: ${resetUrl}\n\nIf you did not request this, ignore this email.`,
-      html: `<p>A password reset was requested for your RiftPulse preview account.</p><p><a href="${safeUrl}">Choose a new password</a></p><p>If you did not request this, ignore this email.</p>`,
+      html: `<p>A password reset was requested for your RiftPulse account.</p><p><a href="${safeUrl}">Choose a new password</a></p><p>If you did not request this, ignore this email.</p>`,
     }),
   });
   const payload = await response.json().catch(() => null) as { id?: string; message?: string; name?: string } | null;
@@ -50,7 +50,18 @@ export function createAuth(env: Env): AuthInstance | null {
   } catch {
     isAllowedRemotePreview = false;
   }
-  if (!isLocal && !isAllowedRemotePreview) return null;
+  let isCanonicalProductionDomain = false;
+  try {
+    const origin = new URL(baseURL);
+    isCanonicalProductionDomain = origin.protocol === "https:"
+      && (origin.hostname === "riftpulse.me" || origin.hostname === "app.riftpulse.me")
+      && origin.pathname === "/"
+      && !origin.username && !origin.password && !origin.search && !origin.hash
+      && configuredOrigins.includes(origin.origin);
+  } catch {
+    isCanonicalProductionDomain = false;
+  }
+  if (!isLocal && !isAllowedRemotePreview && !isCanonicalProductionDomain) return null;
 
   const key = env.DB as object;
   const cached = cache.get(key);

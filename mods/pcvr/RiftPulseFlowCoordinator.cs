@@ -15,9 +15,9 @@ namespace RiftPulse.Pcvr
     [ViewDefinition("RiftPulse.Pcvr.pairing.bsml")]
     public sealed class RiftPulsePairingViewController : BSMLAutomaticViewController
     {
-        private const string ApiBase = "https://riftpulse-dev.chrismeten0.workers.dev/api/v1";
+        private const string ApiBase = "https://riftpulse.me/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.1.13";
+        private const string ModVersion = "0.1.14";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 

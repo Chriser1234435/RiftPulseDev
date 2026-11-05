@@ -1,10 +1,7 @@
-RiftPulse Quest alpha 0.1.18
-Beat Saber 1.40.8 standalone (Scotland2)
+# RiftPulse Quest adapter — alpha 0.1.19
 
-This build updates Quest pairing request construction. It creates UnityWebRequest with an explicit HTTP method and uploads the payload as raw UTF-8 JSON using UploadHandlerRaw, matching the RiftPulse API's application/json contract. The in-game status panel now reports the request-construction failure stage or the HTTP/server rejection details instead of displaying only a generic internet warning.
+Native ARM64 Scotland2 client for Beat Saber 1.40.8 (`1.40.8_7379`). The client creates a persistent installation identity, generates and registers a five-digit pairing code with the RiftPulse production API, checks website claim status, and loads/saves account Chat and BSR module preferences.
 
-To pair: install this QMOD on a Quest running the supported Beat Saber 1.40.8 build, open RiftPulse in the Beat Saber main menu, generate the code, enter that current five-digit code on the RiftPulse development website while signed in, then press CHECK PAIRING STATUS. The game may regenerate a code after a retry; always enter the currently displayed code.
+The request path introduced in 0.1.18 constructs UnityWebRequest with an explicit method and a raw UTF-8 `UploadHandlerRaw` JSON body. Request construction and HTTP failures now surface a specific diagnostic in the in-game status area.
 
-The current Quest UI uses a manual status-check button; it does not yet poll automatically. Chat and BSR switches save account preferences only; live chat/provider events, combined viewer counts, configurable ChatIntegrations command execution, and the BSR song-request queue are not implemented by this client. This build has compiled and been packaged, but still needs a fresh MBF import and headset runtime pairing test.
-
-The QMOD targets Beat Saber package 1.40.8_7379 and declares the Scotland2 loader plus Beat Saber Hook, BSML, Custom Types, and Paper2 dependencies.
+Pairing still uses the manual CHECK PAIRING STATUS button. Module controls save account preferences only; they do not yet activate live chat, provider events, combined viewer counts, configurable ChatIntegrations command execution, or BSR song-request fulfillment. Headset runtime validation is required before calling this build verified on device.
