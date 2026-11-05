@@ -142,26 +142,31 @@ static bool LoadOrCreateIdentity() {
   return true;
 }
 
-static const MethodInfo* FindRequestMethod(const char* name,
-                                           std::array<const Il2CppType*, 2> argumentTypes) {
-  return il2cpp_utils::FindMethod(
-      il2cpp_utils::il2cpp_type_check::il2cpp_no_arg_class<UnityWebRequest*>::get(),
-      name, std::array<Il2CppClass*, 0>{}, argumentTypes);
-}
-
 static bool SetRequestHeader(UnityWebRequest* request,
                              const std::string& name,
                              const std::string& value) {
+  if (!request) {
+    requestDiagnostic = "Unity request object is null.";
+    return false;
+  }
   try {
-    const auto* method = FindRequestMethod(
-        "SetRequestHeader",
-        {il2cpp_utils::il2cpp_type_check::il2cpp_no_arg_type<StringW>::get(),
-         il2cpp_utils::il2cpp_type_check::il2cpp_no_arg_type<StringW>::get()});
-    if (!method) return false;
+    // Resolve by method name and parameter count. Unity's IL2CPP string type
+    // metadata differs between generated bindings; exact type matching was brittle.
+    const auto* klass =
+        il2cpp_utils::il2cpp_type_check::il2cpp_no_arg_class<UnityWebRequest*>::get();
+    const auto* method = il2cpp_utils::FindMethodUnsafe(klass, "SetRequestHeader", 2);
+    if (!method) {
+      requestDiagnostic = "Unity could not resolve SetRequestHeader.";
+      return false;
+    }
     cordl_internals::RunMethodRethrow<void, false>(
         request, method, StringW(name), StringW(value));
     return true;
+  } catch (const std::exception& error) {
+    requestDiagnostic = std::string("Unity SetRequestHeader failed: ") + error.what();
+    return false;
   } catch (...) {
+    requestDiagnostic = "Unity SetRequestHeader failed with an unknown runtime exception.";
     return false;
   }
 }
