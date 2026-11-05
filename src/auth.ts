@@ -72,6 +72,14 @@ export function createAuth(env: Env): AuthInstance | null {
     baseURL,
     secret: env.BETTER_AUTH_SECRET,
     trustedOrigins: configuredOrigins,
+    advanced: {
+      database: { generateId: "uuid" },
+      useSecureCookies: !isLocal,
+      trustedProxyHeaders: true,
+      ipAddress: {
+        ipAddressHeaders: ["cf-connecting-ip", "x-forwarded-for"],
+      },
+    },
     database: {
       dialect: new D1Dialect({ database: env.DB as never }),
       type: "sqlite",
@@ -84,6 +92,16 @@ export function createAuth(env: Env): AuthInstance | null {
       requireEmailVerification: false,
       resetPasswordTokenExpiresIn: 60 * 60,
       revokeSessionsOnPasswordReset: true,
+      onPasswordReset: async ({ user }: { user: { id: string } }) => {
+        const account = await env.DB!.prepare(
+          "SELECT id, email FROM user WHERE id = ? LIMIT 1",
+        ).bind(user.id).first<{ id: string; email: string }>();
+        if (!account?.id || !account.email) throw new Error("Password reset did not persist to the user database.");
+        const credential = await env.DB!.prepare(
+          "SELECT password FROM account WHERE userId = ? AND providerId = 'credential' LIMIT 1",
+        ).bind(user.id).first<{ password: string | null }>();
+        if (!credential?.password) throw new Error("Password reset completed without a credential password record.");
+      },
       sendResetPassword: async ({ user, url }: { user: { email: string }; url: string }) => {
         await sendPasswordResetEmail(env, user.email, url);
       },
@@ -93,10 +111,6 @@ export function createAuth(env: Env): AuthInstance | null {
       updateAge: 60 * 60 * 24,
     },
     rateLimit: { enabled: true },
-    advanced: {
-      database: { generateId: "uuid" },
-      useSecureCookies: !isLocal,
-    },
     databaseHooks: {
       user: {
         create: {

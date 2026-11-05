@@ -172,13 +172,15 @@ function App() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    // Better Auth may put the reset token in the /reset-password/:token path,
-    // while other configured links use ?token=. Accept both link formats.
-    const pathSegments = window.location.pathname.split("/").filter(Boolean);
-    const resetPathIndex = pathSegments.findIndex(segment => segment.toLowerCase() === "reset-password");
-    const pathToken = resetPathIndex >= 0 ? pathSegments[resetPathIndex + 1] : null;
+    const segments = window.location.pathname.split("/").filter(Boolean);
+    const resetPathIndex = segments.findIndex(segment => segment.toLowerCase() === "reset-password");
+    const pathToken = resetPathIndex >= 0 ? segments[resetPathIndex + 1] : null;
     const token = params.get("token") ?? (pathToken ? decodeURIComponent(pathToken) : null);
-    if (token) {
+    if (params.get("error") === "INVALID_TOKEN") {
+      setAuthMode("request-reset");
+      setAuthError("That reset link is expired or has already been used. Request a new one.");
+      window.history.replaceState({}, "", "/");
+    } else if (token) {
       setResetToken(token);
       setAuthMode("reset-password");
       setAuthEmail(params.get("email") ?? "");
@@ -562,10 +564,16 @@ function App() {
         const response = await fetch("/api/auth/request-password-reset", {
           method: "POST", credentials: "include",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ email: authEmail.trim(), redirectTo: window.location.origin + "/?reset=1" }),
+          body: JSON.stringify({ email: authEmail.trim(), redirectTo: "https://app.riftpulse.me/" }),
         });
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.message ?? data.error?.message ?? "Could not request a password reset.");
+        if (!response.ok) {
+          const code = data.code ?? data.error?.code;
+          if (code === "INVALID_ORIGIN" || response.status === 403) {
+            throw new Error("We couldn't verify this request. Refresh the page and try again.");
+          }
+          throw new Error(data.message ?? data.error?.message ?? "Could not request a password reset.");
+        }
         setResetEmailSent(true);
         setAuthError("");
       } else if (authMode === "reset-password") {
@@ -576,12 +584,22 @@ function App() {
           body: JSON.stringify({ token: resetToken, newPassword: authPassword }),
         });
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.message ?? data.error?.message ?? "Could not reset password. The link may have expired.");
+        if (!response.ok) {
+          const code = data.code ?? data.error?.code;
+          if (code === "INVALID_TOKEN") throw new Error("That reset link is expired or has already been used. Request a new one.");
+          if (code === "INVALID_ORIGIN" || response.status === 403) throw new Error("Your reset request could not be verified. Open the link from https://app.riftpulse.me and try again.");
+          throw new Error(data.message ?? data.error?.message ?? "Could not reset password. The link may have expired.");
+        }
+        if (data.status !== true) throw new Error("The password service did not confirm the reset. Please request a new link.");
+        // Better Auth's successful status is returned only after the credential is updated
+        // and the one-time reset token is consumed. Do not make success depend on a second
+        // sign-in request: reset links opened from email may not carry the account email.
+        setUser(null);
         setAuthPassword("");
         setResetToken("");
         window.history.replaceState({}, "", "/");
         setAuthMode("signin");
-        flash("Password reset. Sign in using your new password.");
+        flash("Password updated successfully. Sign in with your new password.");
       } else {
         const endpoint = authMode === "signin" ? "sign-in" : "sign-up";
         const payload = authMode === "signin"
@@ -593,7 +611,16 @@ function App() {
           body: JSON.stringify(payload),
         });
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.message ?? data.error?.message ?? "Could not authenticate. Check your details and try again.");
+        if (!response.ok) {
+          const code = data.code ?? data.error?.code;
+          if (code === "INVALID_EMAIL_OR_PASSWORD" || response.status === 401) {
+            throw new Error("Incorrect email or password. Check your details and try again.");
+          }
+          if (code === "INVALID_ORIGIN" || response.status === 403) {
+            throw new Error("Your sign-in request could not be verified. Refresh the page and try again.");
+          }
+          throw new Error(data.message ?? data.error?.message ?? "Could not authenticate. Check your details and try again.");
+        }
         const sessionResponse = await fetch("/api/auth/get-session", { credentials: "include" });
         const session = await sessionResponse.json();
         if (!session?.user) throw new Error("The server did not create a valid session.");

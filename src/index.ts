@@ -158,6 +158,18 @@ export default {
     const url = new URL(request.url);
     const requestId = crypto.randomUUID();
 
+    // Authentication cookies and CSRF checks are HTTPS-only in production. Redirect
+    // browser-facing custom domains and Worker previews before proxying any API calls.
+    // Do not redirect Railway's internal upstream host, which terminates TLS separately.
+    if (url.protocol === "http:" && (
+      url.hostname === "app.riftpulse.me"
+      || url.hostname === "riftpulse.me"
+      || url.hostname.endsWith(".workers.dev")
+    )) {
+      url.protocol = "https:";
+      return Response.redirect(url.toString(), 308);
+    }
+
     // Keep Cloudflare as the browser-facing origin, but run all API logic on Railway.
     // This also keeps Better Auth cookies same-origin for the Cloudflare-hosted UI.
     if (env.RAILWAY_API_URL && url.pathname.startsWith("/api/")) {
@@ -165,6 +177,8 @@ export default {
         const upstream = new URL(url.pathname + url.search, env.RAILWAY_API_URL);
         const headers = new Headers(request.headers);
         headers.delete("host");
+        headers.set("x-forwarded-host", url.host);
+        headers.set("x-forwarded-proto", url.protocol.replace(":", ""));
         const init: RequestInit & { duplex?: "half" } = {
           method: request.method,
           headers,
