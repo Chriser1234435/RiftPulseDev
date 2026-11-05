@@ -1,7 +1,9 @@
-# RiftPulse Quest adapter — alpha 0.1.19
+# RiftPulse Quest adapter — alpha 0.1.20
 
-Native ARM64 Scotland2 client for Beat Saber 1.40.8 (`1.40.8_7379`). The client creates a persistent installation identity, generates and registers a five-digit pairing code with the RiftPulse production API at https://app.riftpulse.me, checks website claim status, and loads/saves account Chat and BSR module preferences.
+Native ARM64 Scotland2 client for Beat Saber 1.40.8 (`1.40.8_7379`). This alpha generates a five-digit pairing code, registers the pairing challenge with the RiftPulse API, checks website claim status, and after linking loads and saves the account's Chat and BSR module preferences.
 
-The request path introduced in 0.1.18 constructs UnityWebRequest with an explicit method and a raw UTF-8 `UploadHandlerRaw` JSON body. Request construction and HTTP failures now surface a specific diagnostic in the in-game status area.
+Quest uses UnityWebRequest HTTPS calls with validated request headers for pairing registration and module-toggle saves. This avoids the `UploadHandlerRaw` class, which is stripped from the Quest Unity runtime. Device credentials and pairing metadata are sent in headers, never URL query parameters. The API keeps JSON POST/PATCH routes for web and PCVR clients.
 
-Pairing still uses the manual CHECK PAIRING STATUS button. Module controls save account preferences only; they do not yet activate live chat, provider events, combined viewer counts, configurable ChatIntegrations command execution, or BSR song-request fulfillment. Headset runtime validation is required before calling this build verified on device.
+Pairing status is checked manually using CHECK PAIRING STATUS after entering the code on https://app.riftpulse.me. The Quest menu's pairing information and action buttons are arranged in one aligned column.
+
+This is an alpha candidate. Headset installation, menu layout, pairing and preference-save runtime validation remain for testers. Module switches persist preferences only; actual live provider chat/events, combined viewer counts, ChatIntegrations command execution, and BSR song-request fulfillment are not yet implemented.

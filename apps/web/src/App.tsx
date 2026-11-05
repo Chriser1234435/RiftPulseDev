@@ -767,20 +767,20 @@ function App() {
           </section>
 
           <section className="section-block downloads-block" id="downloads">
-            <div className="section-heading"><div><div className="section-overline">TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Alpha packages for Beat Saber 1.40.8. PCVR pairing registration is available in its test flow; Quest currently has an in-game dashboard preview with local-only toggles and an offline pairing-code preview.</p></div><span className="settings-badge">PCVR v0.1.2 · Quest v0.1.1</span></div>
+            <div className="section-heading"><div><div className="section-overline">ALPHA TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Alpha packages for Beat Saber 1.40.8. Quest pairing registration and account module-preference sync are connected to the RiftPulse API; physical headset runtime validation is still needed.</p></div><span className="settings-badge">PCVR v0.1.14 · Quest v0.1.20</span></div>
             <div className="downloads-grid">
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR · BSIPA</b><small>Windows / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.2 · DLL built</span></div>
+                <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR · BSIPA</b><small>Windows / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.14 · DLL built</span></div>
                 <p>Install the PCVR DLL into your test instance's Plugins folder. The in-game pairing challenge flow is wired; realtime Chat and BSR are not implemented yet.</p>
                 <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr.zip" download><Download size={15} /> Download PCVR ZIP</a>
               </article>
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest · Scotland2</b><small>Standalone / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.1 · QMOD built</span></div>
-                <p>QMOD for QuestPatcher/BSManager with a new BSML side-panel entry, Chat/BSR dashboard toggles, local pairing-code preview, and settings-preview action. Toggles are not persisted; website pairing/API and headset runtime testing remain pending.</p>
+                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest · Scotland2</b><small>Standalone / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.20 · QMOD built</span></div>
+                <p>Native ARM64 Scotland2 QMOD. Creates a five-digit pairing challenge through the RiftPulse API and syncs Chat/BSR module preferences after account linking. Headset runtime validation is pending; live provider chat/events and BSR request fulfillment are not implemented yet.</p>
                 <a className="primary-button download-link" href="/downloads/RiftPulse.Quest.qmod" download><Download size={15} /> Download Quest QMOD</a>
               </article>
             </div>
-            <div className="integration-footnote"><ShieldCheck size={15} /><span>Alpha development build: PCVR pairing challenge registration is wired. Quest dashboard switches and code are local previews only. Secure device credentials, live chat, realtime event delivery, BSR, and Quest headset runtime testing are still pending. Use a test instance; not a release build.</span></div>
+            <div className="integration-footnote"><ShieldCheck size={15} /><span>Alpha build for tester validation. Quest pairing and preference sync use the API; actual live chat/provider events, combined viewer counts, ChatIntegrations command execution, and BSR song-request fulfillment remain unfinished. Use a test instance; not a release build.</span></div>
           </section>
 
           <section className="section-block integrations-block" id="integrations">

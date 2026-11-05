@@ -387,3 +387,14 @@ Date: 2026-11-04
 - Public verification: https://riftpulse.me/, /api/v1/health, /api/v1/version, and /api/auth/get-session returned HTTP 200. PCVR DLL, PCVR ZIP, Quest QMOD, manifests, and platform READMEs were downloaded from the live domain and their SHA-256 hashes matched the local published files exactly.
 - Infrastructure naming note: the live domain deliberately reuses the existing Worker script named riftpulse-dev, Railway service, and Railway environment still labeled development. This was chosen to preserve existing secret bindings and the tester database rather than create a parallel empty environment with credentials/data that could not be safely copied. The production hostname is live, but this is not yet a separately isolated production Railway environment.
 - Remaining release gates: PCVR and Quest game-runtime pairing must still be tested on their respective devices. Their current Chat/BSR switches sync preferences but do not activate the live services; provider events, combined viewer counts, configurable ChatIntegrations command execution, and the BSR request queue are not yet implemented by these clients. Railway currently lacks the Twitch/YouTube/Kick OAuth client ID and secret variables, and the provider developer consoles still need the new callback URLs registered. The TikTok bridge remains intentionally paused by its Railway start command.
+
+
+## Website alpha upload — Quest 0.1.20 (November 5, 2026)
+
+- Published the already-built Quest 0.1.20 alpha package to the RiftPulse Downloads page. Refreshed `public/downloads/RiftPulse.Quest.qmod` and `Quest-README.txt`; website UI metadata now shows PCVR 0.1.14 and Quest 0.1.20, and accurately explains the API-connected pairing/preferences and still-unimplemented live Chat/BSR features.
+- Quest QMOD is ARM64 Scotland2, targeting Beat Saber `1.40.8_7379`. Local published QMOD SHA-256: `164CD111095C2909E2DC6C6DF1861E46862524B11360346AB892D31C2E7F4527` (235,833 bytes).
+- `npm.cmd test` passed: typecheck, 49 unit/contract tests, isolated SQLite migration test, and Vite production build.
+- Deployed development Worker `riftpulse-dev` using `wrangler.jsonc`; Worker assets updated at `https://riftpulse-dev.chrismeten0.workers.dev`.
+- Deployed the public website Worker `riftpulse` using `wrangler.production.jsonc` to publish to the configured website domains `https://riftpulse.me` and `https://app.riftpulse.me`, preserving the existing `riftpulse-dev-db` D1 and bindings. Worker Version ID: `994d7536-e7be-44bb-8522-6c16abf58fb0`.
+- Verification: QMOD HTTP GET returned 200 and 235,833 bytes at both public hostnames; downloaded SHA-256 exactly matched local. Quest README returned HTTP 200 and advertises alpha 0.1.20; both website homepages returned HTTP 200 with the refreshed client bundle.
+- Headset installation, Quest menu rendering, and pairing/preference behavior remain alpha tester runtime validation items. No claim of physical headset test is made.
