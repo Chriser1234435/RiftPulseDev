@@ -409,3 +409,14 @@ Date: 2026-11-04
 - Uploaded website assets via production Wrangler deployment. Worker Version ID `ef0987b0-36ee-4782-a19b-0e2cff23ff9c`.
 - Public artifact verification: `https://riftpulse.me/downloads/RiftPulse.Quest.qmod` returned HTTP 200, 235,668 bytes, SHA-256 identical to local. README returned HTTP 200 with 0.1.21. Homepage returned HTTP 200 and refreshed client bundle was verified.
 - Physical Quest runtime retest remains required to confirm Unity permits the remaining headers and the pairing flow completes on-device.
+
+
+## QuestPatcher manifest encoding fix — alpha 0.1.22 (November 5, 2026)
+
+- User reported QuestPatcher import failure: `Parsing manifest caused by: expected value at line 1 column 1`.
+- Root cause confirmed by inspecting raw bytes inside the 0.1.21 QMOD: embedded `mod.json` began `EF BB BF` (UTF-8 BOM) before `{`. QuestPatcher's parser expected `{` at byte 0. The earlier PowerShell JSON parse accepted the BOM, masking the issue.
+- Rewrote canonical Quest `mod.json` as UTF-8 without BOM and bumped Quest package to 0.1.22 in `src/main.cpp`, `mod.json`, `qpm.json`, and `qpm.shared.json`. Retained the 0.1.21 Unity Accept-header fix.
+- Rebuilt ARM64 Quest native library and generated `RiftPulse-Quest-0.1.22-Alpha.qmod` for Beat Saber `1.40.8_7379` / Scotland2. Archive has exactly two entries: `mod.json` and `libriftpulse.so`. Embedded manifest begins `7B` (`{`) with no BOM, parses as JSON, and confirms version 0.1.22 and target `1.40.8_7379`. Library size 888,248 bytes. QMOD size 235,665 bytes. SHA-256: `01279B2D1CF7CEFAEB0823114E47770BFBA978C202FDA651EB0E2244ECE976B8`.
+- Updated website Quest card, QMOD, and Quest README. README documents BOM fix and outstanding runtime validation.
+- Deployed public Worker `riftpulse` with Wrangler config `wrangler.production.jsonc`; Worker Version ID `de4a8fc2-b5fc-4b95-8380-d5258866537a`. Existing D1 and bindings were preserved.
+- Verified both `https://riftpulse.me` and `https://app.riftpulse.me`: QMOD and README HTTP 200; QMOD download exactly 235,665 bytes and SHA-256 matched local (`01279B2D1CF7CEFAEB0823114E47770BFBA978C202FDA651EB0E2244ECE976B8`); README reports 0.1.22; homepage HTTP 200 and serves refreshed client bundle.

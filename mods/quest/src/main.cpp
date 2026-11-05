@@ -1,4 +1,4 @@
-﻿#include "main.hpp"
+#include "main.hpp"
 #include "bsml/shared/BSML.hpp"
 #include "bsml/shared/BSML-Lite.hpp"
 #include "HMUI/CurvedTextMeshPro.hpp"
@@ -31,7 +31,7 @@ using UnityEngine::AsyncOperation;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.21";
+static constexpr const char* MOD_VERSION = "0.1.22";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
