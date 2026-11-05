@@ -398,3 +398,14 @@ Date: 2026-11-04
 - Deployed the public website Worker `riftpulse` using `wrangler.production.jsonc` to publish to the configured website domains `https://riftpulse.me` and `https://app.riftpulse.me`, preserving the existing `riftpulse-dev-db` D1 and bindings. Worker Version ID: `994d7536-e7be-44bb-8522-6c16abf58fb0`.
 - Verification: QMOD HTTP GET returned 200 and 235,833 bytes at both public hostnames; downloaded SHA-256 exactly matched local. Quest README returned HTTP 200 and advertises alpha 0.1.20; both website homepages returned HTTP 200 with the refreshed client bundle.
 - Headset installation, Quest menu rendering, and pairing/preference behavior remain alpha tester runtime validation items. No claim of physical headset test is made.
+
+
+## Quest pairing header compatibility fix — alpha 0.1.21 (November 5, 2026)
+
+- User headset report: Quest pairing API request failed locally with `Unity rejected the Accept request header`; website reported code not registered since the request was stopped before network dispatch.
+- Removed the unnecessary `Accept: application/json` header and Cache-Control setting from Quest UnityWebRequest builder. API responds JSON by default. Keep secure pairing/device metadata request headers; no credentials are placed in URL query params.
+- Rebuilt Quest ARM64 native library and QMOD, version 0.1.21 for Beat Saber `1.40.8_7379`. Archive validation confirms `mod.json` version, target package version, and presence of `libriftpulse.so`. QMOD size 235,668 bytes; SHA-256 `4362327B6600F48B98CCB7E9A2D16A52C975E5D0EA459D6E676DB083E5E6A5B6`.
+- npm test passed: 49 tests, isolated SQLite migration test, TypeScript check, Vite production build.
+- Uploaded website assets via production Wrangler deployment. Worker Version ID `ef0987b0-36ee-4782-a19b-0e2cff23ff9c`.
+- Public artifact verification: `https://riftpulse.me/downloads/RiftPulse.Quest.qmod` returned HTTP 200, 235,668 bytes, SHA-256 identical to local. README returned HTTP 200 with 0.1.21. Homepage returned HTTP 200 and refreshed client bundle was verified.
+- Physical Quest runtime retest remains required to confirm Unity permits the remaining headers and the pairing flow completes on-device.

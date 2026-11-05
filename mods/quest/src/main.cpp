@@ -1,4 +1,4 @@
-#include "main.hpp"
+﻿#include "main.hpp"
 #include "bsml/shared/BSML.hpp"
 #include "bsml/shared/BSML-Lite.hpp"
 #include "HMUI/CurvedTextMeshPro.hpp"
@@ -31,7 +31,7 @@ using UnityEngine::AsyncOperation;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.20";
+static constexpr const char* MOD_VERSION = "0.1.21";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -175,18 +175,14 @@ static UnityWebRequest* CreateGetRequest(const std::string& url,
   }
   request->set_downloadHandler(DownloadHandlerBuffer::New_ctor());
   request->set_timeout(20);
-  if (!SetRequestHeader(request, "Accept", "application/json")) {
-    requestDiagnostic = "Unity rejected the Accept request header.";
-    request->Dispose();
-    return nullptr;
-  }
+  // UnityWebRequest rejects the Accept header in this Quest runtime; the API
+  // responds with JSON by default. Do not set Accept or Cache-Control here.
   if (!credential.empty() &&
       !SetRequestHeader(request, "Authorization", "Bearer " + credential)) {
     requestDiagnostic = "Unity rejected the device authorization header.";
     request->Dispose();
     return nullptr;
   }
-  SetRequestHeader(request, "Cache-Control", "no-store");
   return request;
 }
 
@@ -461,7 +457,7 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
       {0.0f, 15.5f}, {58.0f, 7.0f});
 
   instructions = BSML::Lite::CreateText(
-      root, "QUEST CONNECTION  •  BEAT SABER 1.40.8",
+      root, "QUEST CONNECTION  â€¢  BEAT SABER 1.40.8",
       2.4f, {0.0f, 9.0f}, {58.0f, 5.0f});
 
   overview = BSML::Lite::CreateText(

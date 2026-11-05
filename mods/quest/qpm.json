@@ -1,9 +1,9 @@
-{
+﻿{
     "$schema":  "https://raw.githubusercontent.com/QuestPackageManager/QPM.Package/refs/heads/main/qpm.schema.json",
     "version":  "0.1.5",
     "sharedDir":  "shared",
     "dependenciesDir":  "extern",
-    "info":  { "name":  "RiftPulse", "id":  "riftpulse", "version":  "0.1.20",
+    "info":  { "name":  "RiftPulse", "id":  "riftpulse", "version":  "0.1.21",
                  "url":  "https://app.riftpulse.me",
                  "additionalData":  {
                                         "overrideSoName":  "libriftpulse.so",

@@ -767,7 +767,7 @@ function App() {
           </section>
 
           <section className="section-block downloads-block" id="downloads">
-            <div className="section-heading"><div><div className="section-overline">ALPHA TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Alpha packages for Beat Saber 1.40.8. Quest pairing registration and account module-preference sync are connected to the RiftPulse API; physical headset runtime validation is still needed.</p></div><span className="settings-badge">PCVR v0.1.14 · Quest v0.1.20</span></div>
+            <div className="section-heading"><div><div className="section-overline">ALPHA TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Alpha packages for Beat Saber 1.40.8. Quest pairing request no longer sends Unity's rejected Accept header; pairing registration and account module-preference sync use the RiftPulse API. Physical headset runtime validation is still needed.</p></div><span className="settings-badge">PCVR v0.1.14 · Quest v0.1.21</span></div>
             <div className="downloads-grid">
               <article className="panel-card download-card">
                 <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR · BSIPA</b><small>Windows / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.14 · DLL built</span></div>
@@ -775,7 +775,7 @@ function App() {
                 <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr.zip" download><Download size={15} /> Download PCVR ZIP</a>
               </article>
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest · Scotland2</b><small>Standalone / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.20 · QMOD built</span></div>
+                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest · Scotland2</b><small>Standalone / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.21 · QMOD built</span></div>
                 <p>Native ARM64 Scotland2 QMOD. Creates a five-digit pairing challenge through the RiftPulse API and syncs Chat/BSR module preferences after account linking. Headset runtime validation is pending; live provider chat/events and BSR request fulfillment are not implemented yet.</p>
                 <a className="primary-button download-link" href="/downloads/RiftPulse.Quest.qmod" download><Download size={15} /> Download Quest QMOD</a>
               </article>
