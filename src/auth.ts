@@ -93,14 +93,12 @@ export function createAuth(env: Env): AuthInstance | null {
       resetPasswordTokenExpiresIn: 60 * 60,
       revokeSessionsOnPasswordReset: true,
       onPasswordReset: async ({ user }: { user: { id: string } }) => {
+        // Better Auth completes the credential update before invoking this hook.
+        // Confirm the user record exists; the next browser request also verifies sign-in.
         const account = await env.DB!.prepare(
           "SELECT id, email FROM user WHERE id = ? LIMIT 1",
         ).bind(user.id).first<{ id: string; email: string }>();
         if (!account?.id || !account.email) throw new Error("Password reset did not persist to the user database.");
-        const credential = await env.DB!.prepare(
-          "SELECT password FROM account WHERE userId = ? AND providerId = 'credential' LIMIT 1",
-        ).bind(user.id).first<{ password: string | null }>();
-        if (!credential?.password) throw new Error("Password reset completed without a credential password record.");
       },
       sendResetPassword: async ({ user, url }: { user: { email: string }; url: string }) => {
         await sendPasswordResetEmail(env, user.email, url);

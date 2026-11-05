@@ -80,6 +80,16 @@ test("health and version routes identify the V1 API and only the two V1 modules"
   assert.deepEqual((await version.json()).modules, ["chat", "bsr-song-request"]);
 });
 
+test("redirects insecure RiftPulse browser origins to HTTPS before auth or asset handling", async () => {
+  const response = await worker.fetch(new Request("http://app.riftpulse.me/api/auth/sign-in/email?next=%2F"), env());
+  assert.equal(response.status, 308);
+  assert.equal(response.headers.get("location"), "https://app.riftpulse.me/api/auth/sign-in/email?next=%2F");
+
+  const aliasResponse = await worker.fetch(new Request("http://riftpulse.me/"), env());
+  assert.equal(aliasResponse.status, 308);
+  assert.equal(aliasResponse.headers.get("location"), "https://riftpulse.me/");
+});
+
 test("pairing challenge stores a digest and never returns the raw code", async () => {
   const bindings = env();
   const response = await call("/api/v1/pairing/challenges", {
