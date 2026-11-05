@@ -1,7 +1,9 @@
-# RiftPulse Quest adapter — alpha 0.1.20
+# RiftPulse Quest adapter — alpha 0.1.23
 
-Native ARM64 Scotland2 client for Beat Saber 1.40.8 (`1.40.8_7379`). The client creates a persistent installation identity, generates and registers a five-digit pairing code with the RiftPulse production API at https://app.riftpulse.me, checks website claim status, and loads/saves account Chat and BSR module preferences.
+Native ARM64 Scotland2 client for Beat Saber 1.40.8 (`1.40.8_7379`). This alpha generates a five-digit pairing code, registers the pairing challenge with the RiftPulse API, checks website claim status, and after linking loads and saves the account's Chat and BSR module preferences.
 
-Quest uses UnityWebRequest GET calls with validated HTTPS request headers for pairing registration and module-toggle updates. This avoids the `UploadHandlerRaw` type, which is stripped from the target Quest Unity runtime. The device credential and pairing metadata are sent in headers, never URL query parameters. The API retains its JSON POST/PATCH routes for the web and PCVR clients.
+Fix in 0.1.23: Quest resolves UnityWebRequest.SetRequestHeader using Unity's IL2CPP runtime method lookup by method name and argument count rather than brittle exact string-parameter type matching. The request builder keeps the rejected Accept and unnecessary Cache-Control headers removed. Each secure pairing header now has its own diagnostic, and Unity invocation exceptions are surfaced in the in-game status.
 
-The Quest menu now places pairing information and all four actions in one aligned column. Pairing uses the manual CHECK PAIRING STATUS action after the five-digit code is entered on the website. Module switches persist account preferences; they do not yet activate live chat, provider events, combined viewer counts, configurable ChatIntegrations command execution, or BSR song-request fulfillment. A headset install-and-pair run is still required for final runtime validation by alpha testers.
+The QMOD manifest is UTF-8 without BOM and begins directly with `{`, for QuestPatcher/MBF import. Pairing status is checked manually using CHECK PAIRING STATUS after entering the code on https://app.riftpulse.me.
+
+This is an alpha candidate. Headset import, menu layout, pairing and preference-save runtime validation remain for testers. Module switches persist preferences only; actual live provider chat/events, combined viewer counts, ChatIntegrations command execution, and BSR song-request fulfillment are not yet implemented.

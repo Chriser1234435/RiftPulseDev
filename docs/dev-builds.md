@@ -431,3 +431,13 @@ Date: 2026-11-04
 - Production Cloudflare Worker deployed, Version ID `87d2bc0b-c75b-4d47-a5ea-717b7661ec30`.
 - Public download verification: QMOD HTTP 200, hash matched local, embedded manifest first byte `7B` and version 0.1.22; README HTTP 200; homepage HTTP 200 and refreshed JS asset confirmed.
 - Actual QuestPatcher/MBF import and headset pairing are still untested after deployment and require alpha tester confirmation.
+
+## Quest pairing header-resolution follow-up — alpha 0.1.23 (November 5, 2026)
+
+- Latest Quest screenshot reported `Unity rejected one of the secure pairing headers` after the earlier `Accept` header rejection was removed.
+- Replaced exact IL2CPP signature lookup for `UnityWebRequest.SetRequestHeader` with Unity runtime method lookup by class, method name, and two-argument count (`FindMethodUnsafe`). This avoids dependency on fragile generated string-parameter type metadata.
+- Header construction now reports the exact failing header and captures Unity invocation exceptions to the in-game diagnostic instead of returning a generic failure.
+- Rebuilt and packaged Quest 0.1.23; package manifest verified UTF-8 without BOM, first byte `{`, target Beat Saber `1.40.8_7379`; archive includes `mod.json` and `libriftpulse.so`.
+- Project tests/build passed: 49 unit/contract tests, isolated migration test, TypeScript check and Vite build.
+- Production Cloudflare Worker deployed. Public QMOD returned HTTP 200 (236,609 bytes) with SHA-256 `E5D4953DF26AB89D9B6A14DECB93336C6A1B7017B958EF8AD74F4E450D8C0BDE`, exactly matching local build. Public README and homepage returned HTTP 200 and refreshed website bundle was confirmed.
+- Unity runtime behavior on the actual headset is still unverified; tester should install 0.1.23 and report the new exact diagnostic if any header is still rejected.
