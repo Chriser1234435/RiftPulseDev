@@ -172,6 +172,19 @@ function App() {
   }, []);
 
   useEffect(() => {
+    // Keep a live device class for responsive layout and touch-friendly controls.
+    const mobileQuery = window.matchMedia("(max-width: 760px), (pointer: coarse) and (max-width: 900px)");
+    const updateDeviceClass = () => {
+      document.documentElement.classList.toggle("is-mobile-device", mobileQuery.matches);
+      document.documentElement.classList.toggle("is-desktop-device", !mobileQuery.matches);
+      document.documentElement.dataset.device = mobileQuery.matches ? "mobile" : "desktop";
+    };
+    updateDeviceClass();
+    mobileQuery.addEventListener("change", updateDeviceClass);
+    return () => mobileQuery.removeEventListener("change", updateDeviceClass);
+  }, []);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const segments = window.location.pathname.split("/").filter(Boolean);
     const resetPathIndex = segments.findIndex(segment => segment.toLowerCase() === "reset-password");
@@ -716,15 +729,13 @@ function App() {
           <button onClick={() => setModal("help")}>Explore RiftPulse <ArrowUpRight size={14} /></button>
         </div>
         <button className="nav-item help-nav" onClick={() => setModal("help")}><CircleHelp size={17} /><span>Help & feedback</span></button>
-        <div className="sidebar-footer"><div className="avatar">{user.name.slice(0, 1).toUpperCase()}</div><div className="footer-profile"><b>{user.name}</b><small>{user.email}</small></div><button className="icon-button tiny" onClick={() => setProfileOpen(!profileOpen)} aria-label="Open profile menu"><MoreHorizontal size={18} /></button>
-          {profileOpen && <div className="profile-menu"><div className="profile-menu-title">{user.email}</div><button onClick={() => { setProfileOpen(false); setModal("settings"); }}><Settings2 size={15} /> Preferences</button><button onClick={() => { void signOut(); }}><LogOut size={15} /> Sign out</button></div>}
-        </div>
+        <div className="sidebar-footer"><div className="avatar">{user.name.slice(0, 1).toUpperCase()}</div><div className="footer-profile"><b>{user.name}</b><small>{user.email}</small></div></div>
       </aside>
 
       <main className="main-panel">
         <header className="topbar">
           <div className="breadcrumbs"><span>Workspace</span><span className="crumb-sep">/</span><b>{activeTab}</b></div>
-          <div className="topbar-actions"><div className={`api-pill ${apiStatus}`}><span className="status-dot" />{apiStatus === "online" ? "API operational" : apiStatus === "checking" ? "Checking API" : "API offline"}</div><button className="icon-button" aria-label="Notifications" onClick={() => flash("You're all caught up.")}><Bell size={17} /><i /></button><button className="avatar top-avatar" onClick={() => setProfileOpen(!profileOpen)} aria-label="Account menu">{user.name.slice(0, 1).toUpperCase()}</button></div>
+          <div className="topbar-actions"><div className={`api-pill ${apiStatus}`}><span className="status-dot" />{apiStatus === "online" ? "API operational" : apiStatus === "checking" ? "Checking API" : "API offline"}</div><button className="icon-button" aria-label="Notifications" onClick={() => flash("You're all caught up.")}><Bell size={17} /><i /></button><div className="account-menu-anchor"><button className="avatar top-avatar" onClick={() => setProfileOpen(!profileOpen)} aria-label="Account menu" aria-haspopup="menu" aria-expanded={profileOpen}>{user.name.slice(0, 1).toUpperCase()}</button>{profileOpen && <div className="profile-menu account-dropdown" role="menu"><div className="account-dropdown-heading"><div className="avatar">{user.name.slice(0, 1).toUpperCase()}</div><span><b>{user.name}</b><small>{user.email}</small></span></div><div className="profile-menu-title">ACCOUNT</div><button role="menuitem" onClick={() => { setProfileOpen(false); setModal("settings"); }}><Settings2 size={15} /> Preferences</button><button role="menuitem" onClick={() => { void signOut(); }}><LogOut size={15} /> Sign out</button></div>}</div></div>
         </header>
 
         <div className="page-content">
