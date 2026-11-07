@@ -6,7 +6,7 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AssemblyName>RiftPulse.Pcvr</AssemblyName>
     <RootNamespace>RiftPulse.Pcvr</RootNamespace>
-    <Version>0.1.15</Version>
+    <Version>0.1.16</Version>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Plugin.cs" />

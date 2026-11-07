@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$version = '0.1.15'
+$version = '0.1.16'
 $project = Join-Path $root 'mods\pcvr\RiftPulse.Pcvr.csproj'
 $manifestPath = Join-Path $root 'mods\pcvr\manifest.json'
 $built = Join-Path $root 'mods\pcvr\bin\Release\net472\RiftPulse.Pcvr.dll'
@@ -14,7 +14,9 @@ if ($LASTEXITCODE -ne 0) { throw 'PCVR build failed.' }
 $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
 if ($manifest.version -ne $version) { throw "Manifest version $($manifest.version) does not match $version." }
 Copy-Item $built (Join-Path $downloads 'RiftPulse.Pcvr.dll') -Force
-Copy-Item $manifestPath (Join-Path $downloads 'RiftPulse.Pcvr.manifest.json') -Force
+
+# BSIPA requires the plugin manifest as an embedded DLL resource. Do not ship
+# a second loose manifest: it can be installed into Plugins and shadow the DLL.
 $assembly = [Reflection.Assembly]::LoadFile($built)
 $resources = @($assembly.GetManifestResourceNames())
 if (-not ($resources -contains 'RiftPulse.Pcvr.manifest.json')) {
@@ -24,11 +26,11 @@ if (-not ($resources -contains 'RiftPulse.Pcvr.pairing.bsml')) {
     throw "Embedded pairing BSML missing. Found: $($resources -join ', ')"
 }
 
-# Build a clean archive: package manifest at the root, DLL under Plugins, and README.
+# The ZIP mirrors the Beat Saber game root. It contains only the plugin DLL
+# under Plugins and its README; there is intentionally no loose manifest.json.
 $stage = Join-Path $root "dist\pcvr-package-$version"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Path (Join-Path $stage 'Plugins') -Force | Out-Null
-Copy-Item $manifestPath (Join-Path $stage 'manifest.json') -Force
 Copy-Item $built (Join-Path $stage 'Plugins\RiftPulse.Pcvr.dll') -Force
 Copy-Item (Join-Path $downloads 'PCVR-README.txt') (Join-Path $stage 'README.txt') -Force
 
@@ -40,13 +42,20 @@ foreach ($zip in @($versionedZip, $stableZip)) {
 Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $versionedZip -CompressionLevel Optimal
 Copy-Item $versionedZip $stableZip -Force
 
-# Retire stale sidecar manifests that duplicate the manifest embedded in the DLL.
-foreach ($name in @('RiftPulse.Pcvr.manifest', 'RiftPulse.Pcvr.manifest.json')) {
+# Move aside only old RiftPulse manifests. Leave unrelated files untouched.
+foreach ($name in @('manifest.json', 'RiftPulse.Pcvr.manifest', 'RiftPulse.Pcvr.manifest.json')) {
     $sidecar = Join-Path $install $name
     if (Test-Path $sidecar) {
-        $backup = "$sidecar.disabled-backup-$version"
-        if (Test-Path $backup) { Remove-Item $backup -Force }
-        Move-Item $sidecar $backup -Force
+        $belongsToRiftPulse = $false
+        try {
+            $candidate = Get-Content $sidecar -Raw | ConvertFrom-Json
+            $belongsToRiftPulse = $candidate.id -eq 'RiftPulse.Pcvr'
+        } catch { }
+        if ($belongsToRiftPulse) {
+            $backup = "$sidecar.disabled-backup-$version"
+            if (Test-Path $backup) { Remove-Item $backup -Force }
+            Move-Item $sidecar $backup -Force
+        }
     }
 }
 
@@ -60,12 +69,14 @@ $builtHash = (Get-FileHash $built -Algorithm SHA256).Hash
 $installedHash = (Get-FileHash $installedDll -Algorithm SHA256).Hash
 if ($builtHash -ne $installedHash) { throw 'Installed DLL hash differs from build output.' }
 
-# Verify the archive structure and ensure it does not contain a Plugins sidecar manifest.
+# Verify archive structure and reject all external manifest files.
 $entries = @(& tar -tf $versionedZip)
 if ($LASTEXITCODE -ne 0) { throw 'Could not inspect PCVR ZIP.' }
-if ($entries -notcontains 'manifest.json') { throw 'ZIP root manifest missing.' }
 if ($entries -notcontains 'Plugins/RiftPulse.Pcvr.dll') { throw 'ZIP Plugins DLL missing.' }
-if ($entries -contains 'Plugins/RiftPulse.Pcvr.manifest') { throw 'ZIP contains duplicate Plugins manifest.' }
+if ($entries -notcontains 'README.txt') { throw 'ZIP README missing.' }
+if ($entries | Where-Object { $_ -match '(^|/)manifest\.json$|RiftPulse\.Pcvr\.manifest' }) {
+    throw 'ZIP contains a loose manifest; BSIPA manifest must remain embedded in the DLL.'
+}
 
 Write-Output "PCVR $version build, package, and install verified."
 Write-Output "DLL SHA256: $builtHash"

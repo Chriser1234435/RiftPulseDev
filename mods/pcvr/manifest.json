@@ -3,7 +3,7 @@
     "id":  "RiftPulse.Pcvr",
     "name":  "RiftPulse",
     "author":  "RiftPulse Team",
-    "version":  "0.1.15",
+    "version":  "0.1.16",
     "gameVersion":  "1.40.8",
     "description":  [
                         "RiftPulse PCVR adapter for Beat Saber.",
