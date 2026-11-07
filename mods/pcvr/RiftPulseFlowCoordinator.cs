@@ -17,12 +17,12 @@ namespace RiftPulse.Pcvr
     {
         private const string ApiBase = "https://app.riftpulse.me/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.1.14";
+        private const string ModVersion = "0.1.15";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 
         [UIValue("pairing-code")]
-        public string PairingCode { get; private set; } = "â€” â€” â€” â€” â€”";
+        public string PairingCode { get; private set; } = "— — — — —";
 
         [UIValue("status-text")]
         public string StatusText { get; private set; } = "Connect your Beat Saber installation to your RiftPulse account.";
@@ -174,8 +174,8 @@ namespace RiftPulse.Pcvr
         {
             if (_connecting) return;
             _connecting = true;
-            PairingCode = "â€” â€” â€” â€” â€”";
-            StatusText = "Generating a secure pairing codeâ€¦";
+            PairingCode = "— — — — —";
+            StatusText = "Generating a secure pairing code…";
             NotifyPropertyChanged(nameof(PairingCode));
             NotifyPropertyChanged(nameof(StatusText));
 
@@ -185,7 +185,7 @@ namespace RiftPulse.Pcvr
                 var deviceId = LoadOrCreateDeviceId();
                 var deviceCredential = LoadOrCreateDeviceCredential();
                 PairingCode = code;
-                StatusText = "Registering code with RiftPulseâ€¦";
+                StatusText = "Registering code with RiftPulse…";
                 NotifyPropertyChanged(nameof(PairingCode));
                 NotifyPropertyChanged(nameof(StatusText));
 
@@ -253,7 +253,7 @@ namespace RiftPulse.Pcvr
                     var status = statusMatch.Groups[1].Value;
                     if (status == "claimed")
                     {
-                        StatusText = "âœ“ RiftPulse account linked! Device pairing succeeded.";
+                        StatusText = "✓ RiftPulse account linked! Device pairing succeeded.";
                         NotifyPropertyChanged(nameof(StatusText));
                         await LoadAccountModuleSettings();
                         return;

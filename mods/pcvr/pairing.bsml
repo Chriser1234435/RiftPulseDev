@@ -10,7 +10,7 @@
         <button text="GENERATE PAIRING CODE" on-click="connect-click"/>
       </vertical>
     </horizontal>
-    <text text="Enter the 5-digit code on the RiftPulse development website to link this installation." font-size="3.2" align="Center"/>
+    <text text="Enter the 5-digit code on the RiftPulse website to link this installation." font-size="3.2" align="Center"/>
     <text text="MODULE PREVIEW" font-size="5" align="Center"/>
     <horizontal bg="round-rect-panel" pad-left="4" pad-right="4" pad-top="3" pad-bottom="3">
       <vertical spacing="2">

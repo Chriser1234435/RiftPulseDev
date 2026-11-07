@@ -1,5 +1,5 @@
-# RiftPulse PCVR alpha adapter 0.1.14
+# RiftPulse PCVR alpha adapter 0.1.15
 
 PCVR pairing and dashboard UI prototype for Beat Saber 1.40.8. Generates and registers a five-digit pairing code against the RiftPulse production API at https://app.riftpulse.me; device credential is Windows DPAPI protected. Includes Chat and BSR preference switches that sync to the paired account; they do not activate the streaming services yet. Live provider chat/events, combined viewer counts, configurable ChatIntegrations command execution, and BSR song-request fulfillment remain unfinished. In-game runtime visual/load validation is pending.
 
-Build with `dotnet build RiftPulse.Pcvr.csproj -c Release`. References are pinned to Beat Saber 1.40.8 / BSML.
+The 0.1.15 plugin uses BSIPA enable/disable lifecycle hooks, waits for BSML main-menu initialization before registering the RiftPulse Mods-panel button, and logs registration or menu-open failures. Build and package/install with `powershell -ExecutionPolicy Bypass -File build-release.ps1`; compile only with `dotnet build RiftPulse.Pcvr.csproj -c Release`. The release script validates embedded resources, package layout, installed DLL hash, and removes stale sidecar manifests that otherwise cause duplicate plugin metadata. References are pinned to Beat Saber 1.40.8 / BSML. The actual in-game visual/menu test still needs a launch of Beat Saber.

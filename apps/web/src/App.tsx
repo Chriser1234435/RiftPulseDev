@@ -808,10 +808,10 @@ function App() {
           </section>
 
           <section className="section-block downloads-block" id="downloads">
-            <div className="section-heading"><div><div className="section-overline">ALPHA TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Alpha packages for Beat Saber 1.40.8. Quest v0.1.26 fixes stuck HTTPS request locks and restores pending or claimed pairing sessions after restarts. Headset runtime validation is still required.</p></div><span className="settings-badge">PCVR v0.1.14 · Quest v0.1.26</span></div>
+            <div className="section-heading"><div><div className="section-overline">ALPHA TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Alpha packages for Beat Saber 1.40.8. Quest v0.1.26 fixes stuck HTTPS request locks and restores pending or claimed pairing sessions after restarts. Headset runtime validation is still required.</p></div><span className="settings-badge">PCVR v0.1.15 · Quest v0.1.26</span></div>
             <div className="downloads-grid">
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR · BSIPA</b><small>Windows / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.14 · DLL built</span></div>
+                <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR · BSIPA</b><small>Windows / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.15 · DLL built</span></div>
                 <p>Install the PCVR DLL into your test instance's Plugins folder. The in-game pairing challenge flow is wired; realtime Chat and BSR are not implemented yet.</p>
                 <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr.zip" download><Download size={15} /> Download PCVR ZIP</a>
               </article>
