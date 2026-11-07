@@ -466,3 +466,15 @@ Date: 2026-11-04
 - Deployments: Cloudflare development Worker `riftpulse-dev` deployed successfully, Version ID `6c8feb72-6c99-4bea-a704-f6807beea8a4`; Railway development API deployment `81018f6f-5ba6-469e-9c1d-621c37e2b9fd` reached SUCCESS and its `/api/v1/health` healthcheck passed; TikTok connector deployment `15b14f22-2031-45a1-a3f9-5c9ffc42f0f3` also reached SUCCESS from the same repository commit.
 - Smoke checks: development homepage returned HTTP 200 and served the updated JS/CSS bundle; `/api/v1/health` returned HTTP 200; unauthenticated `/api/v1/updates` returned the expected HTTP 401 `authentication_required`, confirming the endpoint is deployed and protected. The first Website release note was inserted and read back from D1 successfully.
 - Scope: deployed to the development Worker and Railway development environment only. Production `app.riftpulse.me` was not deployed. Signed-in browser rendering and per-account Mark all read interaction remain user-session verification items.
+
+
+## Twitch OAuth callback redirect fix — development Worker (November 7, 2026)
+
+- Root cause: the Cloudflare /api/* proxy inherited the incoming request's default redirect mode (follow). When the Railway OAuth callback returned a 302 to the dashboard with provider and status query parameters, the Worker followed that redirect internally. The browser never received the redirect and the dashboard could not process the callback result.
+- Changed the proxy to use redirect: manual, preserving the upstream 302 and Location header for the browser.
+- Added regression test: Railway API proxy preserves OAuth callback redirects for the browser.
+- Validation: npm test passed — TypeScript check, 53 unit/contract tests, isolated SQLite migration test, and Vite Worker/client build. git diff --check passed.
+- Development deployment: Cloudflare Worker riftpulse-dev, Version ID f8be7aa7-cc96-44f2-be65-927b8fa74051.
+- Public verification: the dev callback endpoint returned HTTP 302 with the provider/status redirect in its Location header; the dev API health endpoint returned HTTP 200. The callback smoke test intentionally omitted OAuth state/code, so status=failed was expected and no account was connected.
+- Published the website release note to the development D1 release history.
+- Production riftpulse / app.riftpulse.me was not deployed. Production deployment requires explicit authorization.

@@ -135,6 +135,31 @@ test("redirects insecure RiftPulse browser origins to HTTPS before auth or asset
   assert.equal(aliasResponse.headers.get("location"), "https://riftpulse.me/");
 });
 
+test("Railway API proxy preserves OAuth callback redirects for the browser", async () => {
+  const bindings: Env = { ...env(), RAILWAY_API_URL: "https://riftpulse-api.test" };
+  const originalFetch = globalThis.fetch;
+  let observedRedirect: RequestRedirect | null = null;
+  const expectedLocation = "https://app.riftpulse.me/?provider=twitch&status=connected";
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const upstreamRequest = input instanceof Request ? input : new Request(input, init);
+    observedRedirect = upstreamRequest.redirect;
+    assert.equal(upstreamRequest.url, "https://riftpulse-api.test/api/v1/providers/twitch/callback?code=example");
+    return new Response(null, { status: 302, headers: { location: expectedLocation } });
+  };
+
+  try {
+    const response = await worker.fetch(new Request(
+      "https://app.riftpulse.me/api/v1/providers/twitch/callback?code=example",
+    ), bindings);
+    assert.equal(observedRedirect, "manual");
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get("location"), expectedLocation);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Quest can register a pairing challenge without a Unity upload handler or URL secrets", async () => {
   const bindings = env();
   const deviceId = "550e8400-e29b-41d4-a716-446655440000";

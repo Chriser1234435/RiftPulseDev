@@ -208,7 +208,10 @@ export default {
         const init: RequestInit & { duplex?: "half" } = {
           method: request.method,
           headers,
-          redirect: request.redirect,
+          // OAuth callback routes return a browser-facing 302 to the app root.
+          // Do not follow it inside the Worker proxy or the SPA will never receive
+          // the provider/status query parameters needed to refresh connection state.
+          redirect: "manual",
           signal: request.signal,
         };
         if (request.method !== "GET" && request.method !== "HEAD") {
