@@ -1,12 +1,12 @@
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$version = '0.1.16'
+$version = '0.1.17'
 $project = Join-Path $root 'mods\pcvr\RiftPulse.Pcvr.csproj'
 $manifestPath = Join-Path $root 'mods\pcvr\manifest.json'
 $built = Join-Path $root 'mods\pcvr\bin\Release\net472\RiftPulse.Pcvr.dll'
 $downloads = Join-Path $root 'public\downloads'
 # Remove obsolete loose metadata and packages that can cause duplicate manifest discovery.
-foreach ($legacyFile in @('manifest.json', 'RiftPulse.Pcvr.manifest.json', 'RiftPulse.Pcvr-0.1.14.zip', 'RiftPulse.Pcvr-0.1.15.zip')) {
+foreach ($legacyFile in @('manifest.json', 'RiftPulse.Pcvr.manifest.json', 'RiftPulse.Pcvr-0.1.14.zip', 'RiftPulse.Pcvr-0.1.15.zip', 'RiftPulse.Pcvr-0.1.16.zip')) {
     $legacyPath = Join-Path $downloads $legacyFile
     if (Test-Path $legacyPath) { Remove-Item $legacyPath -Force }
 }
@@ -18,6 +18,31 @@ if ($LASTEXITCODE -ne 0) { throw 'PCVR build failed.' }
 
 $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
 if ($manifest.version -ne $version) { throw "Manifest version $($manifest.version) does not match $version." }
+
+# Validate BSML component/action IDs against the controller before publishing.
+$bsmlPath = Join-Path $root 'mods\pcvr\pairing.bsml'
+$controllerPath = Join-Path $root 'mods\pcvr\RiftPulseFlowCoordinator.cs'
+$bsmlText = Get-Content $bsmlPath -Raw
+$controllerText = Get-Content $controllerPath -Raw
+foreach ($componentId in @('pairingCodeText', 'statusText', 'connectButton', 'chatToggleButton', 'bsrToggleButton', 'modulePreviewStatus')) {
+    if ($bsmlText -notmatch ('id="' + [regex]::Escape($componentId) + '"')) {
+        throw "BSML component ID missing: $componentId"
+    }
+    if ($controllerText -notmatch ('UIComponent\("' + [regex]::Escape($componentId) + '"\)')) {
+        throw "Controller has no UIComponent binding for: $componentId"
+    }
+}
+foreach ($actionId in @('connect-click', 'toggle-chat', 'toggle-bsr')) {
+    if ($bsmlText -notmatch ('on-click="' + [regex]::Escape($actionId) + '"')) {
+        throw "BSML click action missing: $actionId"
+    }
+    if ($controllerText -notmatch ('UIAction\("' + [regex]::Escape($actionId) + '"\)')) {
+        throw "Controller has no UIAction for: $actionId"
+    }
+}
+if ($bsmlText -match '\{(pairing-code|status-text|chat-toggle-label|bsr-toggle-label|module-preview-status)\}') {
+    throw 'BSML contains unsupported property interpolation placeholders.'
+}
 Copy-Item $built (Join-Path $downloads 'RiftPulse.Pcvr.dll') -Force
 
 # BSIPA requires the plugin manifest as an embedded DLL resource. Do not ship

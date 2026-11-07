@@ -6,7 +6,7 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AssemblyName>RiftPulse.Pcvr</AssemblyName>
     <RootNamespace>RiftPulse.Pcvr</RootNamespace>
-    <Version>0.1.16</Version>
+    <Version>0.1.17</Version>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Plugin.cs" />
@@ -44,6 +44,14 @@
     </Reference>
     <Reference Include="System.Net.Http">
       <HintPath>C:\Users\chris\BSManager\BSInstances\1.40.8\Beat Saber_Data\Managed\System.Net.Http.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.TextMeshPro">
+      <HintPath>C:\Users\chris\BSManager\BSInstances\1.40.8\Beat Saber_Data\Managed\Unity.TextMeshPro.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>C:\Users\chris\BSManager\BSInstances\1.40.8\Beat Saber_Data\Managed\UnityEngine.UI.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.CoreModule">

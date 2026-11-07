@@ -5,6 +5,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using TMPro;
+using UnityEngine.UI;
 using BeatSaberMarkupLanguage;
 using BeatSaberMarkupLanguage.Attributes;
 using BeatSaberMarkupLanguage.ViewControllers;
@@ -17,24 +19,66 @@ namespace RiftPulse.Pcvr
     {
         private const string ApiBase = "https://app.riftpulse.me/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.1.16";
+        private const string ModVersion = "0.1.17";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 
-        [UIValue("pairing-code")]
-        public string PairingCode { get; private set; } = "— — — — —";
-
-        [UIValue("status-text")]
+        public string PairingCode { get; private set; } = "-----";
         public string StatusText { get; private set; } = "Connect your Beat Saber installation to your RiftPulse account.";
-
-        [UIValue("chat-toggle-label")]
         public string ChatToggleLabel { get; private set; } = "CHAT MODULE: OFF (UI PREVIEW)";
-
-        [UIValue("bsr-toggle-label")]
         public string BsrToggleLabel { get; private set; } = "BSR MODULE: OFF (UI PREVIEW)";
-
-        [UIValue("module-preview-status")]
         public string ModulePreviewStatus { get; private set; } = "These prototype switches are local UI state only; they do not activate services or save settings.";
+
+        // BSML does not interpolate {property} placeholders in ordinary text/button
+        // attributes. Bind concrete components and update their text after parsing.
+        [UIComponent("pairingCodeText")]
+        private TextMeshProUGUI _pairingCodeText = null!;
+
+        [UIComponent("statusText")]
+        private TextMeshProUGUI _statusText = null!;
+
+        [UIComponent("connectButton")]
+        private Button _connectButton = null!;
+
+        [UIComponent("chatToggleButton")]
+        private Button _chatToggleButton = null!;
+
+        [UIComponent("bsrToggleButton")]
+        private Button _bsrToggleButton = null!;
+
+        [UIComponent("modulePreviewStatus")]
+        private TextMeshProUGUI _modulePreviewStatus = null!;
+
+        private TextMeshProUGUI? _chatToggleButtonText;
+        private TextMeshProUGUI? _bsrToggleButtonText;
+
+        [UIAction("#post-parse")]
+        public void OnPostParse()
+        {
+            _chatToggleButtonText = _chatToggleButton != null
+                ? _chatToggleButton.GetComponentInChildren<TextMeshProUGUI>()
+                : null;
+            _bsrToggleButtonText = _bsrToggleButton != null
+                ? _bsrToggleButton.GetComponentInChildren<TextMeshProUGUI>()
+                : null;
+
+            if (_connectButton == null || _pairingCodeText == null || _statusText == null ||
+                _chatToggleButtonText == null || _bsrToggleButtonText == null || _modulePreviewStatus == null)
+            {
+                StatusText = "A RiftPulse menu control could not initialize. Reinstall the PCVR package and check the BSML dependency.";
+            }
+
+            RefreshUi();
+        }
+
+        private void RefreshUi()
+        {
+            if (_pairingCodeText != null) _pairingCodeText.text = PairingCode;
+            if (_statusText != null) _statusText.text = StatusText;
+            if (_chatToggleButtonText != null) _chatToggleButtonText.text = ChatToggleLabel;
+            if (_bsrToggleButtonText != null) _bsrToggleButtonText.text = BsrToggleLabel;
+            if (_modulePreviewStatus != null) _modulePreviewStatus.text = ModulePreviewStatus;
+        }
 
         private bool _chatPreviewEnabled;
         private bool _bsrPreviewEnabled;
@@ -75,17 +119,17 @@ namespace RiftPulse.Pcvr
             {
                 File.WriteAllLines(SettingsPath, new[] { _chatPreviewEnabled ? "1" : "0", _bsrPreviewEnabled ? "1" : "0" });
                 ModulePreviewStatus = "Module switches are saved locally. They are still UI previews and do not activate services or sync to the website.";
-                NotifyPropertyChanged(nameof(ModulePreviewStatus));
+                RefreshUi();
             }
             catch (IOException)
             {
                 ModulePreviewStatus = "Could not save preview switches locally. Check RiftPulse folder permissions.";
-                NotifyPropertyChanged(nameof(ModulePreviewStatus));
+                RefreshUi();
             }
             catch (UnauthorizedAccessException)
             {
                 ModulePreviewStatus = "Could not save preview switches locally. Check RiftPulse folder permissions.";
-                NotifyPropertyChanged(nameof(ModulePreviewStatus));
+                RefreshUi();
             }
         }
 
@@ -94,7 +138,7 @@ namespace RiftPulse.Pcvr
         {
             _chatPreviewEnabled = !_chatPreviewEnabled;
             ChatToggleLabel = _chatPreviewEnabled ? "CHAT MODULE: ON (SYNCING)" : "CHAT MODULE: OFF (SYNCING)";
-            NotifyPropertyChanged(nameof(ChatToggleLabel));
+            RefreshUi();
             await SaveModuleSetting("chat", _chatPreviewEnabled);
         }
 
@@ -103,7 +147,7 @@ namespace RiftPulse.Pcvr
         {
             _bsrPreviewEnabled = !_bsrPreviewEnabled;
             BsrToggleLabel = _bsrPreviewEnabled ? "BSR MODULE: ON (SYNCING)" : "BSR MODULE: OFF (SYNCING)";
-            NotifyPropertyChanged(nameof(BsrToggleLabel));
+            RefreshUi();
             await SaveModuleSetting("bsr-song-request", _bsrPreviewEnabled);
         }
 
@@ -122,7 +166,7 @@ namespace RiftPulse.Pcvr
                         if (!response.IsSuccessStatusCode)
                         {
                             ModulePreviewStatus = "Settings sync failed (HTTP " + (int)response.StatusCode + "). Link this device to your account first.";
-                            NotifyPropertyChanged(nameof(ModulePreviewStatus));
+                            RefreshUi();
                             return;
                         }
                     }
@@ -130,14 +174,12 @@ namespace RiftPulse.Pcvr
                 ChatToggleLabel = _chatPreviewEnabled ? "CHAT MODULE: ON (ACCOUNT SYNCED)" : "CHAT MODULE: OFF (ACCOUNT SYNCED)";
                 BsrToggleLabel = _bsrPreviewEnabled ? "BSR MODULE: ON (ACCOUNT SYNCED)" : "BSR MODULE: OFF (ACCOUNT SYNCED)";
                 ModulePreviewStatus = "Module settings saved to your RiftPulse account. Service activation and configuration are separate steps.";
-                NotifyPropertyChanged(nameof(ChatToggleLabel));
-                NotifyPropertyChanged(nameof(BsrToggleLabel));
-                NotifyPropertyChanged(nameof(ModulePreviewStatus));
+                RefreshUi();
             }
             catch (Exception)
             {
                 ModulePreviewStatus = "Could not sync module settings. Check connection and confirm this installation is paired.";
-                NotifyPropertyChanged(nameof(ModulePreviewStatus));
+                RefreshUi();
             }
         }
 
@@ -160,9 +202,7 @@ namespace RiftPulse.Pcvr
                         ChatToggleLabel = _chatPreviewEnabled ? "CHAT MODULE: ON (ACCOUNT SYNCED)" : "CHAT MODULE: OFF (ACCOUNT SYNCED)";
                         BsrToggleLabel = _bsrPreviewEnabled ? "BSR MODULE: ON (ACCOUNT SYNCED)" : "BSR MODULE: OFF (ACCOUNT SYNCED)";
                         ModulePreviewStatus = "Loaded module settings from your RiftPulse account. Services are not activated by these switches yet.";
-                        NotifyPropertyChanged(nameof(ChatToggleLabel));
-                        NotifyPropertyChanged(nameof(BsrToggleLabel));
-                        NotifyPropertyChanged(nameof(ModulePreviewStatus));
+                        RefreshUi();
                     }
                 }
             }
@@ -176,8 +216,7 @@ namespace RiftPulse.Pcvr
             _connecting = true;
             PairingCode = "— — — — —";
             StatusText = "Generating a secure pairing code…";
-            NotifyPropertyChanged(nameof(PairingCode));
-            NotifyPropertyChanged(nameof(StatusText));
+            RefreshUi();
 
             try
             {
@@ -186,8 +225,7 @@ namespace RiftPulse.Pcvr
                 var deviceCredential = LoadOrCreateDeviceCredential();
                 PairingCode = code;
                 StatusText = "Registering code with RiftPulse…";
-                NotifyPropertyChanged(nameof(PairingCode));
-                NotifyPropertyChanged(nameof(StatusText));
+                RefreshUi();
 
                 var body = "{\"code\":\"" + code + "\",\"deviceCredential\":\"" + deviceCredential + "\",\"deviceId\":\"" + deviceId +
                     "\",\"platform\":\"pcvr\",\"gameVersion\":\"" + GameVersion +
@@ -200,7 +238,7 @@ namespace RiftPulse.Pcvr
                         if (!response.IsSuccessStatusCode)
                         {
                             StatusText = "Could not register the code (HTTP " + (int)response.StatusCode + "). Try again.";
-                            NotifyPropertyChanged(nameof(StatusText));
+                            RefreshUi();
                             return;
                         }
                         var responseText = await response.Content.ReadAsStringAsync();
@@ -208,7 +246,7 @@ namespace RiftPulse.Pcvr
                         if (!match.Success)
                         {
                             StatusText = "RiftPulse returned an invalid pairing response. Try again.";
-                            NotifyPropertyChanged(nameof(StatusText));
+                            RefreshUi();
                             return;
                         }
                         await PollPairingStatus(match.Groups[1].Value);
@@ -218,12 +256,12 @@ namespace RiftPulse.Pcvr
             catch (TaskCanceledException)
             {
                 StatusText = "RiftPulse request timed out. Check your connection and try again.";
-                NotifyPropertyChanged(nameof(StatusText));
+                RefreshUi();
             }
             catch (Exception)
             {
                 StatusText = "Could not reach RiftPulse. Check your connection and try again.";
-                NotifyPropertyChanged(nameof(StatusText));
+                RefreshUi();
             }
             finally
             {
@@ -234,7 +272,7 @@ namespace RiftPulse.Pcvr
         private async Task PollPairingStatus(string challengeId)
         {
             StatusText = "Code registered. Enter it on the RiftPulse website to link this installation.";
-            NotifyPropertyChanged(nameof(StatusText));
+            RefreshUi();
             var expiresAt = DateTime.UtcNow.AddMinutes(5);
             while (DateTime.UtcNow < expiresAt)
             {
@@ -244,7 +282,7 @@ namespace RiftPulse.Pcvr
                     if (!response.IsSuccessStatusCode)
                     {
                         StatusText = "Pairing status could not be checked (HTTP " + (int)response.StatusCode + ").";
-                        NotifyPropertyChanged(nameof(StatusText));
+                        RefreshUi();
                         return;
                     }
                     var payload = await response.Content.ReadAsStringAsync();
@@ -253,21 +291,21 @@ namespace RiftPulse.Pcvr
                     var status = statusMatch.Groups[1].Value;
                     if (status == "claimed")
                     {
-                        StatusText = "✓ RiftPulse account linked! Device pairing succeeded.";
-                        NotifyPropertyChanged(nameof(StatusText));
+                        StatusText = "RiftPulse account linked! Device pairing succeeded.";
+                        RefreshUi();
                         await LoadAccountModuleSettings();
                         return;
                     }
                     if (status == "expired" || status == "revoked")
                     {
                         StatusText = "This pairing code expired. Press Generate Pairing Code to generate another.";
-                        NotifyPropertyChanged(nameof(StatusText));
+                        RefreshUi();
                         return;
                     }
                 }
             }
             StatusText = "Pairing timed out. Press Generate Pairing Code to try again.";
-            NotifyPropertyChanged(nameof(StatusText));
+            RefreshUi();
         }
 
         private static string LoadOrCreateDeviceId()
