@@ -19,7 +19,7 @@ namespace RiftPulse.Pcvr
     {
         private const string ApiBase = "https://app.riftpulse.me/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.1.17";
+        private const string ModVersion = "0.1.18";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 
@@ -27,7 +27,7 @@ namespace RiftPulse.Pcvr
         public string StatusText { get; private set; } = "Connect your Beat Saber installation to your RiftPulse account.";
         public string ChatToggleLabel { get; private set; } = "CHAT MODULE: OFF (UI PREVIEW)";
         public string BsrToggleLabel { get; private set; } = "BSR MODULE: OFF (UI PREVIEW)";
-        public string ModulePreviewStatus { get; private set; } = "These prototype switches are local UI state only; they do not activate services or save settings.";
+        public string ModulePreviewStatus { get; private set; } = "Pair this installation to sync its module settings.";
 
         // BSML does not interpolate {property} placeholders in ordinary text/button
         // attributes. Bind concrete components and update their text after parsing.
@@ -49,12 +49,16 @@ namespace RiftPulse.Pcvr
         [UIComponent("modulePreviewStatus")]
         private TextMeshProUGUI _modulePreviewStatus = null!;
 
+        private TextMeshProUGUI? _connectButtonText;
         private TextMeshProUGUI? _chatToggleButtonText;
         private TextMeshProUGUI? _bsrToggleButtonText;
 
         [UIAction("#post-parse")]
         public void OnPostParse()
         {
+            _connectButtonText = _connectButton != null
+                ? _connectButton.GetComponentInChildren<TextMeshProUGUI>()
+                : null;
             _chatToggleButtonText = _chatToggleButton != null
                 ? _chatToggleButton.GetComponentInChildren<TextMeshProUGUI>()
                 : null;
@@ -63,23 +67,26 @@ namespace RiftPulse.Pcvr
                 : null;
 
             if (_connectButton == null || _pairingCodeText == null || _statusText == null ||
-                _chatToggleButtonText == null || _bsrToggleButtonText == null || _modulePreviewStatus == null)
+                _connectButtonText == null || _chatToggleButtonText == null || _bsrToggleButtonText == null || _modulePreviewStatus == null)
             {
                 StatusText = "A RiftPulse menu control could not initialize. Reinstall the PCVR package and check the BSML dependency.";
             }
 
             RefreshUi();
+            _ = LoadAccountModuleSettings();
         }
 
         private void RefreshUi()
         {
             if (_pairingCodeText != null) _pairingCodeText.text = PairingCode;
+            if (_connectButtonText != null) _connectButtonText.text = _connecting ? "GENERATING CODE..." : "GENERATE PAIRING CODE";
             if (_statusText != null) _statusText.text = StatusText;
             if (_chatToggleButtonText != null) _chatToggleButtonText.text = ChatToggleLabel;
             if (_bsrToggleButtonText != null) _bsrToggleButtonText.text = BsrToggleLabel;
             if (_modulePreviewStatus != null) _modulePreviewStatus.text = ModulePreviewStatus;
         }
 
+        private bool _hasPairedThisSession;
         private bool _chatPreviewEnabled;
         private bool _bsrPreviewEnabled;
 
@@ -136,6 +143,12 @@ namespace RiftPulse.Pcvr
         [UIAction("toggle-chat")]
         public async void ToggleChatPreview()
         {
+            if (!_hasPairedThisSession)
+            {
+                ModulePreviewStatus = "Pair this installation using Generate Pairing Code before changing account settings.";
+                RefreshUi();
+                return;
+            }
             _chatPreviewEnabled = !_chatPreviewEnabled;
             ChatToggleLabel = _chatPreviewEnabled ? "CHAT MODULE: ON (SYNCING)" : "CHAT MODULE: OFF (SYNCING)";
             RefreshUi();
@@ -145,6 +158,12 @@ namespace RiftPulse.Pcvr
         [UIAction("toggle-bsr")]
         public async void ToggleBsrPreview()
         {
+            if (!_hasPairedThisSession)
+            {
+                ModulePreviewStatus = "Pair this installation using Generate Pairing Code before changing account settings.";
+                RefreshUi();
+                return;
+            }
             _bsrPreviewEnabled = !_bsrPreviewEnabled;
             BsrToggleLabel = _bsrPreviewEnabled ? "BSR MODULE: ON (SYNCING)" : "BSR MODULE: OFF (SYNCING)";
             RefreshUi();
@@ -193,7 +212,14 @@ namespace RiftPulse.Pcvr
                     request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", credential);
                     using (var response = await Http.SendAsync(request))
                     {
-                        if (!response.IsSuccessStatusCode) return;
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            _hasPairedThisSession = false;
+                            ModulePreviewStatus = "Pair this installation before syncing module settings.";
+                            RefreshUi();
+                            return;
+                        }
+                        _hasPairedThisSession = true;
                         var payload = await response.Content.ReadAsStringAsync();
                         var chatMatch = Regex.Match(payload, "\\\"chat\\\"\\s*:\\s*\\{[^}]*\\\"enabled\\\"\\s*:\\s*(true|false)", RegexOptions.Singleline);
                         var bsrMatch = Regex.Match(payload, "\\\"bsr-song-request\\\"\\s*:\\s*\\{[^}]*\\\"enabled\\\"\\s*:\\s*(true|false)", RegexOptions.Singleline);
@@ -291,6 +317,7 @@ namespace RiftPulse.Pcvr
                     var status = statusMatch.Groups[1].Value;
                     if (status == "claimed")
                     {
+                        _hasPairedThisSession = true;
                         StatusText = "RiftPulse account linked! Device pairing succeeded.";
                         RefreshUi();
                         await LoadAccountModuleSettings();
