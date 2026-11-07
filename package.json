@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && npm run test:contracts && npm run test:db-schema && npm run build",
     "db:migrate:local": "wrangler d1 migrations apply DB --local --config wrangler.jsonc",
-    "db:migrations:local": "wrangler d1 migrations list DB --local --config wrangler.jsonc"
+    "db:migrations:local": "wrangler d1 migrations list DB --local --config wrangler.jsonc",
+    "release:update": "node scripts/publish-update.mjs"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.66.0",

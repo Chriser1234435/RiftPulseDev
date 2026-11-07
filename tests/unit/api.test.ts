@@ -112,6 +112,19 @@ test("health and version routes identify the V1 API and only the two V1 modules"
   assert.deepEqual((await version.json()).modules, ["chat", "bsr-song-request"]);
 });
 
+test("release update history and read-state routes require an authenticated account", async () => {
+  const listing = await call("/api/v1/updates");
+  assert.equal(listing.status, 503);
+  assert.equal((await listing.json()).error.code, "auth_not_configured");
+
+  const marking = await call("/api/v1/updates/read", {
+    method: "POST",
+    headers: { origin: "https://riftpulse.test" },
+  });
+  assert.equal(marking.status, 503);
+  assert.equal((await marking.json()).error.code, "auth_not_configured");
+});
+
 test("redirects insecure RiftPulse browser origins to HTTPS before auth or asset handling", async () => {
   const response = await worker.fetch(new Request("http://app.riftpulse.me/api/auth/sign-in/email?next=%2F"), env());
   assert.equal(response.status, 308);

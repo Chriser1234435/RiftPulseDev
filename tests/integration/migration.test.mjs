@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const migrations = ["0001_initial.sql", "0002_auth.sql", "0003_chat_foundation.sql", "0004_provider_oauth_states.sql", "0005_kick_pkce.sql", "0006_provider_events.sql", "0007_youtube_live_chat_cursor.sql", "0008_provider_settings.sql", "0009_device_credentials.sql"].map(name =>
+const migrations = ["0001_initial.sql", "0002_auth.sql", "0003_chat_foundation.sql", "0004_provider_oauth_states.sql", "0005_kick_pkce.sql", "0006_provider_events.sql", "0007_youtube_live_chat_cursor.sql", "0008_provider_settings.sql", "0009_device_credentials.sql", "0010_release_updates.sql"].map(name =>
   readFileSync(join(root, "migrations", name), "utf8")
 );
 
@@ -23,6 +23,7 @@ test("application, authentication, chat, OAuth-state, and provider-event migrati
       "accounts", "devices", "pairing_challenges", "provider_connections", "module_settings",
       "chat_commands", "song_requests", "integration_health", "idempotency_keys", "chat_messages", "provider_events",
       "user", "session", "account", "verification", "provider_oauth_states", "youtube_live_chat_cursors",
+      "release_updates", "release_update_reads",
     ];
     for (const table of expected) assert.equal(tables.has(table), true, `missing table: ${table}`);
     const healthColumns = new Set(db.prepare("PRAGMA table_info(integration_health)").all().map(row => row.name));
@@ -41,6 +42,12 @@ test("application, authentication, chat, OAuth-state, and provider-event migrati
     ).run("cmd", "acct", "hello", "chat", "reply", "now", "now"), /CHECK constraint failed/);
     db.prepare("INSERT INTO module_settings (id, account_id, module_key, enabled, settings_json, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
       .run("ok", "acct", "chat", 1, "{}", "now");
+
+    db.prepare("INSERT INTO release_updates (id, title, category, version, summary, changes_json, published_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run("release-1", "Release notes", "website", "0.1.0", "Update summary", JSON.stringify(["First change"]), "now");
+    db.prepare("INSERT INTO release_update_reads (account_id, update_id, read_at) VALUES (?, ?, ?)")
+      .run("acct", "release-1", "now");
+    assert.equal(db.prepare("SELECT count(*) AS total FROM release_update_reads WHERE account_id = ?").get("acct").total, 1);
 
     const insertChat = db.prepare(
       "INSERT INTO chat_messages (id, account_id, provider, external_message_id, channel_id, channel_name, sender_id, sender_name, text, sent_at, received_at, badges_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",

@@ -103,3 +103,40 @@ html.is-mobile-device .section-block{scroll-margin-top:70px}
   html.is-mobile-device .main-panel{padding-bottom:62px}
   html.is-mobile-device .auth-layout{padding:18px 0}
 }
+
+
+/* Release updates dropdown attached to the existing notification bell. */
+.notification-anchor{position:relative;display:flex;align-items:center}
+.notification-button{position:relative}
+.notification-button.has-unread{border-color:#59477d;background:#1c1830;color:#d4c5ff}
+.notification-button>i{position:absolute;top:7px;right:7px;width:7px;height:7px;border:1.5px solid #101522;border-radius:50%;background:#b99bff;box-shadow:0 0 10px #a98aff99}
+.updates-dropdown{position:absolute;top:calc(100% + 13px);right:-58px;z-index:60;width:min(390px,calc(100vw - 28px));max-height:min(72vh,620px);display:flex;flex-direction:column;overflow:hidden;border:1px solid #39334e;border-radius:14px;background:linear-gradient(150deg,#171827,#10151f 56%);box-shadow:0 22px 70px #000b;animation:modal-in .16s ease-out}
+.updates-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 17px 13px;border-bottom:1px solid #2b3041}
+.updates-header>div{display:grid;gap:4px}
+.updates-header b{font-size:13px;letter-spacing:-.2px;color:#f0edff}
+.updates-header small{font-size:9px;color:#8993a9}
+.updates-close{width:28px;height:28px;display:grid;place-items:center;border:1px solid #303749;border-radius:8px;background:#171e2b;color:#9aa4b9;cursor:pointer}
+.updates-close:hover{color:#fff;border-color:#5a4c78}
+.updates-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 17px;background:#111722;border-bottom:1px solid #252c3b}
+.updates-toolbar>span{font:9px 'DM Mono',monospace;letter-spacing:.2px;color:#8d98ad}
+.updates-toolbar>button{padding:0;border:0;background:transparent;color:#bda9f3;font-size:9px;cursor:pointer}
+.updates-toolbar>button:hover{color:#e1d6ff}
+.updates-list{overflow-y:auto;overscroll-behavior:contain}
+.update-entry{padding:14px 17px 15px;border-bottom:1px solid #252c3b}
+.update-entry:last-child{border-bottom:0}
+.update-entry.unread{background:linear-gradient(90deg,#30234a44,transparent 75%);box-shadow:inset 2px 0 #ac8cff}
+.update-entry-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px}
+.update-tag{padding:4px 7px;border:1px solid #3d3655;border-radius:5px;background:#211b31;color:#c5b4f2;font:8px 'DM Mono',monospace;letter-spacing:.25px;text-transform:uppercase}
+.update-tag.mod{border-color:#28505a;background:#142a31;color:#88d5e4}
+.update-tag.both{border-color:#4c3d65;background:#29203b;color:#d4b6ff}
+.update-entry-top time{color:#737f94;font:8px 'DM Mono',monospace;white-space:nowrap}
+.update-entry-title{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px;color:#e8e9f4;font-size:11px;font-weight:700;line-height:1.5}
+.update-entry-title small{color:#8b91a7;font:8px 'DM Mono',monospace}
+.update-entry p{margin:6px 0 0;color:#a6afc1;font-size:10px;line-height:1.65}
+.update-entry ul{display:grid;gap:5px;padding-left:16px;margin:9px 0 0;color:#8996ad;font-size:9px;line-height:1.6}
+.update-entry li::marker{color:#a990eb}
+.updates-empty{min-height:145px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;padding:22px;color:#8792a7;font-size:10px;text-align:center}
+.updates-empty svg{color:#b59df2}
+.updates-empty b{color:#dce1ee;font-size:11px}
+.updates-empty span{max-width:220px;line-height:1.6}
+@media(max-width:600px){.updates-dropdown{position:fixed;top:calc(58px + env(safe-area-inset-top));right:12px;width:min(390px,calc(100vw - 24px));max-height:min(72dvh,620px)} }

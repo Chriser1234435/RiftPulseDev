@@ -227,6 +227,43 @@ export default {
       return auth.handler(request);
     }
 
+    if (url.pathname === "/api/v1/updates" && request.method === "GET") {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Release history storage is unavailable.", requestId);
+      const result = await env.DB.prepare(
+        "SELECT u.id, u.title, u.category, u.version, u.summary, u.changes_json AS changesJson, u.published_at AS publishedAt, CASE WHEN r.update_id IS NULL THEN 0 ELSE 1 END AS isRead FROM release_updates u LEFT JOIN release_update_reads r ON r.update_id = u.id AND r.account_id = ? ORDER BY u.published_at DESC, u.id DESC LIMIT 50",
+      ).bind(authContext.userId).all<{
+        id: string; title: string; category: "website" | "mod" | "both"; version: string | null;
+        summary: string; changesJson: string; publishedAt: string; isRead: number;
+      }>();
+      if (!result.success) return jsonError(503, "updates_store_unavailable", "Could not load release history.", requestId);
+      const updates = (result.results ?? []).map(row => {
+        let changes: unknown = [];
+        try { changes = JSON.parse(row.changesJson); } catch { changes = []; }
+        return {
+          id: row.id, title: row.title, category: row.category, version: row.version,
+          summary: row.summary,
+          changes: Array.isArray(changes) ? changes.filter((item): item is string => typeof item === "string").slice(0, 12) : [],
+          publishedAt: row.publishedAt, isRead: row.isRead === 1,
+        };
+      });
+      return Response.json({ updates }, { headers: JSON_HEADERS });
+    }
+
+    if (url.pathname === "/api/v1/updates/read" && request.method === "POST") {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!isTrustedMutationOrigin(request, env)) return jsonError(403, "untrusted_origin", "This origin is not allowed to mark release notes as read.", requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Release history storage is unavailable.", requestId);
+      const now = new Date().toISOString();
+      const result = await env.DB.prepare(
+        "INSERT OR IGNORE INTO release_update_reads (account_id, update_id, read_at) SELECT ?, id, ? FROM release_updates",
+      ).bind(authContext.userId, now).run();
+      if (!result.success) return jsonError(503, "updates_store_unavailable", "Could not save release history read state.", requestId);
+      return Response.json({ ok: true, readAt: now }, { headers: JSON_HEADERS });
+    }
+
     if (url.pathname === "/api/v1/health" && request.method === "GET") {
       return Response.json({
         service: "riftpulse-api", status: "ok", version: VERSION, apiVersion: API_VERSION,
