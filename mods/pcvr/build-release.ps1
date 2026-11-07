@@ -5,6 +5,11 @@ $project = Join-Path $root 'mods\pcvr\RiftPulse.Pcvr.csproj'
 $manifestPath = Join-Path $root 'mods\pcvr\manifest.json'
 $built = Join-Path $root 'mods\pcvr\bin\Release\net472\RiftPulse.Pcvr.dll'
 $downloads = Join-Path $root 'public\downloads'
+# Remove obsolete loose metadata and packages that can cause duplicate manifest discovery.
+foreach ($legacyFile in @('manifest.json', 'RiftPulse.Pcvr.manifest.json', 'RiftPulse.Pcvr-0.1.14.zip', 'RiftPulse.Pcvr-0.1.15.zip')) {
+    $legacyPath = Join-Path $downloads $legacyFile
+    if (Test-Path $legacyPath) { Remove-Item $legacyPath -Force }
+}
 $install = 'C:\Users\chris\BSManager\BSInstances\1.40.8\Plugins'
 
 # Build the exact source that will be packaged.
