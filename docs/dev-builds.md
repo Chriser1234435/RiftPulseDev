@@ -453,3 +453,16 @@ Date: 2026-11-04
 - Published `public/downloads/RiftPulse.Quest.qmod` through Cloudflare Worker `riftpulse`; Worker Version ID `17838e20-d549-4af1-b1ff-93a9d14756ba`. Public QMOD and README returned HTTP 200; public QMOD size 274,317 bytes and SHA-256 exactly matched the local artifact. Homepage HTTP 200 with refreshed client bundle confirmed.
 - Railway `riftpulse-api` deployment `6ad4cd82-af58-4b4e-b1c3-20ba7d51d108` reached SUCCESS for commit `297aacf`. The public `/api/v1/pairing/resume` route was smoke-tested with a dummy, unregistered device credential and returned the expected HTTP 404 `pairing_session_not_found`; this verifies route availability without using a real headset credential.
 - Physical Quest headset validation is still required for first pairing, claiming, menu reopen, full Beat Saber restart, existing linked-device recovery, and module preference loading/saves.
+
+
+## Persistent website + mod updates dropdown — November 7, 2026
+
+- Replaced the dashboard notification-bell toast with an Updates dropdown. Entries support Website, Mod, or Website + Mod categories, title, date, optional version, summary, and up to 12 change bullets. New unread notes show a bell indicator; users can mark the current history as read.
+- Added authenticated API routes `GET /api/v1/updates` and `POST /api/v1/updates/read`. Read state is account-specific; newly published notes remain unread for each account until marked read.
+- Added Cloudflare D1 migration `0010_release_updates.sql`: durable `release_updates` and `release_update_reads` tables plus indexes. Applied through the connected Cloudflare D1 API to database `riftpulse-dev-db` (`1ebf28ca-fcc5-4cb6-8be3-92d889ffc090`); migration ledger records `0010_release_updates.sql`. Existing account/device/pairing/module data was not modified.
+- Added `npm run release:update -- <website|mod|both> "Title" "Summary" [version] ["Change one|Change two"]` to publish release notes and added this as a standing step in `docs/release-workflow.md`.
+- Source commit: `1de96b37a1e53b57271a20cead6e6af5b30c8722` (`Add persistent release updates dropdown`), pushed to `origin/main`. Unrelated loose Quest/PCVR files were excluded.
+- Validation: TypeScript check passed; 52 unit/contract tests passed; isolated SQLite migration test passed; Vite Worker + client production build passed; `git diff --check` passed.
+- Deployments: Cloudflare development Worker `riftpulse-dev` deployed successfully, Version ID `6c8feb72-6c99-4bea-a704-f6807beea8a4`; Railway development API deployment `81018f6f-5ba6-469e-9c1d-621c37e2b9fd` reached SUCCESS and its `/api/v1/health` healthcheck passed; TikTok connector deployment `15b14f22-2031-45a1-a3f9-5c9ffc42f0f3` also reached SUCCESS from the same repository commit.
+- Smoke checks: development homepage returned HTTP 200 and served the updated JS/CSS bundle; `/api/v1/health` returned HTTP 200; unauthenticated `/api/v1/updates` returned the expected HTTP 401 `authentication_required`, confirming the endpoint is deployed and protected. The first Website release note was inserted and read back from D1 successfully.
+- Scope: deployed to the development Worker and Railway development environment only. Production `app.riftpulse.me` was not deployed. Signed-in browser rendering and per-account Mark all read interaction remain user-session verification items.
