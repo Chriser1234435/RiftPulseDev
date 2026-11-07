@@ -811,13 +811,13 @@ function App() {
             <div className="section-heading"><div><div className="section-overline">ALPHA TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Alpha packages for Beat Saber 1.40.8. Quest v0.1.26 fixes stuck HTTPS request locks and restores pending or claimed pairing sessions after restarts. Headset runtime validation is still required.</p></div><span className="settings-badge">PCVR v0.1.15 · Quest v0.1.26</span></div>
             <div className="downloads-grid">
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR · BSIPA</b><small>Windows / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.15 · DLL built</span></div>
-                <p>Install the PCVR DLL into your test instance's Plugins folder. The in-game pairing challenge flow is wired; realtime Chat and BSR are not implemented yet.</p>
+                <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR</b><small>Windows / Beat Saber 1.40.8 (PCVR)</small></div><span className="download-state">v0.1.15 · DLL built</span></div>
+                <p><b>Install on PCVR (Beat Saber 1.40.8):</b> Download and extract the ZIP. Copy <code>manifest.json</code> into your Beat Saber 1.40.8 game folder, then copy <code>Plugins/RiftPulse.Pcvr.dll</code> into that same version's <code>Plugins</code> folder (for BSManager, open the 1.40.8 PCVR instance folder). Launch the PCVR game and look for RiftPulse in the Mods panel. Pairing is available; live Chat and BSR are not implemented yet.</p>
                 <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr.zip" download><Download size={15} /> Download PCVR ZIP</a>
               </article>
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest · Scotland2</b><small>Standalone / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.26 · QMOD built</span></div>
-                <p>Native ARM64 Scotland2 QMOD. Creates a five-digit pairing challenge through the RiftPulse API and syncs Chat/BSR module preferences after account linking. Headset runtime validation is pending; live provider chat/events and BSR request fulfillment are not implemented yet.</p>
+                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest Standalone</b><small>Meta Quest headset / Beat Saber 1.40.8</small></div><span className="download-state">v0.1.26 · QMOD built</span></div>
+                <p><b>Install on Quest Standalone (Beat Saber 1.40.8):</b> Download the QMOD and import it into ModsBeforeFriday (MBF) while your Quest is connected and running the standalone 1.40.8 version of Beat Saber. Install the mod through MBF, then open Beat Saber on the headset and find RiftPulse in the Mods panel. Pairing and Chat/BSR preference sync are included; live provider chat/events and song-request fulfillment are not implemented yet.</p>
                 <a className="primary-button download-link" href="/downloads/RiftPulse.Quest.qmod" download><Download size={15} /> Download Quest QMOD</a>
               </article>
             </div>

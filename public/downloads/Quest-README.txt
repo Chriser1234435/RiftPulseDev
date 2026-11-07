@@ -1,12 +1,12 @@
-# RiftPulse Quest adapter - alpha 0.1.26
+RiftPulse Quest Standalone 0.1.26
+Beat Saber 1.40.8 (Quest standalone)
 
-Native ARM64 Scotland2 QMOD for Beat Saber 1.40.8 (1.40.8_7379).
+INSTALL:
+1. Make sure Beat Saber on your Meta Quest headset is the standalone Quest version 1.40.8.
+2. Download RiftPulse.Quest.qmod from app.riftpulse.me.
+3. Connect the Quest to ModsBeforeFriday (MBF), import the downloaded QMOD, and install it with MBF.
+4. Launch Beat Saber on the Quest headset and open RiftPulse from the Mods panel.
+5. Select Connect to RiftPulse, enter the five-digit code at https://app.riftpulse.me, then use CHECK PAIRING STATUS in-game.
 
-## Pairing fix
-Version 0.1.26 explicitly clears the stored HTTP completion callback as it is moved to the main-thread dispatcher. This prevents a completed HTTPS request from leaving the single-request guard stuck in a busy state and blocking the next pairing request.
-
-Version 0.1.25 fixed Unity SetRequestHeader runtime lookup and removed rejected/unnecessary request headers. Version 0.1.25 also added persisted pairing state, pairing resume, and the stale-request watchdog.
-
-The mod generates a five-digit code and registers it with the RiftPulse API. Enter that code on https://app.riftpulse.me and then select CHECK PAIRING STATUS in Beat Saber.
-
-This remains an alpha build. Headset import, pairing, and preference-sync runtime validation must still be confirmed on a headset. Live provider chat/events, combined viewer counts, ChatIntegrations command execution, and BSR song-request fulfillment are not yet implemented.
+This QMOD is for Quest Standalone only. Do not install it into the PCVR Beat Saber Plugins folder.
+Alpha note: Chat/BSR module preferences sync after pairing; live provider chat/events and BSR song-request fulfillment are not implemented yet.

@@ -1,3 +1,12 @@
 RiftPulse PCVR 0.1.15
-Beat Saber 1.40.8
-The BSIPA archive manifest declares the game-root path Plugins/RiftPulse.Pcvr.dll. Package includes manifest.json at archive root, plugin DLL under Plugins/, and README. Pairing requests use https://app.riftpulse.me. The plugin registers its button from BSML main-menu initialization, logs registration/open failures, and packages only one BSIPA manifest. Confirm the button appears in the main-menu Mods panel after installing and launching the game.
+Windows / Beat Saber PCVR 1.40.8
+
+INSTALL:
+1. Download and extract RiftPulse.Pcvr.zip.
+2. Open your Beat Saber PCVR 1.40.8 game folder. In BSManager, open the folder for the 1.40.8 PCVR instance (not the Quest instance).
+3. Copy the package's manifest.json into the Beat Saber game folder.
+4. Copy Plugins/RiftPulse.Pcvr.dll from the package into the game folder's Plugins directory.
+5. Launch Beat Saber PCVR 1.40.8 and look for RiftPulse in the Mods panel.
+
+This DLL is for PCVR only. Do not install it into Quest Standalone.
+Pairing is available; realtime Chat and BSR are not implemented yet.
