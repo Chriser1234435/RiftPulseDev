@@ -1,27 +1,27 @@
 <bg>
-  <vertical child-expand-height="false" spacing="3" pad-left="6" pad-right="6" pad-top="4" pad-bottom="4">
-    <text text="RIFTPULSE" font-size="9" align="Center"/>
-    <text text="STREAM TOOLS FOR BEAT SABER" font-size="4" align="Center"/>
-    <vertical bg="round-rect-panel" child-expand-height="false" spacing="2" pad-left="4" pad-right="4" pad-top="3" pad-bottom="3">
+  <vertical child-expand-height="false" spacing="6" pad-left="8" pad-right="8" pad-top="6" pad-bottom="6">
+    <text text="RIFTPULSE" font-size="8" align="Center"/>
+    <text text="STREAM TOOLS FOR BEAT SABER" font-size="3.5" align="Center"/>
+    <vertical bg="round-rect-panel" child-expand-height="false" spacing="4" pad-left="6" pad-right="6" pad-top="5" pad-bottom="5">
       <text text="PAIRING CODE" font-size="4" align="Center"/>
-      <text id="pairingCodeText" text="-----" font-size="8" align="Center"/>
-      <text id="statusText" text="Connect your Beat Saber installation to your RiftPulse account." font-size="3.5" align="Center"/>
+      <text id="pairingCodeText" text="-----" font-size="7" align="Center"/>
+      <text id="statusText" text="Connect your Beat Saber installation to your RiftPulse account." font-size="3" align="Center"/>
       <button id="connectButton" text="GENERATE PAIRING CODE" on-click="connect-click"/>
-      <text text="Enter the 5-digit code on the RiftPulse website to link this installation." font-size="3.2" align="Center"/>
-      <text id="modulePreviewStatus" text="Module settings are saved to your RiftPulse account after pairing." font-size="3.2" align="Center"/>
+      <text text="Enter the 5-digit code on the RiftPulse website to link this installation." font-size="2.8" align="Center"/>
+      <text id="modulePreviewStatus" text="Module settings are saved to your RiftPulse account after pairing." font-size="2.8" align="Center"/>
     </vertical>
-    <text text="MODULES" font-size="5" align="Center"/>
-    <horizontal bg="round-rect-panel" pad-left="4" pad-right="4" pad-top="3" pad-bottom="3">
-      <vertical child-expand-height="false" spacing="2">
-        <text text="CHAT" font-size="4" align="Center"/>
-        <text text="Combined Twitch, YouTube, TikTok LIVE, and Kick chat feed." font-size="3.2" align="Center"/>
+    <text text="MODULES" font-size="4.5" align="Center"/>
+    <horizontal bg="round-rect-panel" pad-left="6" pad-right="6" pad-top="5" pad-bottom="5">
+      <vertical child-expand-height="false" spacing="4">
+        <text text="CHAT" font-size="3.8" align="Center"/>
+        <text text="Combined Twitch, YouTube, TikTok LIVE, and Kick chat feed." font-size="2.8" align="Center"/>
         <button id="chatToggleButton" text="CHAT MODULE: OFF" on-click="toggle-chat"/>
       </vertical>
     </horizontal>
-    <horizontal bg="round-rect-panel" pad-left="4" pad-right="4" pad-top="3" pad-bottom="3">
-      <vertical child-expand-height="false" spacing="2">
-        <text text="BEAT SABER SONG REQUEST" font-size="4" align="Center"/>
-        <text text="Let viewers request songs from supported live chats." font-size="3.2" align="Center"/>
+    <horizontal bg="round-rect-panel" pad-left="6" pad-right="6" pad-top="5" pad-bottom="5">
+      <vertical child-expand-height="false" spacing="4">
+        <text text="BEAT SABER SONG REQUEST" font-size="3.8" align="Center"/>
+        <text text="Let viewers request songs from supported live chats." font-size="2.8" align="Center"/>
         <button id="bsrToggleButton" text="BSR MODULE: OFF" on-click="toggle-bsr"/>
       </vertical>
     </horizontal>
