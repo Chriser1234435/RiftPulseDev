@@ -748,7 +748,7 @@ export default {
         || (redirectUri.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(redirectUri.hostname))) {
         return jsonError(503, "twitch_oauth_not_configured", "The callback must be the exact same-origin registered Twitch callback URL.", requestId);
       }
-      console.info("twitch_oauth_start", JSON.stringify({ callbackUri: redirectUri.toString(), appOrigin: appUrl.origin }));
+      console.info("twitch_oauth_start", JSON.stringify({ clientId: env.TWITCH_CLIENT_ID, callbackUri: redirectUri.toString(), appOrigin: appUrl.origin }));
 
       const now = new Date();
       const nowIso = now.toISOString();
