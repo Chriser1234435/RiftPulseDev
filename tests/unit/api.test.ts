@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import worker from "../../src/index.ts";
 import type { D1Database, D1PreparedStatement, D1Result, Env } from "../../src/env.ts";
+import { matchesOAuthStateCookie } from "../../packages/shared/src/oauth-state.ts";
 
 type ChallengeRow = {
   id: string; device_id: string; platform: "pcvr" | "quest"; game_version: string;
@@ -103,6 +104,16 @@ const env = (): { DB: FakeD1; PAIRING_HMAC_KEY: string } => ({
 async function call(path: string, init: RequestInit = {}, bindings: Env = env()): Promise<Response> {
   return worker.fetch(new Request(`https://riftpulse.test${path}`, init), bindings);
 }
+
+test("OAuth state tolerates a missing browser cookie but rejects mismatched or malformed state", () => {
+  const state = "a".repeat(64);
+  assert.equal(matchesOAuthStateCookie(state, state), true);
+  assert.equal(matchesOAuthStateCookie(state, null), true);
+  assert.equal(matchesOAuthStateCookie(state, ""), true);
+  assert.equal(matchesOAuthStateCookie(state, "b".repeat(64)), false);
+  assert.equal(matchesOAuthStateCookie(null, null), false);
+  assert.equal(matchesOAuthStateCookie("not-a-state", null), false);
+});
 
 test("health and version routes identify the V1 API and only the two V1 modules", async () => {
   const health = await call("/api/v1/health");

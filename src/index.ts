@@ -7,7 +7,7 @@ import { persistNormalizedProviderEvent } from "../packages/shared/src/provider-
 import { verifyTikTokConnectorSignature } from "../packages/shared/src/tiktok-connector-signature.ts";
 import { extractKickPublicKey, verifyKickWebhookSignature } from "../packages/shared/src/kick-webhook.ts";
 import { verifyTwitchEventSubSignature } from "../packages/shared/src/twitch-eventsub.ts";
-import { createOAuthState, createPkceChallenge, createPkceVerifier, digestOAuthState } from "../packages/shared/src/oauth-state.ts";
+import { createOAuthState, createPkceChallenge, createPkceVerifier, digestOAuthState, matchesOAuthStateCookie } from "../packages/shared/src/oauth-state.ts";
 import { decryptProviderToken, encryptProviderToken } from "../packages/shared/src/provider-token-vault.ts";
 import { disconnectProvider, ensureFreshTwitchProviderTokens, persistProviderTokens, readProviderTokens } from "../packages/shared/src/provider-connections.ts";
 import { claimPairingChallenge, createPairingChallenge, digestDeviceCredential } from "../packages/shared/src/pairing.ts";
@@ -778,10 +778,12 @@ export default {
     if (url.pathname === "/api/v1/providers/twitch/callback" && request.method === "GET") {
       const state = url.searchParams.get("state");
       const cookieState = readCookie(request, "rp_twitch_oauth_state");
-      const secureCookie = url.protocol === "https:";
+      const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+      const secureCookie = url.protocol === "https:" || forwardedProto === "https";
+      let callbackStage = "validate_state";
       console.info("twitch_oauth_callback_received", JSON.stringify({ host: url.host, hasState: Boolean(state), hasStateCookie: Boolean(cookieState), stateMatchesCookie: Boolean(state && cookieState && state === cookieState), hasCode: url.searchParams.has("code"), providerError: url.searchParams.get("error") || null }));
       const finish = (status: string) => {
-        console.info("twitch_oauth_callback_result", JSON.stringify({ status }));
+        console.info("twitch_oauth_callback_result", JSON.stringify({ status, stage: callbackStage }));
         const response = providerRedirect(env, "twitch", status);
         response.headers.append("set-cookie", twitchStateCookie(null, secureCookie));
         response.headers.set("cache-control", "no-store");
@@ -789,9 +791,10 @@ export default {
         return response;
       };
       if (!env.DB || !env.TWITCH_CLIENT_ID || !env.TWITCH_CLIENT_SECRET || !env.TOKEN_ENCRYPTION_KEY || !env.APP_BASE_URL
-        || !state || state !== cookieState || !/^[a-f0-9]{64}$/i.test(state)) return finish("failed");
+        || !state || !matchesOAuthStateCookie(state, cookieState)) return finish("failed");
       const digest = await digestOAuthState(state);
       const now = new Date();
+      callbackStage = "claim_one_time_state";
       const claimedState = await env.DB.prepare(
         "UPDATE provider_oauth_states SET consumed_at = ? WHERE state_digest = ? AND provider = 'twitch' AND consumed_at IS NULL AND expires_at > ? RETURNING account_id",
       ).bind(now.toISOString(), digest, now.toISOString()).first<{ account_id: string }>();
@@ -808,6 +811,7 @@ export default {
       if (redirectUri.origin !== appUrl.origin || redirectUri.pathname !== "/api/v1/providers/twitch/callback") return finish("failed");
 
       try {
+        callbackStage = "exchange_authorization_code";
         const tokenResponse = await fetch("https://id.twitch.tv/oauth2/token", {
           method: "POST",
           headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
@@ -826,20 +830,23 @@ export default {
         if (typeof token.access_token !== "string" || typeof token.refresh_token !== "string"
           || typeof token.expires_in !== "number" || !Number.isFinite(token.expires_in) || token.expires_in <= 0) return finish("failed");
 
+        callbackStage = "validate_twitch_token";
         const validateResponse = await fetch("https://id.twitch.tv/oauth2/validate", {
           headers: { authorization: "OAuth " + token.access_token, accept: "application/json" },
         });
-        if (!validateResponse.ok) return finish("failed");
+        if (!validateResponse.ok) { callbackStage = "twitch_validation_rejected"; return finish("failed"); }
         const validationPayload: unknown = await validateResponse.json();
         if (!validationPayload || typeof validationPayload !== "object" || Array.isArray(validationPayload)) return finish("failed");
         const validation = validationPayload as Record<string, unknown>;
         const validationScopes = Array.isArray(validation.scopes) && validation.scopes.every(scope => typeof scope === "string")
           ? validation.scopes as string[] : null;
         const requiredScopes = ["user:read:chat", "user:bot", "channel:bot", "moderator:read:followers", "channel:read:subscriptions", "bits:read"];
+        callbackStage = "validate_granted_scopes";
         if (validation.client_id !== env.TWITCH_CLIENT_ID || typeof validation.user_id !== "string"
           || !validation.user_id || typeof validation.login !== "string" || !validation.login
           || !validationScopes || !requiredScopes.every(scope => validationScopes.includes(scope))) return finish("failed");
 
+        callbackStage = "persist_encrypted_tokens";
         const saved = await persistProviderTokens(env.DB, {
           accountId: claimedState.account_id, provider: "twitch", externalAccountId: validation.user_id,
           displayName: validation.login, accessToken: token.access_token, refreshToken: token.refresh_token,
@@ -854,6 +861,7 @@ export default {
         if (!health.success) return finish("failed");
         return finish("connected");
       } catch {
+        callbackStage = "unexpected_callback_exception";
         return finish("failed");
       }
     }
