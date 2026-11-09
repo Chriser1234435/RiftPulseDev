@@ -161,6 +161,32 @@ test("Railway API proxy preserves OAuth callback redirects for the browser", asy
   }
 });
 
+test("Twitch homepage OAuth response is forwarded to the server callback before the SPA loads", async () => {
+  const bindings: Env = { ...env(), RAILWAY_API_URL: "https://riftpulse-api.test" };
+  const originalFetch = globalThis.fetch;
+  const expectedLocation = "https://app.riftpulse.me/?provider=twitch&status=connected";
+  let observedUrl = "";
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const upstreamRequest = input instanceof Request ? input : new Request(input, init);
+    observedUrl = upstreamRequest.url;
+    assert.equal(upstreamRequest.method, "GET");
+    assert.equal(upstreamRequest.redirect, "manual");
+    return new Response(null, { status: 303, headers: { location: expectedLocation } });
+  };
+
+  try {
+    const response = await worker.fetch(new Request(
+      "https://app.riftpulse.me/?code=oauth-code&state=one-time-state&scope=user%3Aread%3Achat",
+    ), bindings);
+    assert.equal(observedUrl, "https://riftpulse-api.test/api/v1/providers/twitch/callback?code=oauth-code&state=one-time-state&scope=user%3Aread%3Achat");
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get("location"), expectedLocation);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Railway API proxy preserves the JSON Twitch authorization handoff", async () => {
   const bindings: Env = { ...env(), RAILWAY_API_URL: "https://riftpulse-api.test" };
   const originalFetch = globalThis.fetch;

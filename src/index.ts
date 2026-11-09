@@ -163,15 +163,19 @@ function kickStateCookie(state: string | null, secure: boolean): string {
   return secure ? base + "; Secure" : base;
 }
 
-function resolveTwitchRedirectUri(env: Env): URL | null {
+function resolveTwitchRedirectUri(env: Env): string | null {
   if (!env.APP_BASE_URL) return null;
   try {
     const appUrl = new URL(env.APP_BASE_URL);
-    const redirectUri = new URL(env.TWITCH_REDIRECT_URI ?? "/api/v1/providers/twitch/callback", appUrl);
-    if (redirectUri.origin !== appUrl.origin
-      || redirectUri.pathname !== "/api/v1/providers/twitch/callback"
-      || redirectUri.username || redirectUri.password || redirectUri.search || redirectUri.hash
-      || (redirectUri.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(redirectUri.hostname))) {
+    // Twitch's homepage redirect URI is registered without a trailing slash.
+    // Preserve the exact origin string for authorization and token exchange.
+    const redirectUri = env.TWITCH_REDIRECT_URI?.trim() || appUrl.origin;
+    const parsed = new URL(redirectUri);
+    if (parsed.origin !== appUrl.origin
+      || parsed.pathname !== "/"
+      || parsed.username || parsed.password || parsed.search || parsed.hash
+      || redirectUri !== appUrl.origin
+      || (parsed.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(parsed.hostname))) {
       return null;
     }
     return redirectUri;
@@ -219,9 +223,16 @@ export default {
 
     // Keep Cloudflare as the browser-facing origin, but run all API logic on Railway.
     // This also keeps Better Auth cookies same-origin for the Cloudflare-hosted UI.
-    if (env.RAILWAY_API_URL && url.pathname.startsWith("/api/")) {
+    // Twitch redirects to the app homepage itself. Forward the OAuth response
+    // to the existing server callback before the SPA can load or inspect the code.
+    const isTwitchRootCallback = url.pathname === "/"
+      && url.searchParams.has("state")
+      && (url.searchParams.has("code") || url.searchParams.has("error"));
+
+    if (env.RAILWAY_API_URL && (url.pathname.startsWith("/api/") || isTwitchRootCallback)) {
       try {
-        const upstream = new URL(url.pathname + url.search, env.RAILWAY_API_URL);
+        const upstreamPath = isTwitchRootCallback ? "/api/v1/providers/twitch/callback" : url.pathname;
+        const upstream = new URL(upstreamPath + url.search, env.RAILWAY_API_URL);
         const headers = new Headers(request.headers);
         headers.delete("host");
         headers.set("x-forwarded-host", url.host);
@@ -774,7 +785,7 @@ export default {
           clientId: env.TWITCH_CLIENT_ID,
           redirectUri: redirectUri.toString(),
         });
-        console.info("twitch_oauth_started", JSON.stringify({ callbackHost: redirectUri.host, callbackPath: redirectUri.pathname }));
+        console.info("twitch_oauth_started", JSON.stringify({ callbackHost: new URL(redirectUri).host, callbackPath: "/" }));
         // Return the authorization URL as same-origin JSON. The frontend checks
         // Twitch origin and path before navigating; no cross-origin proxy redirect is needed.
         return Response.json({ authorizationUrl }, { headers: JSON_HEADERS });
