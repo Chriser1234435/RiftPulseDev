@@ -140,12 +140,13 @@ test("Railway API proxy preserves OAuth callback redirects for the browser", asy
   const originalFetch = globalThis.fetch;
   let observedRedirect: RequestRedirect | null = null;
   const expectedLocation = "https://app.riftpulse.me/?provider=twitch&status=connected";
+  const expectedCookie = "rp_twitch_oauth_state=state-value; Path=/api/v1/providers/twitch/callback; HttpOnly; SameSite=Lax; Max-Age=600; Secure";
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const upstreamRequest = input instanceof Request ? input : new Request(input, init);
     observedRedirect = upstreamRequest.redirect;
     assert.equal(upstreamRequest.url, "https://riftpulse-api.test/api/v1/providers/twitch/callback?code=example");
-    return new Response(null, { status: 302, headers: { location: expectedLocation } });
+    return new Response(null, { status: 302, headers: { location: expectedLocation, "set-cookie": expectedCookie } });
   };
 
   try {
@@ -155,6 +156,7 @@ test("Railway API proxy preserves OAuth callback redirects for the browser", asy
     assert.equal(observedRedirect, "manual");
     assert.equal(response.status, 302);
     assert.equal(response.headers.get("location"), expectedLocation);
+    assert.equal(response.headers.get("set-cookie"), expectedCookie, "the upstream OAuth state cookie must reach the browser");
   } finally {
     globalThis.fetch = originalFetch;
   }

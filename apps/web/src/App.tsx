@@ -359,17 +359,29 @@ function App() {
     if (!authLoaded) return;
     const params = new URLSearchParams(window.location.search);
     const provider = params.get("provider");
-    if ((provider !== "twitch" && provider !== "youtube" && provider !== "kick") || !params.get("status")) return;
     const status = params.get("status");
-    if (status === "connected") flash(provider === "twitch" ? "Twitch account authorized. EventSub subscription setup is still pending." : provider === "youtube" ? "YouTube account authorized. Live-chat polling is still pending." : "Kick account authorized. Webhook subscription setup is still pending.");
-    else if (status === "denied") flash(provider + " authorization was canceled.");
-    else flash(provider + " connection could not be completed. No token details were shown.");
-    window.history.replaceState({}, "", window.location.pathname);
+    if ((provider !== "twitch" && provider !== "youtube" && provider !== "kick") || !status) return;
+
+    setActiveTab("Integrations");
+    if (status === "connected" && !user?.id) {
+      flash(provider + " returned from authorization, but RiftPulse could not confirm your sign-in. Sign in again and reconnect.");
+    } else if (status === "connected") {
+      flash(provider === "twitch" ? "Twitch account authorized. EventSub subscription setup is still pending." : provider === "youtube" ? "YouTube account authorized. Live-chat polling is still pending." : "Kick account authorized. Webhook subscription setup is still pending.");
+    } else if (status === "denied") {
+      flash(provider + " authorization was canceled.");
+    } else {
+      flash(provider + " connection could not be completed. No token details were shown.");
+    }
+
+    window.history.replaceState({}, "", `${window.location.pathname}#integrations`);
     if (user?.id) {
       void refreshProviderConnections();
       void refreshProviderHealth();
       void refreshChat();
     }
+    window.requestAnimationFrame(() => {
+      document.getElementById("integrations")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }, [authLoaded, user?.id, refreshProviderConnections, refreshProviderHealth, refreshChat]);
 
   const toggleModule = async (key: ModuleKey) => {
@@ -531,6 +543,11 @@ function App() {
       if (!response.ok) throw new Error(data.error?.message ?? "Could not start Twitch authorization.");
       const authorizationUrl = new URL(data.authorizationUrl);
       if (authorizationUrl.origin !== "https://id.twitch.tv" || authorizationUrl.pathname !== "/oauth2/authorize") throw new Error("The authorization URL was not trusted.");
+      const callbackUri = authorizationUrl.searchParams.get("redirect_uri");
+      const expectedCallbackUri = new URL("/api/v1/providers/twitch/callback", window.location.origin).toString();
+      if (callbackUri !== expectedCallbackUri) {
+        throw new Error("Twitch callback URL mismatch. Expected " + expectedCallbackUri + " but received " + (callbackUri ?? "no redirect URI") + ". Check the Twitch redirect URL configuration.");
+      }
       window.location.assign(authorizationUrl.toString());
     } catch (error) {
       flash(error instanceof Error ? error.message : "Could not start Twitch authorization.");
