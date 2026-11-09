@@ -748,6 +748,7 @@ export default {
         || (redirectUri.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(redirectUri.hostname))) {
         return jsonError(503, "twitch_oauth_not_configured", "The callback must be the exact same-origin registered Twitch callback URL.", requestId);
       }
+      console.info("twitch_oauth_start", JSON.stringify({ callbackUri: redirectUri.toString(), appOrigin: appUrl.origin }));
 
       const now = new Date();
       const nowIso = now.toISOString();
@@ -778,6 +779,7 @@ export default {
       const state = url.searchParams.get("state");
       const cookieState = readCookie(request, "rp_twitch_oauth_state");
       const secureCookie = url.protocol === "https:";
+      console.info("twitch_oauth_callback_received", JSON.stringify({ host: url.host, hasState: Boolean(state), hasStateCookie: Boolean(cookieState), stateMatchesCookie: Boolean(state && cookieState && state === cookieState), hasCode: url.searchParams.has("code"), providerError: url.searchParams.get("error") || null }));
       const finish = (status: string) => {
         const response = providerRedirect(env, "twitch", status);
         response.headers.append("set-cookie", twitchStateCookie(null, secureCookie));
