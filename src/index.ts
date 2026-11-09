@@ -235,12 +235,16 @@ export default {
           redirect: "manual",
           signal: request.signal,
         };
-        if (request.method !== "GET" && request.method !== "HEAD") {
+        // Only attach a streaming body when one actually exists. POST actions
+        // such as Twitch OAuth start intentionally send no body; setting duplex
+        // without a body can make Request construction fail before proxying.
+        if (request.method !== "GET" && request.method !== "HEAD" && request.body !== null) {
           init.body = request.body;
           init.duplex = "half";
         }
         return await fetch(new Request(upstream, init));
-      } catch {
+      } catch (error) {
+        console.error("api_upstream_proxy_failed", error instanceof Error ? error.message : "unknown");
         return jsonError(502, "api_upstream_unavailable", "The RiftPulse API service is temporarily unavailable.", requestId);
       }
     }
@@ -771,16 +775,9 @@ export default {
           redirectUri: redirectUri.toString(),
         });
         console.info("twitch_oauth_started", JSON.stringify({ callbackHost: redirectUri.host, callbackPath: redirectUri.pathname }));
-        // Top-level form POST: browser follows this redirect directly to Twitch.
-        // No XHR handoff or temporary browser cookie is involved.
-        return new Response(null, {
-          status: 303,
-          headers: {
-            location: authorizationUrl,
-            "cache-control": "no-store",
-            "referrer-policy": "no-referrer",
-          },
-        });
+        // Return the authorization URL as same-origin JSON. The frontend checks
+        // Twitch origin and path before navigating; no cross-origin proxy redirect is needed.
+        return Response.json({ authorizationUrl }, { headers: JSON_HEADERS });
       } catch {
         console.error("twitch_oauth_start_failed");
         return jsonError(503, "oauth_state_store_unavailable", "RiftPulse could not start a secure Twitch authorization. Try again.", requestId);

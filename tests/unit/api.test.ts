@@ -161,7 +161,7 @@ test("Railway API proxy preserves OAuth callback redirects for the browser", asy
   }
 });
 
-test("Railway API proxy preserves the top-level Twitch authorization redirect", async () => {
+test("Railway API proxy preserves the JSON Twitch authorization handoff", async () => {
   const bindings: Env = { ...env(), RAILWAY_API_URL: "https://riftpulse-api.test" };
   const originalFetch = globalThis.fetch;
   let observedRedirect: RequestRedirect | null = null;
@@ -173,17 +173,19 @@ test("Railway API proxy preserves the top-level Twitch authorization redirect", 
     assert.equal(upstreamRequest.method, "POST");
     assert.equal(upstreamRequest.url, "https://riftpulse-api.test/api/v1/providers/twitch/connect");
     assert.equal(upstreamRequest.headers.get("origin"), "https://app.riftpulse.me");
-    return new Response(null, { status: 303, headers: { location: authorizeUrl } });
+    return new Response(JSON.stringify({ authorizationUrl: authorizeUrl }), {
+      headers: { "content-type": "application/json; charset=utf-8" },
+    });
   };
 
   try {
     const response = await worker.fetch(new Request(
       "https://app.riftpulse.me/api/v1/providers/twitch/connect",
-      { method: "POST", headers: { origin: "https://app.riftpulse.me", "content-type": "application/x-www-form-urlencoded" }, body: "" },
+      { method: "POST", headers: { origin: "https://app.riftpulse.me" } },
     ), bindings);
     assert.equal(observedRedirect, "manual");
-    assert.equal(response.status, 303);
-    assert.equal(response.headers.get("location"), authorizeUrl);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { authorizationUrl: authorizeUrl });
   } finally {
     globalThis.fetch = originalFetch;
   }

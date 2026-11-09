@@ -560,12 +560,21 @@ function App() {
       flash("Twitch OAuth is not configured in this local workspace yet.");
       return;
     }
-    const form = document.createElement("form");
-    form.method = "POST";
-    form.action = "/api/v1/providers/twitch/connect";
-    form.hidden = true;
-    document.body.append(form);
-    form.submit();
+    try {
+      const response = await fetch("/api/v1/providers/twitch/connect", {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error?.message ?? "Could not start Twitch authorization.");
+      const authorizationUrl = new URL(data.authorizationUrl);
+      if (authorizationUrl.origin !== "https://id.twitch.tv" || authorizationUrl.pathname !== "/oauth2/authorize") {
+        throw new Error("The Twitch authorization URL was not trusted.");
+      }
+      window.location.assign(authorizationUrl.toString());
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Could not start Twitch authorization.");
+    }
   };
 
   const startPairing = () => {
