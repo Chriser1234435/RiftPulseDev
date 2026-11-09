@@ -261,9 +261,19 @@ function App() {
 
   useEffect(() => {
     if (!user?.id) return;
-    const timer = window.setInterval(() => { void refreshProviderHealth(); }, 5000);
-    return () => window.clearInterval(timer);
-  }, [user?.id, refreshProviderHealth]);
+    const refreshProviderStatus = () => {
+      void refreshProviderConnections();
+      void refreshProviderHealth();
+    };
+    const timer = window.setInterval(refreshProviderStatus, 5000);
+    window.addEventListener("focus", refreshProviderStatus);
+    document.addEventListener("visibilitychange", refreshProviderStatus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshProviderStatus);
+      document.removeEventListener("visibilitychange", refreshProviderStatus);
+    };
+  }, [user?.id, refreshProviderConnections, refreshProviderHealth]);
 
 
 

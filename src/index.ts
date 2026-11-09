@@ -781,6 +781,7 @@ export default {
       const secureCookie = url.protocol === "https:";
       console.info("twitch_oauth_callback_received", JSON.stringify({ host: url.host, hasState: Boolean(state), hasStateCookie: Boolean(cookieState), stateMatchesCookie: Boolean(state && cookieState && state === cookieState), hasCode: url.searchParams.has("code"), providerError: url.searchParams.get("error") || null }));
       const finish = (status: string) => {
+        console.info("twitch_oauth_callback_result", JSON.stringify({ status }));
         const response = providerRedirect(env, "twitch", status);
         response.headers.append("set-cookie", twitchStateCookie(null, secureCookie));
         response.headers.set("cache-control", "no-store");
