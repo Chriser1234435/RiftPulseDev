@@ -7,7 +7,8 @@ import { persistNormalizedProviderEvent } from "../packages/shared/src/provider-
 import { verifyTikTokConnectorSignature } from "../packages/shared/src/tiktok-connector-signature.ts";
 import { extractKickPublicKey, verifyKickWebhookSignature } from "../packages/shared/src/kick-webhook.ts";
 import { verifyTwitchEventSubSignature } from "../packages/shared/src/twitch-eventsub.ts";
-import { createOAuthState, createPkceChallenge, createPkceVerifier, digestOAuthState, matchesOAuthStateCookie } from "../packages/shared/src/oauth-state.ts";
+import { createOAuthState, createPkceChallenge, createPkceVerifier, digestOAuthState } from "../packages/shared/src/oauth-state.ts";
+import { beginTwitchOAuth, completeTwitchOAuth } from "../packages/shared/src/twitch-oauth.ts";
 import { decryptProviderToken, encryptProviderToken } from "../packages/shared/src/provider-token-vault.ts";
 import { disconnectProvider, ensureFreshTwitchProviderTokens, persistProviderTokens, readProviderTokens } from "../packages/shared/src/provider-connections.ts";
 import { claimPairingChallenge, createPairingChallenge, digestDeviceCredential } from "../packages/shared/src/pairing.ts";
@@ -152,11 +153,6 @@ function readCookie(request: Request, name: string): string | null {
   return null;
 }
 
-function twitchStateCookie(state: string | null, secure: boolean): string {
-  const base = "rp_twitch_oauth_state=" + (state ?? "") + "; Path=/api/v1/providers/twitch/callback; HttpOnly; SameSite=Lax; Max-Age=" + (state ? "600" : "0");
-  return secure ? base + "; Secure" : base;
-}
-
 function youtubeStateCookie(state: string | null, secure: boolean): string {
   const base = "rp_youtube_oauth_state=" + (state ?? "") + "; Path=/api/v1/providers/youtube/callback; HttpOnly; SameSite=Lax; Max-Age=" + (state ? "600" : "0");
   return secure ? base + "; Secure" : base;
@@ -167,7 +163,24 @@ function kickStateCookie(state: string | null, secure: boolean): string {
   return secure ? base + "; Secure" : base;
 }
 
-function providerRedirect(env: Env, provider: "twitch" | "youtube" | "kick", status: string): Response {
+function resolveTwitchRedirectUri(env: Env): URL | null {
+  if (!env.APP_BASE_URL) return null;
+  try {
+    const appUrl = new URL(env.APP_BASE_URL);
+    const redirectUri = new URL(env.TWITCH_REDIRECT_URI ?? "/api/v1/providers/twitch/callback", appUrl);
+    if (redirectUri.origin !== appUrl.origin
+      || redirectUri.pathname !== "/api/v1/providers/twitch/callback"
+      || redirectUri.username || redirectUri.password || redirectUri.search || redirectUri.hash
+      || (redirectUri.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(redirectUri.hostname))) {
+      return null;
+    }
+    return redirectUri;
+  } catch {
+    return null;
+  }
+}
+
+function providerRedirect(env: Env, provider: "twitch" | "youtube" | "kick", status: string, reason?: string): Response {
   let target: URL;
   try { target = new URL(env.APP_BASE_URL ?? "http://127.0.0.1:5173"); }
   catch { target = new URL("http://127.0.0.1:5173"); }
@@ -176,7 +189,15 @@ function providerRedirect(env: Env, provider: "twitch" | "youtube" | "kick", sta
   target.hash = "";
   target.searchParams.set("provider", provider);
   target.searchParams.set("status", status);
-  return new Response(null, { status: 302, headers: { location: target.toString(), "cache-control": "no-store" } });
+  if (reason) target.searchParams.set("reason", reason);
+  return new Response(null, {
+    status: 303,
+    headers: {
+      location: target.toString(),
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+    },
+  });
 }
 
 export default {
@@ -734,138 +755,64 @@ export default {
       if (!isTrustedMutationOrigin(request, env)) return jsonError(403, "untrusted_origin", "Request origin is not trusted.", requestId);
       if (!env.DB) return jsonError(503, "database_unavailable", "Provider storage is not configured.", requestId);
       if (!env.TWITCH_CLIENT_ID || !env.TWITCH_CLIENT_SECRET || !env.TOKEN_ENCRYPTION_KEY || !env.APP_BASE_URL) {
-        return jsonError(503, "twitch_oauth_not_configured", "Twitch OAuth credentials, app URL, and token encryption key must be configured locally first.", requestId);
+        return jsonError(503, "twitch_oauth_not_configured", "Twitch OAuth credentials, app URL, and token encryption key must be configured.", requestId);
       }
-      let appUrl: URL, redirectUri: URL;
+
+      const redirectUri = resolveTwitchRedirectUri(env);
+      if (!redirectUri) {
+        return jsonError(503, "twitch_oauth_not_configured", "The Twitch callback must match the registered same-origin URL.", requestId);
+      }
+
       try {
-        appUrl = new URL(env.APP_BASE_URL);
-        redirectUri = new URL(env.TWITCH_REDIRECT_URI ?? "/api/v1/providers/twitch/callback", appUrl);
+        const authorizationUrl = await beginTwitchOAuth({
+          db: env.DB,
+          accountId: authContext.userId,
+          clientId: env.TWITCH_CLIENT_ID,
+          redirectUri: redirectUri.toString(),
+        });
+        console.info("twitch_oauth_started", JSON.stringify({ callbackHost: redirectUri.host, callbackPath: redirectUri.pathname }));
+        // Top-level form POST: browser follows this redirect directly to Twitch.
+        // No XHR handoff or temporary browser cookie is involved.
+        return new Response(null, {
+          status: 303,
+          headers: {
+            location: authorizationUrl,
+            "cache-control": "no-store",
+            "referrer-policy": "no-referrer",
+          },
+        });
       } catch {
-        return jsonError(503, "twitch_oauth_not_configured", "The Twitch OAuth callback URL is invalid.", requestId);
+        console.error("twitch_oauth_start_failed");
+        return jsonError(503, "oauth_state_store_unavailable", "RiftPulse could not start a secure Twitch authorization. Try again.", requestId);
       }
-      if (redirectUri.origin !== appUrl.origin || redirectUri.pathname !== "/api/v1/providers/twitch/callback"
-        || redirectUri.username || redirectUri.password || redirectUri.search || redirectUri.hash
-        || (redirectUri.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(redirectUri.hostname))) {
-        return jsonError(503, "twitch_oauth_not_configured", "The callback must be the exact same-origin registered Twitch callback URL.", requestId);
-      }
-      console.info("twitch_oauth_start", JSON.stringify({ clientId: env.TWITCH_CLIENT_ID, callbackUri: redirectUri.toString(), appOrigin: appUrl.origin }));
-
-      const now = new Date();
-      const nowIso = now.toISOString();
-      const expiresAt = new Date(now.getTime() + 10 * 60_000).toISOString();
-      const cleanup = await env.DB.prepare(
-        "DELETE FROM provider_oauth_states WHERE expires_at <= ? OR (account_id = ? AND provider = 'twitch' AND consumed_at IS NULL)",
-      ).bind(nowIso, authContext.userId).run();
-      if (!cleanup.success) return jsonError(503, "oauth_state_store_unavailable", "Could not prepare a secure authorization attempt.", requestId);
-      const state = createOAuthState();
-      const digest = await digestOAuthState(state);
-      const inserted = await env.DB.prepare(
-        "INSERT INTO provider_oauth_states (state_digest, account_id, provider, created_at, expires_at, consumed_at) VALUES (?, ?, 'twitch', ?, ?, NULL)",
-      ).bind(digest, authContext.userId, nowIso, expiresAt).run();
-      if (!inserted.success) return jsonError(503, "oauth_state_store_unavailable", "Could not start a secure authorization attempt.", requestId);
-
-      const authorizationUrl = new URL("https://id.twitch.tv/oauth2/authorize");
-      authorizationUrl.searchParams.set("client_id", env.TWITCH_CLIENT_ID);
-      authorizationUrl.searchParams.set("redirect_uri", redirectUri.toString());
-      authorizationUrl.searchParams.set("response_type", "code");
-      authorizationUrl.searchParams.set("scope", "user:read:chat user:bot channel:bot moderator:read:followers channel:read:subscriptions bits:read");
-      authorizationUrl.searchParams.set("state", state);
-      return Response.json({ authorizationUrl: authorizationUrl.toString() }, {
-        headers: { ...JSON_HEADERS, "set-cookie": twitchStateCookie(state, redirectUri.protocol === "https:") },
-      });
     }
 
     if (url.pathname === "/api/v1/providers/twitch/callback" && request.method === "GET") {
       const state = url.searchParams.get("state");
-      const cookieState = readCookie(request, "rp_twitch_oauth_state");
-      const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
-      const secureCookie = url.protocol === "https:" || forwardedProto === "https";
-      let callbackStage = "validate_state";
-      console.info("twitch_oauth_callback_received", JSON.stringify({ host: url.host, hasState: Boolean(state), hasStateCookie: Boolean(cookieState), stateMatchesCookie: Boolean(state && cookieState && state === cookieState), hasCode: url.searchParams.has("code"), providerError: url.searchParams.get("error") || null }));
-      const finish = (status: string) => {
-        console.info("twitch_oauth_callback_result", JSON.stringify({ status, stage: callbackStage }));
-        const response = providerRedirect(env, "twitch", status);
-        response.headers.append("set-cookie", twitchStateCookie(null, secureCookie));
-        response.headers.set("cache-control", "no-store");
-        response.headers.set("referrer-policy", "no-referrer");
-        return response;
-      };
-      if (!env.DB || !env.TWITCH_CLIENT_ID || !env.TWITCH_CLIENT_SECRET || !env.TOKEN_ENCRYPTION_KEY || !env.APP_BASE_URL
-        || !state || !matchesOAuthStateCookie(state, cookieState)) return finish("failed");
-      const digest = await digestOAuthState(state);
-      const now = new Date();
-      callbackStage = "claim_one_time_state";
-      const claimedState = await env.DB.prepare(
-        "UPDATE provider_oauth_states SET consumed_at = ? WHERE state_digest = ? AND provider = 'twitch' AND consumed_at IS NULL AND expires_at > ? RETURNING account_id",
-      ).bind(now.toISOString(), digest, now.toISOString()).first<{ account_id: string }>();
-      if (!claimedState?.account_id) return finish("failed");
-      if (url.searchParams.has("error")) return finish("denied");
-      const code = url.searchParams.get("code");
-      if (!code || code.length > 2048) return finish("failed");
+      const redirectUri = resolveTwitchRedirectUri(env);
+      const result: Awaited<ReturnType<typeof completeTwitchOAuth>> =
+        !env.DB || !env.TWITCH_CLIENT_ID || !env.TWITCH_CLIENT_SECRET
+          || !env.TOKEN_ENCRYPTION_KEY || !redirectUri
+          ? { ok: false, reason: "storage_failed", stage: "configuration" }
+          : await completeTwitchOAuth({
+            db: env.DB,
+            state,
+            code: url.searchParams.get("code"),
+            providerError: url.searchParams.get("error"),
+            clientId: env.TWITCH_CLIENT_ID,
+            clientSecret: env.TWITCH_CLIENT_SECRET,
+            encryptionKey: env.TOKEN_ENCRYPTION_KEY,
+            redirectUri: redirectUri.toString(),
+          });
 
-      let appUrl: URL, redirectUri: URL;
-      try {
-        appUrl = new URL(env.APP_BASE_URL);
-        redirectUri = new URL(env.TWITCH_REDIRECT_URI ?? "/api/v1/providers/twitch/callback", appUrl);
-      } catch { return finish("failed"); }
-      if (redirectUri.origin !== appUrl.origin || redirectUri.pathname !== "/api/v1/providers/twitch/callback") return finish("failed");
-
-      try {
-        callbackStage = "exchange_authorization_code";
-        const tokenResponse = await fetch("https://id.twitch.tv/oauth2/token", {
-          method: "POST",
-          headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
-          body: new URLSearchParams({
-            client_id: env.TWITCH_CLIENT_ID,
-            client_secret: env.TWITCH_CLIENT_SECRET,
-            code,
-            grant_type: "authorization_code",
-            redirect_uri: redirectUri.toString(),
-          }),
-        });
-        if (!tokenResponse.ok) return finish("failed");
-        const tokenPayload: unknown = await tokenResponse.json();
-        if (!tokenPayload || typeof tokenPayload !== "object" || Array.isArray(tokenPayload)) return finish("failed");
-        const token = tokenPayload as Record<string, unknown>;
-        if (typeof token.access_token !== "string" || typeof token.refresh_token !== "string"
-          || typeof token.expires_in !== "number" || !Number.isFinite(token.expires_in) || token.expires_in <= 0) return finish("failed");
-
-        callbackStage = "validate_twitch_token";
-        const validateResponse = await fetch("https://id.twitch.tv/oauth2/validate", {
-          headers: { authorization: "OAuth " + token.access_token, accept: "application/json" },
-        });
-        if (!validateResponse.ok) { callbackStage = "twitch_validation_rejected"; return finish("failed"); }
-        const validationPayload: unknown = await validateResponse.json();
-        if (!validationPayload || typeof validationPayload !== "object" || Array.isArray(validationPayload)) return finish("failed");
-        const validation = validationPayload as Record<string, unknown>;
-        const validationScopes = Array.isArray(validation.scopes) && validation.scopes.every(scope => typeof scope === "string")
-          ? validation.scopes as string[] : null;
-        const requiredScopes = ["user:read:chat", "user:bot", "channel:bot", "moderator:read:followers", "channel:read:subscriptions", "bits:read"];
-        callbackStage = "validate_granted_scopes";
-        if (validation.client_id !== env.TWITCH_CLIENT_ID || typeof validation.user_id !== "string"
-          || !validation.user_id || typeof validation.login !== "string" || !validation.login
-          || !validationScopes || !requiredScopes.every(scope => validationScopes.includes(scope))) return finish("failed");
-
-        callbackStage = "persist_encrypted_tokens";
-        const saved = await persistProviderTokens(env.DB, {
-          accountId: claimedState.account_id, provider: "twitch", externalAccountId: validation.user_id,
-          displayName: validation.login, accessToken: token.access_token, refreshToken: token.refresh_token,
-          tokenExpiresAt: new Date(Date.now() + token.expires_in * 1000).toISOString(),
-          scopes: validationScopes,
-        }, env.TOKEN_ENCRYPTION_KEY);
-        if (!saved.ok) return finish("failed");
-
-        const health = await env.DB.prepare(
-          "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'twitch', 'degraded', NULL, ?, 'eventsub_subscription_pending', NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'degraded', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = 'eventsub_subscription_pending', viewer_count_observed_at = NULL",
-        ).bind(crypto.randomUUID(), claimedState.account_id, new Date().toISOString()).run();
-        if (!health.success) return finish("failed");
-        return finish("connected");
-      } catch {
-        callbackStage = "unexpected_callback_exception";
-        return finish("failed");
+      if (result.ok) {
+        console.info("twitch_oauth_completed", JSON.stringify({ stage: "persisted" }));
+        return providerRedirect(env, "twitch", "connected");
       }
-    }
 
+      console.warn("twitch_oauth_failed", JSON.stringify({ reason: result.reason, stage: result.stage }));
+      return providerRedirect(env, "twitch", result.reason === "authorization_denied" ? "denied" : "failed", result.reason);
+    }
     if (url.pathname === "/api/v1/providers/youtube/callback" && request.method === "GET") {
       const state = url.searchParams.get("state");
       const cookieState = readCookie(request, "rp_youtube_oauth_state");

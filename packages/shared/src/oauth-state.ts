@@ -10,17 +10,6 @@ export function createOAuthState(): string {
   return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
-/**
- * The persisted, random, single-use OAuth state is the primary CSRF check.
- * A matching browser cookie adds defense in depth, but a missing cookie must
- * not break the flow in browsers that discard cookies during provider handoff.
- */
-export function matchesOAuthStateCookie(state: string | null, cookieState: string | null): boolean {
-  return typeof state === "string"
-    && /^[a-f0-9]{64}$/i.test(state)
-    && (!cookieState || state === cookieState);
-}
-
 function base64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);

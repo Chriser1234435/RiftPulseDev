@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import worker from "../../src/index.ts";
 import type { D1Database, D1PreparedStatement, D1Result, Env } from "../../src/env.ts";
-import { matchesOAuthStateCookie } from "../../packages/shared/src/oauth-state.ts";
 
 type ChallengeRow = {
   id: string; device_id: string; platform: "pcvr" | "quest"; game_version: string;
@@ -105,16 +104,6 @@ async function call(path: string, init: RequestInit = {}, bindings: Env = env())
   return worker.fetch(new Request(`https://riftpulse.test${path}`, init), bindings);
 }
 
-test("OAuth state tolerates a missing browser cookie but rejects mismatched or malformed state", () => {
-  const state = "a".repeat(64);
-  assert.equal(matchesOAuthStateCookie(state, state), true);
-  assert.equal(matchesOAuthStateCookie(state, null), true);
-  assert.equal(matchesOAuthStateCookie(state, ""), true);
-  assert.equal(matchesOAuthStateCookie(state, "b".repeat(64)), false);
-  assert.equal(matchesOAuthStateCookie(null, null), false);
-  assert.equal(matchesOAuthStateCookie("not-a-state", null), false);
-});
-
 test("health and version routes identify the V1 API and only the two V1 modules", async () => {
   const health = await call("/api/v1/health");
   assert.equal(health.status, 200);
@@ -151,13 +140,12 @@ test("Railway API proxy preserves OAuth callback redirects for the browser", asy
   const originalFetch = globalThis.fetch;
   let observedRedirect: RequestRedirect | null = null;
   const expectedLocation = "https://app.riftpulse.me/?provider=twitch&status=connected";
-  const expectedCookie = "rp_twitch_oauth_state=state-value; Path=/api/v1/providers/twitch/callback; HttpOnly; SameSite=Lax; Max-Age=600; Secure";
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const upstreamRequest = input instanceof Request ? input : new Request(input, init);
     observedRedirect = upstreamRequest.redirect;
     assert.equal(upstreamRequest.url, "https://riftpulse-api.test/api/v1/providers/twitch/callback?code=example");
-    return new Response(null, { status: 302, headers: { location: expectedLocation, "set-cookie": expectedCookie } });
+    return new Response(null, { status: 303, headers: { location: expectedLocation } });
   };
 
   try {
@@ -165,9 +153,37 @@ test("Railway API proxy preserves OAuth callback redirects for the browser", asy
       "https://app.riftpulse.me/api/v1/providers/twitch/callback?code=example",
     ), bindings);
     assert.equal(observedRedirect, "manual");
-    assert.equal(response.status, 302);
+    assert.equal(response.status, 303);
     assert.equal(response.headers.get("location"), expectedLocation);
-    assert.equal(response.headers.get("set-cookie"), expectedCookie, "the upstream OAuth state cookie must reach the browser");
+    assert.equal(response.headers.get("set-cookie"), null, "the rewritten Twitch flow does not depend on a browser state cookie");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Railway API proxy preserves the top-level Twitch authorization redirect", async () => {
+  const bindings: Env = { ...env(), RAILWAY_API_URL: "https://riftpulse-api.test" };
+  const originalFetch = globalThis.fetch;
+  let observedRedirect: RequestRedirect | null = null;
+  const authorizeUrl = "https://id.twitch.tv/oauth2/authorize?client_id=test&response_type=code";
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const upstreamRequest = input instanceof Request ? input : new Request(input, init);
+    observedRedirect = upstreamRequest.redirect;
+    assert.equal(upstreamRequest.method, "POST");
+    assert.equal(upstreamRequest.url, "https://riftpulse-api.test/api/v1/providers/twitch/connect");
+    assert.equal(upstreamRequest.headers.get("origin"), "https://app.riftpulse.me");
+    return new Response(null, { status: 303, headers: { location: authorizeUrl } });
+  };
+
+  try {
+    const response = await worker.fetch(new Request(
+      "https://app.riftpulse.me/api/v1/providers/twitch/connect",
+      { method: "POST", headers: { origin: "https://app.riftpulse.me", "content-type": "application/x-www-form-urlencoded" }, body: "" },
+    ), bindings);
+    assert.equal(observedRedirect, "manual");
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get("location"), authorizeUrl);
   } finally {
     globalThis.fetch = originalFetch;
   }

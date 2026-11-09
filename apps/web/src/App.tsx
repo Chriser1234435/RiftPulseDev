@@ -370,15 +370,28 @@ function App() {
     const params = new URLSearchParams(window.location.search);
     const provider = params.get("provider");
     const status = params.get("status");
+    const reason = params.get("reason");
     if ((provider !== "twitch" && provider !== "youtube" && provider !== "kick") || !status) return;
 
     setActiveTab("Integrations");
     if (status === "connected" && !user?.id) {
       flash(provider + " returned from authorization, but RiftPulse could not confirm your sign-in. Sign in again and reconnect.");
     } else if (status === "connected") {
-      flash(provider === "twitch" ? "Twitch account authorized. EventSub subscription setup is still pending." : provider === "youtube" ? "YouTube account authorized. Live-chat polling is still pending." : "Kick account authorized. Webhook subscription setup is still pending.");
+      flash(provider === "twitch" ? "Twitch connected successfully. Enable chat events next." : provider === "youtube" ? "YouTube account authorized. Live-chat polling is still pending." : "Kick account authorized. Webhook subscription setup is still pending.");
     } else if (status === "denied") {
       flash(provider + " authorization was canceled.");
+    } else if (provider === "twitch") {
+      const messages: Record<string, string> = {
+        state_invalid_or_expired: "Twitch returned an expired or invalid authorization attempt. Start Connect Twitch again.",
+        authorization_code_missing: "Twitch did not return an authorization code. Start Connect Twitch again.",
+        token_exchange_failed: "Twitch accepted the login, but its token exchange failed. Try connecting again.",
+        token_response_invalid: "Twitch returned an incomplete token response. Try connecting again.",
+        token_validation_failed: "Twitch could not validate the returned account token. Try connecting again.",
+        scope_mismatch: "Twitch did not grant every permission RiftPulse needs for chat and events.",
+        token_persistence_failed: "Twitch authorized RiftPulse, but the encrypted connection could not be saved.",
+        storage_failed: "RiftPulse could not verify or save the Twitch authorization state.",
+      };
+      flash(messages[reason ?? ""] ?? "Twitch connection could not be completed. Check the latest RiftPulse callback diagnostic.");
     } else {
       flash(provider + " connection could not be completed. No token details were shown.");
     }
@@ -547,21 +560,12 @@ function App() {
       flash("Twitch OAuth is not configured in this local workspace yet.");
       return;
     }
-    try {
-      const response = await fetch("/api/v1/providers/twitch/connect", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: "{}" });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error?.message ?? "Could not start Twitch authorization.");
-      const authorizationUrl = new URL(data.authorizationUrl);
-      if (authorizationUrl.origin !== "https://id.twitch.tv" || authorizationUrl.pathname !== "/oauth2/authorize") throw new Error("The authorization URL was not trusted.");
-      const callbackUri = authorizationUrl.searchParams.get("redirect_uri");
-      const expectedCallbackUri = new URL("/api/v1/providers/twitch/callback", window.location.origin).toString();
-      if (callbackUri !== expectedCallbackUri) {
-        throw new Error("Twitch callback URL mismatch. Expected " + expectedCallbackUri + " but received " + (callbackUri ?? "no redirect URI") + ". Check the Twitch redirect URL configuration.");
-      }
-      window.location.assign(authorizationUrl.toString());
-    } catch (error) {
-      flash(error instanceof Error ? error.message : "Could not start Twitch authorization.");
-    }
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = "/api/v1/providers/twitch/connect";
+    form.hidden = true;
+    document.body.append(form);
+    form.submit();
   };
 
   const startPairing = () => {
