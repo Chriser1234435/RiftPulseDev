@@ -154,7 +154,8 @@ function readCookie(request: Request, name: string): string | null {
 }
 
 function youtubeStateCookie(state: string | null, secure: boolean): string {
-  const base = "rp_youtube_oauth_state=" + (state ?? "") + "; Path=/api/v1/providers/youtube/callback; HttpOnly; SameSite=Lax; Max-Age=" + (state ? "600" : "0");
+  // Google returns to the app homepage, so the state cookie must be sent there.
+  const base = "rp_youtube_oauth_state=" + (state ?? "") + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + (state ? "600" : "0");
   return secure ? base + "; Secure" : base;
 }
 
@@ -223,15 +224,33 @@ export default {
 
     // Keep Cloudflare as the browser-facing origin, but run all API logic on Railway.
     // This also keeps Better Auth cookies same-origin for the Cloudflare-hosted UI.
-    // Twitch redirects to the app homepage itself. Forward the OAuth response
-    // to the existing server callback before the SPA can load or inspect the code.
-    const isTwitchRootCallback = url.pathname === "/"
+    // Twitch and YouTube redirect to the app homepage. Identify the provider
+    // using the digest-only, unconsumed OAuth state row; API callback logic still
+    // atomically consumes and validates the state before token exchange.
+    let rootOAuthProvider: "twitch" | "youtube" | null = null;
+    const isRootOAuthCallback = url.pathname === "/"
       && url.searchParams.has("state")
       && (url.searchParams.has("code") || url.searchParams.has("error"));
+    if (isRootOAuthCallback && env.DB) {
+      const state = url.searchParams.get("state");
+      if (state && /^[a-f0-9]{64}$/i.test(state)) {
+        try {
+          const digest = await digestOAuthState(state);
+          const row = await env.DB.prepare(
+            "SELECT provider FROM provider_oauth_states WHERE state_digest = ? AND consumed_at IS NULL AND expires_at > ? LIMIT 1",
+          ).bind(digest, new Date().toISOString()).first<{ provider: string }>();
+          if (row?.provider === "twitch" || row?.provider === "youtube") rootOAuthProvider = row.provider;
+        } catch {
+          console.error("root_oauth_provider_lookup_failed");
+        }
+      }
+    }
 
-    if (env.RAILWAY_API_URL && (url.pathname.startsWith("/api/") || isTwitchRootCallback)) {
+    if (env.RAILWAY_API_URL && (url.pathname.startsWith("/api/") || rootOAuthProvider !== null)) {
       try {
-        const upstreamPath = isTwitchRootCallback ? "/api/v1/providers/twitch/callback" : url.pathname;
+        const upstreamPath = rootOAuthProvider
+          ? `/api/v1/providers/${rootOAuthProvider}/callback`
+          : url.pathname;
         const upstream = new URL(upstreamPath + url.search, env.RAILWAY_API_URL);
         const headers = new Headers(request.headers);
         headers.delete("host");
@@ -671,17 +690,19 @@ export default {
       if (!env.YOUTUBE_CLIENT_ID || !env.YOUTUBE_CLIENT_SECRET || !env.TOKEN_ENCRYPTION_KEY || !env.APP_BASE_URL) {
         return jsonError(503, "youtube_oauth_not_configured", "Google OAuth credentials, app URL, and token encryption key must be configured locally first.", requestId);
       }
-      let appUrl: URL, redirectUri: URL;
+      let appUrl: URL, redirectUri: URL, redirectUriValue: string;
       try {
         appUrl = new URL(env.APP_BASE_URL);
-        redirectUri = new URL(env.YOUTUBE_REDIRECT_URI ?? "/api/v1/providers/youtube/callback", appUrl);
+        redirectUriValue = env.YOUTUBE_REDIRECT_URI?.trim() || appUrl.origin;
+        redirectUri = new URL(redirectUriValue);
       } catch {
         return jsonError(503, "youtube_oauth_not_configured", "The YouTube OAuth callback URL is invalid.", requestId);
       }
-      if (redirectUri.origin !== appUrl.origin || redirectUri.pathname !== "/api/v1/providers/youtube/callback"
+      if (redirectUri.origin !== appUrl.origin || redirectUri.pathname !== "/"
         || redirectUri.username || redirectUri.password || redirectUri.search || redirectUri.hash
+        || redirectUriValue !== appUrl.origin
         || (redirectUri.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(redirectUri.hostname))) {
-        return jsonError(503, "youtube_oauth_not_configured", "The callback must be the exact same-origin registered Google OAuth callback URL.", requestId);
+        return jsonError(503, "youtube_oauth_not_configured", "The callback must be the exact same-origin registered Google OAuth homepage URL.", requestId);
       }
 
       const now = new Date();
@@ -700,7 +721,7 @@ export default {
 
       const authorizationUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
       authorizationUrl.searchParams.set("client_id", env.YOUTUBE_CLIENT_ID);
-      authorizationUrl.searchParams.set("redirect_uri", redirectUri.toString());
+      authorizationUrl.searchParams.set("redirect_uri", redirectUriValue);
       authorizationUrl.searchParams.set("response_type", "code");
       authorizationUrl.searchParams.set("scope", "https://www.googleapis.com/auth/youtube.readonly");
       authorizationUrl.searchParams.set("access_type", "offline");
@@ -844,13 +865,15 @@ export default {
       const code = url.searchParams.get("code");
       if (!code || code.length > 2048) return finish("failed");
 
-      let appUrl: URL, redirectUri: URL;
+      let appUrl: URL, redirectUri: URL, redirectUriValue: string;
       try {
         appUrl = new URL(env.APP_BASE_URL);
-        redirectUri = new URL(env.YOUTUBE_REDIRECT_URI ?? "/api/v1/providers/youtube/callback", appUrl);
+        redirectUriValue = env.YOUTUBE_REDIRECT_URI?.trim() || appUrl.origin;
+        redirectUri = new URL(redirectUriValue);
       } catch { return finish("failed"); }
-      if (redirectUri.origin !== appUrl.origin || redirectUri.pathname !== "/api/v1/providers/youtube/callback"
-        || redirectUri.username || redirectUri.password || redirectUri.search || redirectUri.hash) return finish("failed");
+      if (redirectUri.origin !== appUrl.origin || redirectUri.pathname !== "/"
+        || redirectUri.username || redirectUri.password || redirectUri.search || redirectUri.hash
+        || redirectUriValue !== appUrl.origin) return finish("failed");
 
       try {
         const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
@@ -861,7 +884,7 @@ export default {
             client_secret: env.YOUTUBE_CLIENT_SECRET,
             code,
             grant_type: "authorization_code",
-            redirect_uri: redirectUri.toString(),
+            redirect_uri: redirectUriValue,
           }),
         });
         if (!tokenResponse.ok) return finish("failed");

@@ -17,6 +17,9 @@ class FakeStatement implements D1PreparedStatement {
   bind(...values: unknown[]): D1PreparedStatement { this.values = values; return this; }
   async first<T>(): Promise<T | null> {
     const q = this.query.toLowerCase();
+    if (q.includes("select provider from provider_oauth_states")) {
+      return { provider: this.db.rootOAuthProvider } as T;
+    }
     if (q.includes("select count(*) as count from pairing_challenges")) {
       const [deviceId, now] = this.values as [string, string];
       const count = [...this.db.challenges.values()].filter(row =>
@@ -88,6 +91,7 @@ class FakeStatement implements D1PreparedStatement {
 
 class FakeD1 implements D1Database {
   readonly challenges = new Map<string, ChallengeRow>();
+  rootOAuthProvider = "twitch";
   deviceCredentialDigest: string | null = null;
   deviceAccountId = "test-account";
   readonly moduleSettings = new Map<string, { enabled: number; settings_json: string }>();
@@ -177,9 +181,9 @@ test("Twitch homepage OAuth response is forwarded to the server callback before 
 
   try {
     const response = await worker.fetch(new Request(
-      "https://app.riftpulse.me/?code=oauth-code&state=one-time-state&scope=user%3Aread%3Achat",
+      "https://app.riftpulse.me/?code=oauth-code&state=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&scope=user%3Aread%3Achat",
     ), bindings);
-    assert.equal(observedUrl, "https://riftpulse-api.test/api/v1/providers/twitch/callback?code=oauth-code&state=one-time-state&scope=user%3Aread%3Achat");
+    assert.equal(observedUrl, "https://riftpulse-api.test/api/v1/providers/twitch/callback?code=oauth-code&state=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&scope=user%3Aread%3Achat");
     assert.equal(response.status, 303);
     assert.equal(response.headers.get("location"), expectedLocation);
   } finally {
