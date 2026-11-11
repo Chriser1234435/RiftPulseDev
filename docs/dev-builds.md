@@ -478,3 +478,14 @@ Date: 2026-11-04
 - Public verification: the dev callback endpoint returned HTTP 302 with the provider/status redirect in its Location header; the dev API health endpoint returned HTTP 200. The callback smoke test intentionally omitted OAuth state/code, so status=failed was expected and no account was connected.
 - Published the website release note to the development D1 release history.
 - Production riftpulse / app.riftpulse.me was not deployed. Production deployment requires explicit authorization.
+
+
+## YouTube OAuth homepage callback fix — development (November 11, 2026)
+
+- Updated the YouTube OAuth start and token exchange to use the canonical app homepage redirect URI (exact origin, no slash), aligned with the Twitch callback pattern.
+- Cloudflare Worker now detects provider for a homepage OAuth callback using the digest-only, unconsumed state record in D1, then proxies the query to the provider callback route. The API still atomically consumes state, checks the YouTube state cookie, and rejects replay/expired attempts.
+- Expanded the YouTube state cookie path to root so it is sent on the Google redirect back to the homepage.
+- Validation: npm test passed — TypeScript check, 60 unit/contract tests, isolated SQLite migration test, and Worker/client production build.
+- Source commit: e3c6fb7e7c4c05435dbcad11fd9f6a6e8ab97e88. Cloudflare development Worker riftpulse-dev deployed, Version ID ca7261a3-7fab-4221-a699-a3ea81bfd4c1. Railway development API deployment 4877eae8-b857-4056-a7bb-5019eda286cc reached SUCCESS.
+- Published release update to development D1 release history (record release-youtube-homepage-oauth-20261111).
+- Production app.riftpulse.me was not deployed. Actual Google-account OAuth round-trip remains pending user testing.
