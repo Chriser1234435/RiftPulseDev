@@ -140,3 +140,24 @@ html.is-mobile-device .section-block{scroll-margin-top:70px}
 .updates-empty b{color:#dce1ee;font-size:11px}
 .updates-empty span{max-width:220px;line-height:1.6}
 @media(max-width:600px){.updates-dropdown{position:fixed;top:calc(58px + env(safe-area-inset-top));right:12px;width:min(390px,calc(100vw - 24px));max-height:min(72dvh,620px)} }
+
+/* Legal document pages */
+.legal-shell{min-height:100vh;background:var(--bg,#0b0c10);color:var(--text,#f2f3f5);padding:0 24px 36px}
+.legal-header{max-width:980px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:26px 0;border-bottom:1px solid rgba(255,255,255,.08)}
+.legal-brand{display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none;font-weight:800;letter-spacing:.12em}
+.legal-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:11px;background:linear-gradient(135deg,#8c5cf6,#4f46e5);font-weight:900}
+.legal-back{color:#b8a4ff;text-decoration:none;font-size:14px}
+.legal-document{max-width:780px;margin:54px auto 40px;line-height:1.75;color:#c8cbd4}
+.legal-eyebrow{color:#a78bfa;font-size:11px;font-weight:800;letter-spacing:.2em}
+.legal-document h1{font-size:clamp(32px,5vw,48px);line-height:1.15;color:#f8fafc;margin:12px 0}
+.legal-effective{color:#969baa;font-size:13px;margin-bottom:36px}
+.legal-document h2{font-size:19px;color:#f0f1f5;margin:28px 0 8px;line-height:1.4}
+.legal-document p{margin:0 0 12px}
+.legal-document a,.legal-bottom a{color:#b8a4ff;text-decoration:none}
+.legal-document a:hover,.legal-bottom a:hover,.legal-back:hover{text-decoration:underline}
+.legal-bottom{display:flex;flex-wrap:wrap;gap:12px;margin-top:40px;padding-top:20px;border-top:1px solid rgba(255,255,255,.1);font-size:14px}
+.legal-footer{max-width:980px;margin:auto;border-top:1px solid rgba(255,255,255,.08);padding-top:20px;color:#8b91a0;font-size:12px}
+.auth-footer a,.page-footer a{color:inherit;text-decoration:none}
+.auth-footer a:hover,.page-footer a:hover{color:#b8a4ff;text-decoration:underline}
+@media(max-width:600px){.legal-shell{padding:0 18px 28px}.legal-header{padding:18px 0}.legal-document{margin:32px auto}.legal-document h2{font-size:17px}}
+

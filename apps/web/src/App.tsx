@@ -737,6 +737,12 @@ function App() {
     { label: "Settings", icon: SlidersHorizontal },
   ];
 
+  const rawPath = window.location.pathname;
+  const legalPath = (rawPath.endsWith("/") ? rawPath.slice(0, -1) : rawPath) || "/";
+  if (legalPath === "/privacy" || legalPath === "/terms") {
+    return <LegalPage kind={legalPath === "/privacy" ? "privacy" : "terms"} />;
+  }
+
   if (!authLoaded) return <div className="auth-loading"><div className="brand-mark"><AudioLines size={25}/></div><span className="loading-ring"/><small>INITIALIZING RIFTPULSE</small></div>;
 
   if (!user || authMode === "reset-password" || authMode === "request-reset") return (
@@ -760,7 +766,7 @@ function App() {
           <div className="auth-foot"><ShieldCheck size={15}/><span>RiftPulse preview account. Password reset links expire after one hour.</span></div>
         </div>
       </section>
-      <footer className="auth-footer"><span>© 2026 RiftPulse</span><span>CHAT · BSR SONG REQUEST</span><span>LOCAL DEVELOPMENT BUILD</span></footer>
+      <footer className="auth-footer"><span>© 2026 RiftPulse</span><span>CHAT · BSR SONG REQUEST</span><span><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></span></footer>
     </main>
   );
 
@@ -919,7 +925,7 @@ function App() {
             </div>
           </section>
 
-          <footer className="page-footer"><div><span className="footer-pulse" /> RIFTPULSE <span className="footer-version">V0.1.0 · DEVELOPMENT PREVIEW</span></div><div><span>Built for the beat.</span><span className="footer-separator">·</span><button onClick={() => setModal("help")}>Support</button><span className="footer-separator">·</span><button onClick={() => setModal("settings")}>Preferences</button></div></footer>
+          <footer className="page-footer"><div><span className="footer-pulse" /> RIFTPULSE <span className="footer-version">V0.1.0 · DEVELOPMENT PREVIEW</span></div><div><span>Built for the beat.</span><span className="footer-separator">·</span><a href="/privacy">Privacy</a><span className="footer-separator">·</span><a href="/terms">Terms</a><span className="footer-separator">·</span><button onClick={() => setModal("help")}>Support</button><span className="footer-separator">·</span><button onClick={() => setModal("settings")}>Preferences</button></div></footer>
         </div>
       </main>
 
@@ -956,6 +962,47 @@ function App() {
       </div>}
     </div>
   );
+}
+
+function LegalPage({ kind }: { kind: "privacy" | "terms" }) {
+  const privacy = kind === "privacy";
+  return <main className="legal-shell">
+    <header className="legal-header"><a className="legal-brand" href="/"><span className="legal-mark"><AudioLines size={22}/></span>RIFTPULSE</a><a className="legal-back" href="/">Back to RiftPulse <ArrowRight size={15}/></a></header>
+    <article className="legal-document">
+      <div className="legal-eyebrow">RIFTPULSE · LEGAL</div>
+      <h1>{privacy ? "Privacy Policy" : "Terms of Service"}</h1>
+      <p className="legal-effective">Effective date: November 11, 2026</p>
+      {privacy ? <>
+        <p>This Privacy Policy describes how RiftPulse (“RiftPulse,” “we,” “us,” or “our”) handles information when you use our website, account services, and Beat Saber-related integrations. RiftPulse is a development-stage service; features and data flows may change as features are introduced.</p>
+        <h2>1. Information we handle</h2><p>Depending on the features you use, we may handle account details such as email address, display name, and account identifier; device and pairing identifiers, pairing status, and configuration preferences; and technical information such as request logs, browser/device details, IP address, and security events.</p>
+        <h2>2. Connected platform data</h2><p>If you authorize Twitch, YouTube/Google, TikTok LIVE, or Kick, the service may process platform identifiers, usernames, authorization tokens, chat messages, stream status, viewer counts, and event data (such as follows, subscriptions, gifts, or donations) to the extent the integration supports them and the permissions allow. Actual data availability varies by platform and feature.</p>
+        <h2>3. How information is used</h2><p>We use information to operate and secure accounts, complete device pairing, provide integrations and settings sync, deliver chat/event and song-request features, troubleshoot errors, prevent abuse, and maintain or improve RiftPulse.</p>
+        <h2>4. Service providers and sharing</h2><p>RiftPulse relies on service providers including Cloudflare and Railway for hosting, infrastructure, and operation. Information may be processed by providers and connected platforms as needed to deliver requested features. We may disclose information when legally required or when reasonably necessary to protect the service, users, or others. We do not sell personal information for money.</p>
+        <h2>5. OAuth and third-party accounts</h2><p>When you connect an external account, you grant RiftPulse access within the permissions presented by that platform. You can revoke authorization through the platform's account settings; this may disable RiftPulse features. Third-party services are governed by their own terms and privacy policies.</p>
+        <h2>6. Security and retention</h2><p>We use reasonable safeguards to protect information, but no service can guarantee absolute security. Information is retained as needed to provide the service, maintain security, resolve issues, and meet legal obligations; retention periods may vary by data type.</p>
+        <h2>7. Your choices and requests</h2><p>You may disconnect integrations through available controls or revoke them at the platform. You may request access, correction, or deletion of account information by contacting RiftPulse through the website's Support feature. We will handle requests as required by applicable law. Certain records may need to be retained for security or legal reasons.</p>
+        <h2>8. Children's privacy</h2><p>RiftPulse is not intended for children below the minimum age permitted under applicable law. If we learn that we have collected personal information in violation of applicable law, we will take appropriate steps to address it.</p>
+        <h2>9. International processing</h2><p>Our providers may process information in locations outside your country. Where applicable, we take steps required by law for such processing.</p>
+        <h2>10. Policy updates and contact</h2><p>We may update this policy and revise its effective date. For privacy questions or requests, contact us through the Support feature on the RiftPulse website.</p>
+      </> : <>
+        <p>These Terms of Service (“Terms”) govern your use of the RiftPulse website, accounts, software integrations, device pairing, and supported features. By accessing or using RiftPulse, you agree to these Terms. If you do not agree, do not use the service.</p>
+        <h2>1. Service description</h2><p>RiftPulse provides tools intended for Beat Saber players and streamers, which may include account and device pairing, streaming-platform connections, chat and event integrations, configurable commands, and song-request features. Features may be changed, suspended, or discontinued as the service develops.</p>
+        <h2>2. Eligibility and accounts</h2><p>You must meet the minimum age required by applicable law and the services you connect. If you are a minor, obtain any parent or guardian permission required by law. Keep account credentials secure, provide accurate information, and promptly report suspected unauthorized access.</p>
+        <h2>3. Third-party platform connections</h2><p>Connecting Twitch, YouTube/Google, TikTok LIVE, Kick, or another platform is subject to that platform's terms, policies, and availability. You are responsible for having permission to connect the account and for revoking access when appropriate. RiftPulse does not control third-party services and does not guarantee their continued availability.</p>
+        <h2>4. Acceptable use</h2><p>You may not use RiftPulse unlawfully; attempt unauthorized access; disrupt, abuse, or overload the service; circumvent authentication, pairing, or security controls; distribute harmful code; harass or impersonate others; or violate another person's rights. You may not use chat commands or song requests to spam or disrupt a stream.</p>
+        <h2>5. User configuration and content</h2><p>You are responsible for the commands, request rules, and moderation settings you configure, and for ensuring your use of connected platforms and content complies with applicable rules and rights. RiftPulse does not claim ownership of Beat Saber, music, or third-party platform content.</p>
+        <h2>6. Intellectual property</h2><p>RiftPulse's original software, branding, and website materials are owned by or licensed to RiftPulse, except third-party materials. Do not reproduce or commercially exploit these materials except as permitted by law or applicable license. Third-party marks belong to their respective owners.</p>
+        <h2>7. Availability and changes</h2><p>RiftPulse is under development and is provided without a guarantee of uninterrupted, error-free operation, compatibility with every device or game version, or continued operation of integrations. We may modify or discontinue features as reasonably needed.</p>
+        <h2>8. Suspension and termination</h2><p>We may restrict or suspend access for violations, abuse, security risks, or legal requirements. You may stop using RiftPulse at any time and request account-data deletion through the website's Support feature, subject to applicable retention obligations.</p>
+        <h2>9. Disclaimer</h2><p>To the maximum extent permitted by law, RiftPulse is provided “AS IS” and “AS AVAILABLE,” without warranties not expressly provided, including implied warranties of merchantability, fitness for a particular purpose, and non-infringement. Nothing here excludes rights or warranties that cannot legally be excluded.</p>
+        <h2>10. Limitation of liability</h2><p>To the maximum extent permitted by law, RiftPulse is not liable for indirect, incidental, special, consequential, or punitive damages, including loss of data, service interruption, or third-party service issues. This does not limit liability that cannot legally be limited.</p>
+        <h2>11. Privacy</h2><p>Your use of RiftPulse is also subject to our <a href="/privacy">Privacy Policy</a>, which explains how information is handled.</p>
+        <h2>12. Updates, governing law, and contact</h2><p>We may revise these Terms by posting an updated version and effective date; additional notice or consent will be provided where required. Governing law and dispute venue will be determined by applicable law. For questions, contact RiftPulse through the website's Support feature.</p>
+      </>}
+      <div className="legal-bottom"><a href="/privacy">Privacy Policy</a><span>·</span><a href="/terms">Terms of Service</a><span>·</span><a href="/">RiftPulse Home</a></div>
+    </article>
+    <footer className="legal-footer">© 2026 RiftPulse · Built for the beat.</footer>
+  </main>;
 }
 
 function MetricCard({ icon, label, value, detail, muted = false }: { icon: React.ReactNode; label: string; value: string; detail: string; muted?: boolean }) {
