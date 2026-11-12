@@ -8,7 +8,9 @@ const id = (v: unknown): string => typeof v === "string" ? v.trim().slice(0, 128
 const text = (v: unknown, max: number): string => typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max) : "";
 const date = (v: unknown, fallback: Date): string => {
   if (typeof v === "string" || typeof v === "number") {
-    const normalized = typeof v === "number" && Math.abs(v) < 1_000_000_000_000 ? v * 1000 : v;
+    const numeric = typeof v === "string" && /^\d+(?:\.\d+)?$/.test(v) ? Number(v) : null;
+    const value = numeric ?? v;
+    const normalized = typeof value === "number" && Math.abs(value) < 1_000_000_000_000 ? value * 1000 : value;
     const parsed = new Date(normalized);
     if (Number.isFinite(parsed.getTime())) return parsed.toISOString();
   }
@@ -106,7 +108,8 @@ export function normalizeYouTubeProviderEvent(payload: unknown, channelId: strin
 const TIKTOK_EVENT_KIND: Record<string, ProviderEventKind> = {
   follow: "follow", follow_event: "follow", subscribe: "subscription", subscription: "subscription",
   gift: "gift", gift_event: "gift", like: "like", like_event: "like", share: "share",
-  share_event: "share", member: "member_join", member_join: "member_join", roomuser: "viewer_count",
+  share_event: "share", member: "member_join", member_join: "member_join",
+  subnotify: "subscription", sub_notify: "subscription", roomuser: "viewer_count",
   room_user: "viewer_count", viewer_count: "viewer_count",
 };
 
@@ -118,19 +121,24 @@ export function normalizeTikTokProviderEvent(
   const user = child(root, "user") ?? child(root, "gifter") ?? child(root, "userInfo");
   const kind = TIKTOK_EVENT_KIND[eventName.toLowerCase()];
   if (!root || !kind || !id(channelId)) return null;
-  const common = child(root, "common");
-  const eventId = id(common?.msgId ?? common?.messageId ?? common?.logId ?? root.eventId ?? root.event_id
-    ?? root.msgId ?? root.messageId ?? root.logId ?? root.id
-    ?? ((common?.createTime ?? root.createTime ?? root.create_time) !== undefined
-      ? eventName + ":" + id(common?.createTime ?? root.createTime ?? root.create_time) + ":" + id(user?.userId ?? user?.id)
-      : kind === "viewer_count" ? eventName + ":" + id(root.totalUser ?? root.total ?? root.totalUserCount ?? root.viewerCount) + ":" + receivedAt.getTime() : kind === "gift" ? eventName + ":" + id(user?.userId ?? user?.id) + ":" + id(root.giftId ?? child(root, "giftDetails")?.giftId) + ":" + receivedAt.getTime() : ""));
+  // The installed connector's protobuf payloads put event IDs/timestamps under
+  // the nested event object; older adapter shapes may expose these under common.
+  const eventMeta = child(root, "common") ?? child(root, "event");
+  const eventTime = eventMeta?.createTime ?? root.createTime ?? root.create_time ?? root.timestamp;
+  const eventId = id(eventMeta?.msgId ?? eventMeta?.messageId ?? eventMeta?.logId
+    ?? root.eventId ?? root.event_id ?? root.msgId ?? root.messageId ?? root.logId ?? root.id
+    ?? (eventTime !== undefined
+      ? eventName + ":" + id(eventTime) + ":" + id(user?.userId ?? user?.user_id ?? user?.id)
+      : kind === "viewer_count" ? eventName + ":" + id(root.totalUser ?? root.total ?? root.totalUserCount ?? root.viewerCount) + ":" + receivedAt.getTime()
+      : kind === "gift" ? eventName + ":" + id(user?.userId ?? user?.user_id ?? user?.id) + ":" + id(root.giftId ?? child(root, "giftDetails")?.giftId) + ":" + receivedAt.getTime()
+      : ""));
   if (!eventId) return null;
   const gift = child(root, "giftDetails") ?? child(root, "extendedGiftInfo") ?? child(root, "gift");
   const amountValue = root.amount ?? root.superChatAmount ?? root.bits;
   const amount = typeof amountValue === "number" && Number.isFinite(amountValue) && amountValue >= 0 ? amountValue : null;
   const quantityValue = kind === "viewer_count"
     ? root.viewerCount ?? root.totalUser ?? root.total ?? root.totalUserCount ?? root.memberCount
-    : root.repeatCount ?? root.repeat_count ?? root.count ?? root.likeCount ?? root.viewerCount ?? root.totalUserCount ?? root.memberCount;
+    : root.repeatCount ?? root.repeat_count ?? root.count ?? root.likeCount ?? root.subMonth ?? root.viewerCount ?? root.totalUserCount ?? root.memberCount;
   const parsedQuantity = typeof quantityValue === "number" ? quantityValue
     : typeof quantityValue === "string" && /^\d+$/.test(quantityValue) ? Number(quantityValue) : NaN;
   const quantity = Number.isSafeInteger(parsedQuantity) && parsedQuantity >= 0 ? parsedQuantity : null;
@@ -140,9 +148,9 @@ export function normalizeTikTokProviderEvent(
     actorId: id(user?.userId ?? user?.user_id ?? user?.id) || null,
     actorName: text(user?.uniqueId ?? user?.nickname ?? user?.displayId ?? user?.username, 80) || null,
     message: text(root.comment ?? root.message ?? root.text, 500) || null,
-    itemName: text(gift?.giftName ?? gift?.name ?? root.giftName ?? root.gift_name ?? child(root, "trayInfo")?.name, 100) || null,
+    itemName: text(gift?.giftName ?? gift?.name ?? root.giftName ?? root.gift_name ?? child(root, "trayInfo")?.name ?? (kind === "subscription" ? "TikTok LIVE subscription" : ""), 100) || null,
     quantity, amount, currency: text(root.currency, 8) || null,
-    occurredAt: date(common?.createTime ?? root.createTime ?? root.create_time ?? root.timestamp, receivedAt),
+    occurredAt: date(eventTime, receivedAt),
     receivedAt: receivedAt.toISOString(),
   };
 }

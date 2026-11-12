@@ -103,6 +103,50 @@ test("normalizes TikTok chat and platform events without inventing cash values",
   assert.equal(connectorGift?.itemName, "Rose");
   assert.equal(connectorGift?.quantity, 4);
 
+  // Actual TikTok LIVE protobuf event shape: event metadata is nested inside
+  // event.msgId/event.createTime for follow, like, share, and member callbacks.
+  const follow = normalizeTikTokProviderEvent("follow", {
+    event: { msgId: "follow-msg-1", createTime: "1793275140" },
+    user: { userId: "viewer-follow-1", uniqueId: "follower", nickname: "Follower" },
+  }, "room-1", "Streamer", now);
+  assert.equal(follow?.kind, "follow");
+  assert.equal(follow?.externalEventId, "follow-msg-1");
+  assert.equal(follow?.actorName, "follower");
+  assert.equal(follow?.occurredAt, new Date(1793275140 * 1000).toISOString());
+
+  const like = normalizeTikTokProviderEvent("like", {
+    event: { msgId: "like-msg-1", createTime: "1793275141" },
+    user: { userId: "viewer-like-1", uniqueId: "liker", nickname: "Liker" },
+    likeCount: 18, totalLikeCount: 120,
+  }, "room-1", "Streamer", now);
+  assert.equal(like?.kind, "like");
+  assert.equal(like?.externalEventId, "like-msg-1");
+  assert.equal(like?.quantity, 18);
+
+  const share = normalizeTikTokProviderEvent("share", {
+    event: { msgId: "share-msg-1", createTime: "1793275142" },
+    user: { userId: "viewer-share-1", uniqueId: "sharer", nickname: "Sharer" },
+  }, "room-1", "Streamer", now);
+  assert.equal(share?.kind, "share");
+  assert.equal(share?.externalEventId, "share-msg-1");
+
+  const member = normalizeTikTokProviderEvent("member", {
+    event: { msgId: "member-msg-1", createTime: "1793275143" },
+    user: { userId: "viewer-member-1", uniqueId: "member", nickname: "Member" },
+  }, "room-1", "Streamer", now);
+  assert.equal(member?.kind, "member_join");
+  assert.equal(member?.externalEventId, "member-msg-1");
+
+  const subscription = normalizeTikTokProviderEvent("subNotify", {
+    event: { msgId: "sub-msg-1", createTime: "1793275144" },
+    user: { userId: "viewer-sub-1", uniqueId: "subscriber", nickname: "Subscriber" },
+    subMonth: 3, subscribeType: 1,
+  }, "room-1", "Streamer", now);
+  assert.equal(subscription?.kind, "subscription");
+  assert.equal(subscription?.externalEventId, "sub-msg-1");
+  assert.equal(subscription?.quantity, 3);
+  assert.equal(subscription?.itemName, "TikTok LIVE subscription");
+
   const protobufViewerStats = normalizeTikTokProviderEvent("room_user", {
     common: { msgId: "viewer-count-2" }, total: "41", totalUser: "39",
   }, "room-1", "Streamer", now);

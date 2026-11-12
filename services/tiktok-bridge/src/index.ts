@@ -56,6 +56,7 @@ class AccountRunner {
     this.connection.on(WebcastEvent.LIKE, data => this.enqueue("event", data, "like"));
     this.connection.on(WebcastEvent.SHARE, data => this.enqueue("event", data, "share"));
     this.connection.on(WebcastEvent.MEMBER, data => this.enqueue("event", data, "member"));
+    this.connection.on(WebcastEvent.SUB_NOTIFY, data => this.enqueue("event", data, "subNotify"));
     this.connection.on(WebcastEvent.ROOM_USER, data => this.enqueue("viewers", data));
     this.connection.on("disconnected", () => this.requestReconnect("disconnected"));
     this.connection.on("error", () => this.requestReconnect("connector error"));
@@ -75,10 +76,14 @@ class AccountRunner {
   }
 
   private enqueue(kind: "chat" | "event" | "viewers", payload: unknown, eventName?: string): void {
-    if (this.stopped || !this.roomId) return;
+    // Capture the room at event time. The runner clears this.roomId immediately
+    // on disconnect; reading it later inside the queued callback used to send an
+    // empty channelId for events waiting behind another ingest request.
+    const channelId = this.roomId;
+    if (this.stopped || !channelId) return;
     this.queue = this.queue.then(async () => {
       const body = JSON.stringify({
-        accountId: this.accountId, channelId: this.roomId, channelName: this.channelName, kind,
+        accountId: this.accountId, channelId, channelName: this.channelName, kind,
         ...(eventName ? { eventName } : {}), payload,
       });
       const timestamp = Math.floor(Date.now() / 1000).toString();
