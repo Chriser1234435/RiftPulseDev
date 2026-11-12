@@ -32,6 +32,14 @@ const maxAccounts = Math.max(1, Math.min(50, Number(process.env.TIKTOK_MAX_ACTIV
 type AccountConfig = { accountId: string; username: string };
 type ConnectorWithEvents = TikTokLiveConnection & { on(event: string, listener: (data: unknown) => void): unknown };
 
+function isExpectedOfflineError(value: unknown): boolean {
+  const message = value instanceof Error ? value.message
+    : typeof value === "string" ? value
+    : value && typeof value === "object" && "message" in value && typeof value.message === "string" ? value.message
+    : "";
+  return /requested user (?:is not|isn.t) online|user (?:is not|isn.t) online|failed to retrieve room id/i.test(message);
+}
+
 class AccountRunner {
   readonly accountId: string;
   readonly username: string;
@@ -59,7 +67,7 @@ class AccountRunner {
     this.connection.on(WebcastEvent.SUB_NOTIFY, data => this.enqueue("event", data, "subNotify"));
     this.connection.on(WebcastEvent.ROOM_USER, data => this.enqueue("viewers", data));
     this.connection.on("disconnected", () => this.requestReconnect("disconnected"));
-    this.connection.on("error", () => this.requestReconnect("connector error"));
+    this.connection.on("error", error => this.requestReconnect(isExpectedOfflineError(error) ? "stream offline" : "connector error"));
     this.connection.on("streamEnd", () => this.requestReconnect("stream ended"));
     this.runPromise = this.run();
   }

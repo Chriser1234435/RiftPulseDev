@@ -329,13 +329,13 @@ button,a{touch-action:manipulation}
   html.is-mobile-device .download-card-head{align-items:flex-start;flex-wrap:wrap;gap:9px}
   html.is-mobile-device .download-card-head>div:nth-child(2){flex:1;min-width:0}
   html.is-mobile-device .download-state{margin-left:48px;max-width:calc(100% - 48px)}
-  html.is-mobile-device .provider-row{display:grid;grid-template-columns:38px minmax(0,1fr) auto;grid-template-areas:"icon main main" "state state button";align-items:center;gap:11px 10px;min-width:0;padding:13px}
+  html.is-mobile-device .provider-row{display:grid;grid-template-columns:38px minmax(0,1fr) 112px;grid-template-areas:"icon main main" "state state button";align-items:center;gap:11px 10px;min-width:0;padding:13px}
   html.is-mobile-device .provider-row>.provider-icon{grid-area:icon;width:38px;height:38px}
   html.is-mobile-device .provider-row>.provider-main{grid-area:main;display:grid;gap:5px;min-width:0;width:100%}
   html.is-mobile-device .provider-main>b{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px}
   html.is-mobile-device .provider-main small{font-size:10px;line-height:1.4;overflow-wrap:anywhere}
   html.is-mobile-device .provider-row>.connection-state{grid-area:state;min-width:0;margin:0;font-size:10px}
-  html.is-mobile-device .provider-row>.connect-button,html.is-mobile-device .provider-row>.disconnect-button{grid-area:button;width:auto;min-width:92px;min-height:40px;margin:0;font-size:10px}
+  html.is-mobile-device .provider-row>.connect-button,html.is-mobile-device .provider-row>.disconnect-button{grid-area:button;justify-self:end;width:100%;max-width:112px;min-width:92px;min-height:40px;margin:0;font-size:10px;box-sizing:border-box}
   html.is-mobile-device .integration-footnote{font-size:10px;line-height:1.65}
   html.is-mobile-device .chat-feed-panel{grid-template-columns:minmax(0,1fr)}
   html.is-mobile-device .chat-feed-main{min-width:0}
@@ -367,9 +367,9 @@ button,a{touch-action:manipulation}
   html.is-mobile-device .metric-label{font-size:8px}
   html.is-mobile-device .metric-detail{font-size:9px}
   html.is-mobile-device .section-heading>.outline-button,html.is-mobile-device .section-heading>.text-button{margin-left:0}
-  html.is-mobile-device .provider-row{grid-template-columns:34px minmax(0,1fr);grid-template-areas:"icon main" "state button";gap:10px}
+  html.is-mobile-device .provider-row{grid-template-columns:34px minmax(0,1fr) 92px;grid-template-areas:"icon main main" "state state button";gap:10px}
   html.is-mobile-device .provider-row>.provider-icon{width:34px;height:34px}
-  html.is-mobile-device .provider-row>.connect-button,html.is-mobile-device .provider-row>.disconnect-button{min-width:82px}
+  html.is-mobile-device .provider-row>.connect-button,html.is-mobile-device .provider-row>.disconnect-button{min-width:82px;max-width:92px}
   html.is-mobile-device .onboarding-panel{bottom:calc(75px + env(safe-area-inset-bottom));width:calc(100vw - 16px);padding:14px 13px 12px}
   html.is-mobile-device .onboarding-copy p{font-size:11px}
   html.is-mobile-device .onboarding-copy{min-height:0}
