@@ -30,6 +30,7 @@ namespace RiftPulse.Pcvr
             // Subscribe while the plugin is enabled and register only when BSML
             // signals that those instances are ready.
             MainMenuAwaiter.MainMenuInitializing -= OnMainMenuInitializing;
+            RiftPulseChatPanel.Shutdown();
             MainMenuAwaiter.MainMenuInitializing += OnMainMenuInitializing;
             _logger?.Info("Waiting for BSML main-menu initialization.");
         }
@@ -50,6 +51,7 @@ namespace RiftPulse.Pcvr
                 var button = new MenuButton("RiftPulse", ShowRiftPulse);
                 menuButtons.RegisterButton(button);
                 _menuButton = button;
+                RiftPulseChatPanel.Initialize();
                 _logger?.Info("RiftPulse menu button registered in the Beat Saber main-menu mods panel.");
             }
             catch (Exception exception)
@@ -76,6 +78,7 @@ namespace RiftPulse.Pcvr
             if (!_enabled) return;
             _enabled = false;
             MainMenuAwaiter.MainMenuInitializing -= OnMainMenuInitializing;
+            RiftPulseChatPanel.Shutdown();
 
             try
             {

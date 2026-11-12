@@ -1,12 +1,12 @@
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$version = '0.1.19'
+$version = '0.1.20'
 $project = Join-Path $root 'mods\pcvr\RiftPulse.Pcvr.csproj'
 $manifestPath = Join-Path $root 'mods\pcvr\manifest.json'
 $built = Join-Path $root 'mods\pcvr\bin\Release\net472\RiftPulse.Pcvr.dll'
 $downloads = Join-Path $root 'public\downloads'
 # Remove obsolete loose metadata and packages that can cause duplicate manifest discovery.
-foreach ($legacyFile in @('manifest.json', 'RiftPulse.Pcvr.manifest.json', 'RiftPulse.Pcvr-0.1.14.zip', 'RiftPulse.Pcvr-0.1.15.zip', 'RiftPulse.Pcvr-0.1.16.zip', 'RiftPulse.Pcvr-0.1.17.zip', 'RiftPulse.Pcvr-0.1.18.zip')) {
+foreach ($legacyFile in @('manifest.json', 'RiftPulse.Pcvr.manifest.json', 'RiftPulse.Pcvr-0.1.14.zip', 'RiftPulse.Pcvr-0.1.15.zip', 'RiftPulse.Pcvr-0.1.16.zip', 'RiftPulse.Pcvr-0.1.17.zip', 'RiftPulse.Pcvr-0.1.18.zip', 'RiftPulse.Pcvr-0.1.19.zip')) {
     $legacyPath = Join-Path $downloads $legacyFile
     if (Test-Path $legacyPath) { Remove-Item $legacyPath -Force }
 }
@@ -32,7 +32,7 @@ foreach ($componentId in @('pairingCodeText', 'statusText', 'connectButton', 'ch
         throw "Controller has no UIComponent binding for: $componentId"
     }
 }
-foreach ($actionId in @('connect-click', 'toggle-chat', 'toggle-bsr')) {
+foreach ($actionId in @('connect-click', 'toggle-chat', 'toggle-bsr', 'move-chat-panel')) {
     if ($bsmlText -notmatch ('on-click="' + [regex]::Escape($actionId) + '"')) {
         throw "BSML click action missing: $actionId"
     }

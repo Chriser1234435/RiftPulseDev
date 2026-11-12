@@ -55,6 +55,10 @@ class FakeStatement implements D1PreparedStatement {
       const [digest] = this.values as [string];
       return digest === this.db.deviceCredentialDigest ? ({ accountId: this.db.deviceAccountId } as T) : null;
     }
+    if (q.includes("select enabled from module_settings")) {
+      const [moduleKey] = this.values as [string];
+      return ({ enabled: this.db.moduleSettings.get(moduleKey)?.enabled ?? 1 } as T);
+    }
     if (q.includes("select enabled, settings_json from module_settings")) {
       const [, moduleKey] = this.values as [string, string];
       return (this.db.moduleSettings.get(moduleKey) ?? null) as T | null;
@@ -299,6 +303,29 @@ test("Quest can save a module toggle with a device-authenticated header request"
   assert.equal(bindings.DB.moduleSettings.get("chat")?.enabled, 0);
 });
 
+test("native chat panel feed requires device auth and reports chat toggle plus viewer summary", async () => {
+  const denied = await call("/api/v1/device/chat/panel");
+  assert.equal(denied.status, 401);
+
+  const bindings = env();
+  const credential = "b".repeat(64);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential));
+  bindings.DB.deviceCredentialDigest = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  const response = await call("/api/v1/device/chat/panel", {
+    headers: { authorization: "Bearer " + credential },
+  }, bindings);
+  assert.equal(response.status, 200, await response.clone().text());
+  const payload = await response.json();
+  assert.equal(payload.chatEnabled, true);
+  assert.deepEqual(payload.messages, []);
+  assert.deepEqual(payload.viewers, {
+    total: null,
+    includedProviders: [],
+    missingProviders: ["twitch", "youtube", "tiktok"],
+    partial: false,
+  });
+});
+
 test("Quest managed HTTP JSON PATCH saves a module preference with device authorization", async () => {
   const bindings = env();
   const credential = "f".repeat(64);
@@ -529,4 +556,21 @@ test("private TikTok connection status route requires the bridge secret", async 
     body: JSON.stringify({ accountId: "acct", username: "creator", status: "connected" }),
   }, bindings);
   assert.equal(denied.status, 401);
+});
+
+test("in-game chat feed requires a valid paired-device credential", async () => {
+  const bindings = env();
+  const credential = "a".repeat(64);
+  const digestBytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential));
+  bindings.DB.deviceCredentialDigest = Array.from(new Uint8Array(digestBytes), byte => byte.toString(16).padStart(2, "0")).join("");
+
+  const denied = await call("/api/v1/device/chat/messages", {}, bindings);
+  assert.equal(denied.status, 401);
+  assert.equal((await denied.json()).error.code, "device_authentication_required");
+
+  const response = await call("/api/v1/device/chat/messages", {
+    headers: { authorization: "Bearer " + credential },
+  }, bindings);
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).messages, []);
 });

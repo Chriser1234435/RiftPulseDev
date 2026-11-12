@@ -1,7 +1,18 @@
-# RiftPulse PCVR alpha adapter 0.1.17
+# RiftPulse PCVR alpha adapter 0.1.20
 
-PCVR pairing and dashboard UI prototype for Beat Saber 1.40.8. Generates and registers a five-digit pairing code against the RiftPulse production API at https://app.riftpulse.me; device credential is Windows DPAPI protected. Includes Chat and BSR preference switches that sync to the paired account; they do not activate the streaming services yet. Live provider chat/events, combined viewer counts, configurable ChatIntegrations command execution, and BSR song-request fulfillment remain unfinished.
+PCVR adapter for Beat Saber 1.40.8. Generates a five-digit pairing code, links the installation to your RiftPulse account, syncs Chat/BSR module preferences, and adds a movable world-space RiftPulse chat panel inside gameplay.
 
-The BSIPA manifest is embedded in the DLL as required by BSIPA. The release ZIP intentionally contains no loose manifest.json: it contains only Plugins/RiftPulse.Pcvr.dll and README.txt. Extract the ZIP directly into the Beat Saber game root, not into the Plugins folder. Remove any old RiftPulse Plugins/manifest.json left by earlier packages because it can shadow the embedded manifest and prevent the plugin class from being discovered.
+## World-space chat panel
 
-The 0.1.17 plugin fixes BSML dynamic text by binding TextMeshPro and button components by ID, updating them after parse and whenever pairing or module state changes. It preserves the BSIPA enable/disable lifecycle hooks, waits for BSML main-menu initialization before registering the RiftPulse Mods-panel button, and logs registration or menu-open failures. Build and package/install with `powershell -ExecutionPolicy Bypass -File build-release.ps1`; compile only with `dotnet build RiftPulse.Pcvr.csproj -c Release`. The release script validates embedded resources, package layout, installed DLL hash, and removes stale RiftPulse sidecar manifests. References are pinned to Beat Saber 1.40.8 / BSML. The next in-game launch should confirm the button is visible.
+- A real 3D floating panel in the Beat Saber play space, not a camera HUD or flat screen overlay.
+- Grab and move the panel with the VR controller handle. Its position and rotation are saved locally.
+- The RiftPulse in-game menu includes MOVE CHAT PANEL TO VIEW to reset it in front of your view.
+- Displays recent Twitch, YouTube, and TikTok LIVE messages and supported provider events.
+- Displays the combined viewer total when a fresh count is available.
+- Polls the paired-device chat feed while the Chat module is enabled.
+
+## Alpha limitations
+
+This build has compiled for PCVR, but a live in-headset test is still needed to confirm the panel size, grab-handle behavior, placement persistence, and performance in a running Beat Saber session. Incoming provider events depend on the relevant platform connector being active. ChatIntegrations command execution and BSR song-request fulfillment are separate workstreams.
+
+The BSIPA manifest is embedded in the DLL. The release ZIP contains Plugins/RiftPulse.Pcvr.dll and README.txt; there is intentionally no loose manifest. Extract the ZIP into the Beat Saber game root, not directly into the Plugins folder. This package is PCVR only and must not be installed on Quest Standalone.

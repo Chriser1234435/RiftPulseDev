@@ -3,11 +3,11 @@
     "id":  "RiftPulse.Pcvr",
     "name":  "RiftPulse",
     "author":  "RiftPulse Team",
-    "version":  "0.1.19",
+    "version":  "0.1.20",
     "gameVersion":  "1.40.8",
     "description":  [
                         "RiftPulse PCVR adapter for Beat Saber.",
-                        "Provides the RiftPulse pairing entry point and in-game interface prototype."
+                        "Provides device pairing and a movable world-space chat panel for Twitch, YouTube, and TikTok LIVE."
                     ],
     "dependsOn":  {
                       "BSIPA":  "^4.2.0",

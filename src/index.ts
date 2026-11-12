@@ -422,6 +422,57 @@ export default {
       return Response.json({ moduleKey, enabled: enabled === 1, settings, updatedAt: now }, { headers: JSON_HEADERS });
     }
 
+    // Device-authenticated feed for the native PCVR and Quest world-space chat panel.
+    // The browser route remains account-session authenticated; game builds never need
+    // a browser cookie or an account secret to read their own feed.
+    if ((url.pathname === "/api/v1/device/chat/panel" || url.pathname === "/api/v1/device/chat/messages") && request.method === "GET") {
+      const authContext = await getDeviceAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Chat storage is not configured.", requestId);
+      const feed = await env.DB.prepare(
+        "SELECT * FROM (SELECT id, provider, channel_name AS channelName, sender_name AS senderName, text, received_at AS receivedAt FROM chat_messages WHERE account_id = ? UNION ALL SELECT id, provider, channel_name AS channelName, COALESCE(actor_name, 'Stream event') AS senderName, CASE kind WHEN 'follow' THEN 'followed the channel' WHEN 'subscription' THEN 'subscribed' WHEN 'gift' THEN 'sent ' || COALESCE(CASE WHEN quantity IS NOT NULL THEN CAST(quantity AS TEXT) || ' x ' ELSE '' END, '') || COALESCE(item_name, 'a gift') WHEN 'bits' THEN 'cheered ' || COALESCE(CAST(amount AS TEXT), '') || ' Bits' WHEN 'super_chat' THEN 'sent a Super Chat' WHEN 'donation' THEN 'donated ' || COALESCE(currency, '') || COALESCE(CAST(amount AS TEXT), '') WHEN 'like' THEN 'liked the stream' WHEN 'share' THEN 'shared the stream' WHEN 'raid' THEN 'raided the channel' WHEN 'member_join' THEN 'joined the stream' ELSE kind END || CASE WHEN message IS NOT NULL THEN ': ' || message ELSE '' END AS text, received_at AS receivedAt FROM provider_events WHERE account_id = ? AND kind != 'viewer_count') ORDER BY receivedAt DESC LIMIT 8",
+      ).bind(authContext.userId, authContext.userId).all<{
+        id: string; provider: string; channelName: string; senderName: string; text: string; receivedAt: string;
+      }>();
+      if (!feed.success) return jsonError(503, "chat_store_unavailable", "Could not load the in-game chat feed.", requestId);
+
+      const healthRows = await env.DB.prepare(
+        "SELECT provider, status, viewer_count AS viewerCount, observed_at AS observedAt, viewer_count_observed_at AS viewerCountObservedAt, detail_code AS detailCode, (SELECT MAX(received_at) FROM chat_messages cm WHERE cm.account_id = integration_health.account_id AND cm.provider = integration_health.provider) AS lastMessageAt FROM integration_health WHERE account_id = ?",
+      ).bind(authContext.userId).all<{
+        provider: string; status: string; viewerCount: number | null; observedAt: string;
+        viewerCountObservedAt: string | null; detailCode: string | null; lastMessageAt: string | null;
+      }>();
+      if (!healthRows.success) return jsonError(503, "integration_health_unavailable", "Could not load provider viewer counts.", requestId);
+      const chatSetting = await env.DB.prepare(
+        "SELECT enabled FROM module_settings WHERE account_id = ? AND module_key = 'chat' LIMIT 1",
+      ).bind(authContext.userId).first<{ enabled: number }>();
+      const chatEnabled = chatSetting ? chatSetting.enabled === 1 : true;
+      const byProvider = new Map((healthRows.results ?? []).map(row => [row.provider, row]));
+      const now = new Date();
+      const providerHealth: ProviderHealthSnapshot[] = PROVIDERS.map(provider => {
+        const row = byProvider.get(provider);
+        if (!row) return emptyProviderHealth(provider, now);
+        const state = row.status === "healthy" ? "connected"
+          : row.status === "degraded" ? "degraded"
+          : row.status === "disconnected" ? "disconnected" : "error";
+        return {
+          provider, state, observedAt: row.observedAt, lastMessageAt: row.lastMessageAt,
+          viewerCount: row.viewerCount, viewerCountObservedAt: row.viewerCountObservedAt,
+          detailCode: row.detailCode, unofficial: provider === "tiktok",
+        };
+      });
+      const messages = chatEnabled ? (feed.results ?? []).reverse() : [];
+      if (url.pathname === "/api/v1/device/chat/messages") {
+        return Response.json({ messages }, { headers: JSON_HEADERS });
+      }
+      return Response.json({
+        chatEnabled,
+        messages,
+        viewers: aggregateViewerCounts(providerHealth, now),
+        providers: providerHealth.map(item => ({ provider: item.provider, state: item.state })),
+      }, { headers: JSON_HEADERS });
+    }
+
     if (url.pathname === "/api/v1/settings/modules" && request.method === "GET") {
       const authContext = await getAuthContext(request, env);
       if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);

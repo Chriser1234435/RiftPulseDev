@@ -6,11 +6,12 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AssemblyName>RiftPulse.Pcvr</AssemblyName>
     <RootNamespace>RiftPulse.Pcvr</RootNamespace>
-    <Version>0.1.17</Version>
+    <Version>0.1.20</Version>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Plugin.cs" />
     <Compile Include="RiftPulseFlowCoordinator.cs" />
+    <Compile Include="RiftPulseChatPanel.cs" />
     <EmbeddedResource Include="manifest.json">
       <LogicalName>RiftPulse.Pcvr.manifest.json</LogicalName>
     </EmbeddedResource>

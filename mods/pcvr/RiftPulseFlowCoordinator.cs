@@ -19,7 +19,7 @@ namespace RiftPulse.Pcvr
     {
         private const string ApiBase = "https://app.riftpulse.me/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.1.19";
+        private const string ModVersion = "0.1.20";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 
@@ -240,8 +240,8 @@ namespace RiftPulse.Pcvr
         {
             if (_connecting) return;
             _connecting = true;
-            PairingCode = "— — — — —";
-            StatusText = "Generating a secure pairing code…";
+            PairingCode = "• • • • •";
+            StatusText = "Generating a secure pairing code...";
             RefreshUi();
 
             try
@@ -250,7 +250,7 @@ namespace RiftPulse.Pcvr
                 var deviceId = LoadOrCreateDeviceId();
                 var deviceCredential = LoadOrCreateDeviceCredential();
                 PairingCode = code;
-                StatusText = "Registering code with RiftPulse…";
+                StatusText = "Registering code with RiftPulse...";
                 RefreshUi();
 
                 var body = "{\"code\":\"" + code + "\",\"deviceCredential\":\"" + deviceCredential + "\",\"deviceId\":\"" + deviceId +
@@ -335,6 +335,15 @@ namespace RiftPulse.Pcvr
             RefreshUi();
         }
 
+        internal static string DeviceCredential => LoadOrCreateDeviceCredential();
+
+        [UIAction("move-chat-panel")]
+        public void MoveChatPanel()
+        {
+            RiftPulseChatPanel.RequestReposition();
+            ModulePreviewStatus = "The 3D chat panel will reposition in front of your view when gameplay starts or resumes.";
+            RefreshUi();
+        }
         private static string LoadOrCreateDeviceId()
         {
             var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RiftPulse");

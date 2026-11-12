@@ -1,4 +1,16 @@
 #include "main.hpp"
+#include "RiftPulseChatPanel.hpp"
+#include "bsml/shared/BSML/FloatingScreen/FloatingScreen.hpp"
+#include "UnityEngine/PrimitiveType.hpp"
+#include "UnityEngine/Camera.hpp"
+#include "UnityEngine/Time.hpp"
+#include "UnityEngine/MeshRenderer.hpp"
+#include "UnityEngine/Material.hpp"
+#include "UnityEngine/Object.hpp"
+#include "UnityEngine/SceneManagement/zzzz__Scene_impl.hpp"
+#include "TMPro/TextMeshPro.hpp"
+#include "TMPro/TMP_Text.hpp"
+#include <regex>
 #include "bsml/shared/BSML.hpp"
 #include "bsml/shared/BSML-Lite.hpp"
 #include "HMUI/CurvedTextMeshPro.hpp"
@@ -50,7 +62,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.26";
+static constexpr const char* MOD_VERSION = "0.1.27";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -837,6 +849,10 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
       UnityEngine::Vector2({22.0f, -28.5f}), UnityEngine::Vector2({42.0f, 5.5f}),
       []() { ToggleBsr(); });
 
+  BSML::Lite::CreateUIButton(
+      root, "MOVE CHAT PANEL TO VIEW", "PracticeButton",
+      UnityEngine::Vector2({22.0f, -35.0f}), UnityEngine::Vector2({42.0f, 5.0f}),
+      []() { RiftPulse::RequestChatPanelReposition(); SetStatus("The 3D chat panel will reposition in front of you when gameplay resumes."); });
   // Recover pending or already-linked sessions as soon as the menu opens.
   ResumePairing();
 }
@@ -845,9 +861,263 @@ MOD_EXTERN_FUNC void setup(CModInfo *info) noexcept {
   *info = modInfo.to_c();
 }
 
+DEFINE_TYPE(RiftPulse, ChatPanelDriver);
+
+static BSML::FloatingScreen* worldChatPanel = nullptr;
+static HMUI::CurvedTextMeshPro* worldChatTitle = nullptr;
+static HMUI::CurvedTextMeshPro* worldChatText = nullptr;
+static bool worldChatRequestInFlight = false;
+static bool worldChatNeedsReposition = false;
+static bool worldChatModuleEnabled = true;
+static float worldChatNextPoll = 0.0f;
+static float worldChatNextPlacementSave = 0.0f;
+
+static std::string WorldChatPlacementPath() {
+  const auto base = static_cast<std::string>(UnityEngine::Application::get_persistentDataPath());
+  return base + "/riftpulse-world-chat-position.dat";
+}
+
+static bool IsRiftPulseGameplayScene() {
+  // These scene objects only exist while Beat Saber gameplay is active.
+  // Avoid Scene::get_name here: this generated Quest binding declares the
+  // accessor but does not expose its implementation in the shipped runtime.
+  return UnityEngine::GameObject::Find(StringW("AudioTimeSyncController"))
+      || UnityEngine::GameObject::Find(StringW("ScoreController"));
+}
+
+static std::string ReadJsonStringField(const std::string& json, const std::string& key) {
+  const std::string marker = "\"" + key + "\"";
+  auto position = json.find(marker);
+  if (position == std::string::npos) return {};
+  position = json.find(':', position + marker.size());
+  if (position == std::string::npos) return {};
+  position = json.find('"', position + 1);
+  if (position == std::string::npos) return {};
+  std::string value;
+  bool escaped = false;
+  for (size_t i = position + 1; i < json.size(); ++i) {
+    const char ch = json[i];
+    if (escaped) {
+      switch (ch) {
+        case 'n': value.push_back(' '); break;
+        case 'r': break;
+        case 't': value.push_back(' '); break;
+        default: value.push_back(ch); break;
+      }
+      escaped = false;
+    } else if (ch == '\\') {
+      escaped = true;
+    } else if (ch == '"') {
+      break;
+    } else {
+      value.push_back(ch);
+    }
+  }
+  return value;
+}
+
+static std::string EscapeChatRichText(std::string value, size_t maxLength) {
+  if (value.size() > maxLength) value.resize(maxLength);
+  std::string safe;
+  safe.reserve(value.size() + 16);
+  for (const char ch : value) {
+    if (ch == '<') safe += "&lt;";
+    else if (ch == '>') safe += "&gt;";
+    else if (ch == '&') safe += "&amp;";
+    else if (ch == '\r' || ch == '\n') safe.push_back(' ');
+    else if (static_cast<unsigned char>(ch) >= 0x20) safe.push_back(ch);
+  }
+  return safe;
+}
+
+static void SaveWorldChatPlacement() {
+  if (!worldChatPanel) return;
+  const auto position = worldChatPanel->get_ScreenPosition();
+  const auto rotation = worldChatPanel->get_ScreenRotation();
+  std::ofstream output(WorldChatPlacementPath(), std::ios::out | std::ios::trunc);
+  if (!output) return;
+  output << position.x << " " << position.y << " " << position.z << " "
+         << rotation.x << " " << rotation.y << " " << rotation.z << " " << rotation.w;
+}
+
+static bool LoadWorldChatPlacement(UnityEngine::Vector3& position,
+                                   UnityEngine::Quaternion& rotation) {
+  std::ifstream input(WorldChatPlacementPath());
+  if (!input) return false;
+  float px = 0.0f, py = 0.0f, pz = 0.0f;
+  float qx = 0.0f, qy = 0.0f, qz = 0.0f, qw = 1.0f;
+  if (!(input >> px >> py >> pz >> qx >> qy >> qz >> qw)) return false;
+  position = UnityEngine::Vector3(px, py, pz);
+  rotation = UnityEngine::Quaternion(qx, qy, qz, qw);
+  return true;
+}
+
+static void SetWorldChatText(const std::string& value) {
+  if (worldChatText) worldChatText->set_text(StringW(value));
+}
+
+static void DestroyWorldChatPanel(bool savePlacement) {
+  if (savePlacement) SaveWorldChatPlacement();
+  if (worldChatPanel) {
+    auto gameObject = worldChatPanel->get_gameObject();
+    if (gameObject) UnityEngine::Object::Destroy(gameObject);
+  }
+  worldChatPanel = nullptr;
+  worldChatTitle = nullptr;
+  worldChatText = nullptr;
+}
+
+static bool CreateWorldChatPanel() {
+  auto camera = UnityEngine::Camera::get_main();
+  if (!camera || !camera->get_transform()) return false;
+  auto cameraTransform = camera->get_transform();
+  const auto cameraPosition = cameraTransform->get_position();
+  const auto forward = cameraTransform->get_forward();
+  const auto right = cameraTransform->get_right();
+  const auto up = cameraTransform->get_up();
+  UnityEngine::Vector3 panelPosition(
+      cameraPosition.x + forward.x * 2.15f + right.x * 0.72f - up.x * 0.12f,
+      cameraPosition.y + forward.y * 2.15f + right.y * 0.72f - up.y * 0.12f,
+      cameraPosition.z + forward.z * 2.15f + right.z * 0.72f - up.z * 0.12f);
+  const UnityEngine::Vector3 towardPlayer(-forward.x, -forward.y, -forward.z);
+  auto panelRotation = UnityEngine::Quaternion::LookRotation(towardPlayer, up);
+  LoadWorldChatPlacement(panelPosition, panelRotation);
+
+  // BSML FloatingScreen supplies a real VR grab handle. This is a world-space
+  // object in the play scene, not a camera-parented HUD or screen overlay.
+  worldChatPanel = BSML::FloatingScreen::CreateFloatingScreen(
+      UnityEngine::Vector2(110.0f, 70.0f), true, panelPosition, panelRotation, 0.0f, true);
+  if (!worldChatPanel) return false;
+  worldChatPanel->set_ShowHandle(true);
+  worldChatPanel->set_HighlightHandle(true);
+
+  auto root = worldChatPanel->get_rectTransform();
+  worldChatTitle = BSML::Lite::CreateText(
+      root, StringW("RIFTPULSE  /  LIVE CHAT"), 3.0f,
+      UnityEngine::Vector2(0.0f, 27.0f), UnityEngine::Vector2(104.0f, 8.0f));
+  worldChatText = BSML::Lite::CreateText(
+      root, StringW("COMBINED VIEWERS  -\n\nWaiting for your stream messages..."), 2.45f,
+      UnityEngine::Vector2(0.0f, -5.0f), UnityEngine::Vector2(104.0f, 54.0f));
+  if (!worldChatTitle || !worldChatText) {
+    DestroyWorldChatPanel(true);
+    return false;
+  }
+  return true;
+}
+static size_t FindMatchingJsonArrayEnd(const std::string& json, size_t start) {
+  if (start >= json.size() || json[start] != '[') return std::string::npos;
+  size_t depth = 0;
+  bool inString = false;
+  bool escaped = false;
+  for (size_t i = start; i < json.size(); ++i) {
+    const char ch = json[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch == '\\') escaped = true;
+      else if (ch == '"') inString = false;
+      continue;
+    }
+    if (ch == '"') inString = true;
+    else if (ch == '[') ++depth;
+    else if (ch == ']' && --depth == 0) return i;
+  }
+  return std::string::npos;
+}
+static void RenderWorldChatFeed(const std::string& response) {
+  const bool enabled = response.find("\"chatEnabled\":true") != std::string::npos;
+  worldChatModuleEnabled = enabled;
+  if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(enabled);
+  if (!enabled) return;
+
+  std::string totalViewers = "-";
+  std::smatch viewerMatch;
+  const std::regex viewerRegex("\"total\"\\s*:\\s*(null|[0-9]+)");
+  if (std::regex_search(response, viewerMatch, viewerRegex) && viewerMatch.size() > 1
+      && viewerMatch[1].str() != "null") {
+    totalViewers = viewerMatch[1].str();
+  }
+
+  std::string output = "RIFTPULSE  /  LIVE CHAT\n";
+  output += "COMBINED VIEWERS  " + totalViewers + "\n";
+  output += "----------------------------\n";
+
+  const auto messagesStart = response.find("\"messages\"");
+  const auto arrayStart = messagesStart == std::string::npos ? std::string::npos : response.find('[', messagesStart);
+  const auto arrayEnd = FindMatchingJsonArrayEnd(response, arrayStart);
+  if (arrayStart != std::string::npos && arrayEnd != std::string::npos) {
+    const auto messagesJson = response.substr(arrayStart + 1, arrayEnd - arrayStart - 1);
+    const std::regex objectRegex("\\{[^{}]*\\}");
+    size_t rendered = 0;
+    for (std::sregex_iterator it(messagesJson.begin(), messagesJson.end(), objectRegex), end; it != end && rendered < 8; ++it) {
+      const auto object = it->str();
+      const auto provider = ReadJsonStringField(object, "provider");
+      const auto sender = ReadJsonStringField(object, "senderName");
+      const auto message = ReadJsonStringField(object, "text");
+      if (sender.empty() || message.empty()) continue;
+      const auto tag = provider == "twitch" ? "TW" : provider == "youtube" ? "YT" : provider == "tiktok" ? "TT" : "LIVE";
+      output += std::string("[") + tag + "] " + EscapeChatRichText(sender, 28) + "\n";
+      output += EscapeChatRichText(message, 115) + "\n\n";
+      ++rendered;
+    }
+    if (rendered == 0) output += "No messages yet. Your chat will appear here.\n";
+  }
+  SetWorldChatText(output);
+}
+
+static void PollWorldChatPanel() {
+  if (!isPaired || worldChatRequestInFlight || !EnsureHttpClient()) return;
+  worldChatRequestInFlight = true;
+  auto* request = CreateGetRequest(std::string(API_BASE) + "/device/chat/panel", deviceCredential);
+  if (!request || !SendAsync(request, [](int64_t status, const std::string& body) {
+        worldChatRequestInFlight = false;
+        if (status >= 200 && status < 300) {
+          RenderWorldChatFeed(body);
+        } else if (status == 401) {
+          if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(false);
+        } else if (worldChatText) {
+          SetWorldChatText("RIFTPULSE  /  CHAT\n\nConnection paused. Retrying...");
+        }
+      })) {
+    worldChatRequestInFlight = false;
+  }
+}
+
+void RiftPulse::ChatPanelDriver::Update() {
+  if (!IsRiftPulseGameplayScene()) {
+    if (worldChatPanel) DestroyWorldChatPanel(true);
+    return;
+  }
+  if (worldChatNeedsReposition) {
+    DestroyWorldChatPanel(false);
+    std::remove(WorldChatPlacementPath().c_str());
+    worldChatNeedsReposition = false;
+  }
+  if (!isPaired) { if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(false); return; }
+  if (!worldChatPanel && !CreateWorldChatPanel()) return;
+  const float now = UnityEngine::Time::get_realtimeSinceStartup();
+  if (now >= worldChatNextPoll) {
+    worldChatNextPoll = now + 3.0f;
+    SaveWorldChatPlacement();
+    PollWorldChatPanel();
+  }
+}
+
+void RiftPulse::RequestChatPanelReposition() {
+  worldChatNeedsReposition = true;
+}
+
+static void EnsureWorldChatDriver() {
+  auto* driverObject = UnityEngine::GameObject::New_ctor(StringW("RiftPulse World Chat Driver"));
+  if (!driverObject) return;
+  driverObject->AddComponent<RiftPulse::ChatPanelDriver*>();
+  UnityEngine::Object::DontDestroyOnLoad(driverObject);
+}
+
 MOD_EXTERN_FUNC void late_load() noexcept {
   BSML::Init();
   BSML::LateInit();
+  custom_types::Register::AutoRegister();
+  EnsureWorldChatDriver();
   BSML::Register::RegisterMainMenuViewControllerMethod(
       "RiftPulse", "RiftPulse", "Connect Quest to RiftPulse",
       BuildRiftPulseMenu);
