@@ -160,7 +160,8 @@ function youtubeStateCookie(state: string | null, secure: boolean): string {
 }
 
 function kickStateCookie(state: string | null, secure: boolean): string {
-  const base = "rp_kick_oauth_state=" + (state ?? "") + "; Path=/api/v1/providers/kick/callback; HttpOnly; SameSite=Lax; Max-Age=" + (state ? "600" : "0");
+  // Kick returns to the app homepage, so the state cookie must be sent there.
+  const base = "rp_kick_oauth_state=" + (state ?? "") + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + (state ? "600" : "0");
   return secure ? base + "; Secure" : base;
 }
 
@@ -224,10 +225,10 @@ export default {
 
     // Keep Cloudflare as the browser-facing origin, but run all API logic on Railway.
     // This also keeps Better Auth cookies same-origin for the Cloudflare-hosted UI.
-    // Twitch and YouTube redirect to the app homepage. Identify the provider
+    // Twitch, YouTube, and Kick redirect to the app homepage. Identify the provider
     // using the digest-only, unconsumed OAuth state row; API callback logic still
     // atomically consumes and validates the state before token exchange.
-    let rootOAuthProvider: "twitch" | "youtube" | null = null;
+    let rootOAuthProvider: "twitch" | "youtube" | "kick" | null = null;
     const isRootOAuthCallback = url.pathname === "/"
       && url.searchParams.has("state")
       && (url.searchParams.has("code") || url.searchParams.has("error"));
@@ -239,7 +240,7 @@ export default {
           const row = await env.DB.prepare(
             "SELECT provider FROM provider_oauth_states WHERE state_digest = ? AND consumed_at IS NULL AND expires_at > ? LIMIT 1",
           ).bind(digest, new Date().toISOString()).first<{ provider: string }>();
-          if (row?.provider === "twitch" || row?.provider === "youtube") rootOAuthProvider = row.provider;
+          if (row?.provider === "twitch" || row?.provider === "youtube" || row?.provider === "kick") rootOAuthProvider = row.provider;
         } catch {
           console.error("root_oauth_provider_lookup_failed");
         }
@@ -741,17 +742,21 @@ export default {
       if (!env.KICK_CLIENT_ID || !env.KICK_CLIENT_SECRET || !env.TOKEN_ENCRYPTION_KEY || !env.APP_BASE_URL) {
         return jsonError(503, "kick_oauth_not_configured", "Kick OAuth credentials, app URL, and token encryption key must be configured locally first.", requestId);
       }
-      let appUrl: URL, redirectUri: URL;
+      let appUrl: URL, redirectUri: URL, redirectUriValue: string;
       try {
         appUrl = new URL(env.APP_BASE_URL);
-        redirectUri = new URL(env.KICK_REDIRECT_URI ?? "/api/v1/providers/kick/callback", appUrl);
+        // Use the same homepage redirect as Twitch and YouTube. Preserve the
+        // exact origin string (without a trailing slash) for Kick's token exchange.
+        redirectUriValue = env.KICK_REDIRECT_URI?.trim() || appUrl.origin;
+        redirectUri = new URL(redirectUriValue);
       } catch {
-        return jsonError(503, "kick_oauth_not_configured", "The Kick OAuth callback URL is invalid.", requestId);
+        return jsonError(503, "kick_oauth_not_configured", "The Kick OAuth homepage URL is invalid.", requestId);
       }
-      if (redirectUri.origin !== appUrl.origin || redirectUri.pathname !== "/api/v1/providers/kick/callback"
+      if (redirectUri.origin !== appUrl.origin || redirectUri.pathname !== "/"
         || redirectUri.username || redirectUri.password || redirectUri.search || redirectUri.hash
+        || redirectUriValue !== appUrl.origin
         || (redirectUri.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(redirectUri.hostname))) {
-        return jsonError(503, "kick_oauth_not_configured", "The callback must be the exact same-origin registered Kick OAuth callback URL.", requestId);
+        return jsonError(503, "kick_oauth_not_configured", "The callback must be the exact registered Kick OAuth homepage URL.", requestId);
       }
 
       const state = createOAuthState();
@@ -775,7 +780,7 @@ export default {
       authorizationUrl.searchParams.set("client_id", env.KICK_CLIENT_ID);
       authorizationUrl.searchParams.set("response_type", "code");
       if (redirectUri.hostname === "127.0.0.1") authorizationUrl.searchParams.set("redirect", "127.0.0.1");
-      authorizationUrl.searchParams.set("redirect_uri", redirectUri.toString());
+      authorizationUrl.searchParams.set("redirect_uri", redirectUriValue);
       authorizationUrl.searchParams.set("scope", "user:read channel:read events:subscribe kicks:read");
       authorizationUrl.searchParams.set("code_challenge", challenge);
       authorizationUrl.searchParams.set("code_challenge_method", "S256");
@@ -952,12 +957,16 @@ export default {
       const code = url.searchParams.get("code");
       if (!code || code.length > 2048) return finish("failed");
 
-      let redirectUri: URL;
+      let redirectUri: URL, redirectUriValue: string;
       try {
         const appUrl = new URL(env.APP_BASE_URL);
-        redirectUri = new URL(env.KICK_REDIRECT_URI ?? "/api/v1/providers/kick/callback", appUrl);
+        redirectUriValue = env.KICK_REDIRECT_URI?.trim() || appUrl.origin;
+        redirectUri = new URL(redirectUriValue);
       } catch { return finish("failed"); }
-      if (redirectUri.pathname !== "/api/v1/providers/kick/callback" || redirectUri.origin !== new URL(env.APP_BASE_URL).origin) return finish("failed");
+      if (redirectUri.origin !== new URL(env.APP_BASE_URL).origin
+        || redirectUri.pathname !== "/"
+        || redirectUri.username || redirectUri.password || redirectUri.search || redirectUri.hash
+        || redirectUriValue !== new URL(env.APP_BASE_URL).origin) return finish("failed");
 
       try {
         const verifier = await decryptProviderToken(claimedState.code_verifier_ciphertext, env.TOKEN_ENCRYPTION_KEY);
@@ -969,7 +978,7 @@ export default {
             client_secret: env.KICK_CLIENT_SECRET,
             code,
             grant_type: "authorization_code",
-            redirect_uri: redirectUri.toString(),
+            redirect_uri: redirectUriValue,
             code_verifier: verifier,
           }),
         });
@@ -995,7 +1004,7 @@ export default {
         if (introspect.active !== true || introspect.client_id !== env.KICK_CLIENT_ID || introspect.token_type !== "user"
           || typeof introspect.scope !== "string") return finish("failed");
         const scopes = introspect.scope.split(/\s+/).filter(Boolean);
-        if (!["user:read", "channel:read", "events:subscribe"].every(scope => scopes.includes(scope))) return finish("failed");
+        if (!["user:read", "channel:read", "events:subscribe", "kicks:read"].every(scope => scopes.includes(scope))) return finish("failed");
 
         const userResponse = await fetch("https://api.kick.com/public/v1/users", {
           headers: { authorization: "Bearer " + token.access_token, accept: "application/json" },
