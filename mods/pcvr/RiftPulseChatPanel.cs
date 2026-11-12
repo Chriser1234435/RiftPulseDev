@@ -112,6 +112,7 @@ namespace RiftPulse.Pcvr
 
             _panel.ShowHandle = true;
             _panel.HighlightHandle = true;
+            DontDestroyOnLoad(_panel.gameObject);
 
             var textObject = new GameObject(
                 "RiftPulse World Chat Text",

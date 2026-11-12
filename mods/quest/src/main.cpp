@@ -7,7 +7,6 @@
 #include "UnityEngine/MeshRenderer.hpp"
 #include "UnityEngine/Material.hpp"
 #include "UnityEngine/Object.hpp"
-#include "UnityEngine/SceneManagement/zzzz__Scene_impl.hpp"
 #include "TMPro/TextMeshPro.hpp"
 #include "TMPro/TMP_Text.hpp"
 #include <regex>
@@ -62,7 +61,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.28";
+static constexpr const char* MOD_VERSION = "0.1.29";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -852,9 +851,9 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
       []() { ToggleBsr(); });
 
   BSML::Lite::CreateUIButton(
-      root, "MOVE CHAT PANEL TO VIEW", "PracticeButton",
+      root, "OPEN 3D CHAT PANEL", "PracticeButton",
       UnityEngine::Vector2({22.0f, -35.0f}), UnityEngine::Vector2({42.0f, 5.0f}),
-      []() { RiftPulse::RequestChatPanelReposition(); SetStatus("The 3D chat panel will reposition in front of you when gameplay resumes."); });
+      []() { ShowWorldChatPanel(); });
   // Recover pending or already-linked sessions as soon as the menu opens.
   ResumePairing();
 }
@@ -871,20 +870,13 @@ static HMUI::CurvedTextMeshPro* worldChatText = nullptr;
 static bool worldChatRequestInFlight = false;
 static bool worldChatNeedsReposition = false;
 static bool worldChatModuleEnabled = true;
+static bool worldChatPairingPromptVisible = false;
 static float worldChatNextPoll = 0.0f;
 static float worldChatNextPlacementSave = 0.0f;
 
 static std::string WorldChatPlacementPath() {
   const auto base = static_cast<std::string>(UnityEngine::Application::get_persistentDataPath());
   return base + "/riftpulse-world-chat-position.dat";
-}
-
-static bool IsRiftPulseGameplayScene() {
-  // These scene objects only exist while Beat Saber gameplay is active.
-  // Avoid Scene::get_name here: this generated Quest binding declares the
-  // accessor but does not expose its implementation in the shipped runtime.
-  return UnityEngine::GameObject::Find(StringW("AudioTimeSyncController"))
-      || UnityEngine::GameObject::Find(StringW("ScoreController"));
 }
 
 static std::string ReadJsonStringField(const std::string& json, const std::string& key) {
@@ -967,6 +959,7 @@ static void DestroyWorldChatPanel(bool savePlacement) {
   worldChatPanel = nullptr;
   worldChatTitle = nullptr;
   worldChatText = nullptr;
+  worldChatPairingPromptVisible = false;
 }
 
 static bool CreateWorldChatPanel() {
@@ -992,6 +985,7 @@ static bool CreateWorldChatPanel() {
   if (!worldChatPanel) return false;
   worldChatPanel->set_ShowHandle(true);
   worldChatPanel->set_HighlightHandle(true);
+  UnityEngine::Object::DontDestroyOnLoad(worldChatPanel->get_gameObject());
 
   auto root = worldChatPanel->get_rectTransform();
   worldChatTitle = BSML::Lite::CreateText(
@@ -1028,8 +1022,11 @@ static size_t FindMatchingJsonArrayEnd(const std::string& json, size_t start) {
 static void RenderWorldChatFeed(const std::string& response) {
   const bool enabled = response.find("\"chatEnabled\":true") != std::string::npos;
   worldChatModuleEnabled = enabled;
-  if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(enabled);
-  if (!enabled) return;
+  if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(true);
+  if (!enabled) {
+    SetWorldChatText("RIFTPULSE  /  LIVE CHAT\n\nChat is currently disabled for this installation. Enable the Chat module on app.riftpulse.me.");
+    return;
+  }
 
   std::string totalViewers = "-";
   std::smatch viewerMatch;
@@ -1075,7 +1072,8 @@ static void PollWorldChatPanel() {
         if (status >= 200 && status < 300) {
           RenderWorldChatFeed(body);
         } else if (status == 401) {
-          if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(false);
+          if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(true);
+          SetWorldChatText("RIFTPULSE  /  LIVE CHAT\n\nConnect this Quest installation to your RiftPulse account to load chat.");
         } else if (worldChatText) {
           SetWorldChatText("RIFTPULSE  /  CHAT\n\nConnection paused. Retrying...");
         }
@@ -1092,8 +1090,16 @@ void RiftPulse::ChatPanelDriver::Update() {
     std::remove(WorldChatPlacementPath().c_str());
     worldChatNeedsReposition = false;
   }
-  if (!isPaired) { if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(false); return; }
   if (!worldChatPanel && !CreateWorldChatPanel()) return;
+  if (!isPaired) {
+    if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(true);
+    if (!worldChatPairingPromptVisible) {
+      SetWorldChatText("RIFTPULSE  /  LIVE CHAT\n\nConnect this Quest installation to your RiftPulse account to load chat. Grab the top handle to move this panel.");
+      worldChatPairingPromptVisible = true;
+    }
+    return;
+  }
+  worldChatPairingPromptVisible = false;
   const float now = UnityEngine::Time::get_realtimeSinceStartup();
   if (now >= worldChatNextPoll) {
     worldChatNextPoll = now + 3.0f;
@@ -1106,18 +1112,42 @@ void RiftPulse::RequestChatPanelReposition() {
   worldChatNeedsReposition = true;
 }
 
-static void EnsureWorldChatDriver() {
+static UnityEngine::GameObject* worldChatDriverObject = nullptr;
+
+static bool EnsureWorldChatDriver() {
+  if (worldChatDriverObject) return true;
   auto* driverObject = UnityEngine::GameObject::New_ctor(StringW("RiftPulse World Chat Driver"));
-  if (!driverObject) return;
-  driverObject->AddComponent<RiftPulse::ChatPanelDriver*>();
+  if (!driverObject) return false;
+  auto* driver = driverObject->AddComponent<RiftPulse::ChatPanelDriver*>();
+  if (!driver) {
+    UnityEngine::Object::Destroy(driverObject);
+    return false;
+  }
   UnityEngine::Object::DontDestroyOnLoad(driverObject);
+  worldChatDriverObject = driverObject;
+  return true;
+}
+
+static void ShowWorldChatPanel() {
+  try {
+    // Defer optional custom-type registration and Unity object creation until
+    // the user requests the panel; panel startup must not block menu startup.
+    custom_types::Register::AutoRegister();
+    if (!EnsureWorldChatDriver()) {
+      SetStatus("Could not start the 3D chat panel. The RiftPulse menu is still available; check the mod log.");
+      return;
+    }
+    RiftPulse::RequestChatPanelReposition();
+    SetStatus("The movable 3D chat panel is appearing in front of you. Grab its top handle to move it.");
+  } catch (...) {
+    SetStatus("The 3D chat panel could not start. The RiftPulse menu remains available.");
+  }
 }
 
 MOD_EXTERN_FUNC void late_load() noexcept {
   BSML::Init();
   BSML::LateInit();
-  custom_types::Register::AutoRegister();
-  EnsureWorldChatDriver();
+  // Keep late-load limited to registering the menu.
   BSML::Register::RegisterMainMenuViewControllerMethod(
       "RiftPulse", "RiftPulse", "Connect Quest to RiftPulse",
       BuildRiftPulseMenu);
