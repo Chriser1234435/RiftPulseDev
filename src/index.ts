@@ -7,7 +7,7 @@ import { persistNormalizedProviderEvent } from "../packages/shared/src/provider-
 import { verifyTikTokConnectorSignature } from "../packages/shared/src/tiktok-connector-signature.ts";
 import { extractKickPublicKey, verifyKickWebhookSignature } from "../packages/shared/src/kick-webhook.ts";
 import { verifyTwitchEventSubSignature } from "../packages/shared/src/twitch-eventsub.ts";
-import { createOAuthState, createPkceChallenge, createPkceVerifier, createOAuthBasicAuthorization, digestOAuthState } from "../packages/shared/src/oauth-state.ts";
+import { createOAuthState, createPkceChallenge, createPkceVerifier, digestOAuthState } from "../packages/shared/src/oauth-state.ts";
 import { beginTwitchOAuth, completeTwitchOAuth } from "../packages/shared/src/twitch-oauth.ts";
 import { decryptProviderToken, encryptProviderToken } from "../packages/shared/src/provider-token-vault.ts";
 import { disconnectProvider, ensureFreshTwitchProviderTokens, persistProviderTokens, readProviderTokens } from "../packages/shared/src/provider-connections.ts";
@@ -978,15 +978,16 @@ export default {
         failureStage = "authorization_code_exchange";
         const tokenResponse = await fetch("https://id.kick.com/oauth/token", {
           method: "POST",
-          // Kick's token service currently rejects client credentials sent only in
-          // the form body with 401. Authenticate the confidential client using
-          // OAuth client_secret_basic; keep grant parameters in the form body.
+          // Kick's authorization-code token endpoint expects the confidential
+          // client credentials in the form body alongside the PKCE verifier.
+          // Trim copied secret values to avoid whitespace breaking client auth.
           headers: {
             "content-type": "application/x-www-form-urlencoded",
             accept: "application/json",
-            authorization: createOAuthBasicAuthorization(env.KICK_CLIENT_ID.trim(), env.KICK_CLIENT_SECRET.trim()),
           },
           body: new URLSearchParams({
+            client_id: env.KICK_CLIENT_ID.trim(),
+            client_secret: env.KICK_CLIENT_SECRET.trim(),
             code,
             grant_type: "authorization_code",
             redirect_uri: redirectUriValue,
@@ -994,7 +995,16 @@ export default {
           }),
         });
         if (!tokenResponse.ok) {
-          console.warn("kick_oauth_provider_response", JSON.stringify({ stage: failureStage, status: tokenResponse.status }));
+          const errorPayload: unknown = await tokenResponse.json().catch(() => null);
+          const errorObject = errorPayload && typeof errorPayload === "object" && !Array.isArray(errorPayload)
+            ? errorPayload as Record<string, unknown> : {};
+          console.warn("kick_oauth_provider_response", JSON.stringify({
+            stage: failureStage,
+            status: tokenResponse.status,
+            error: typeof errorObject.error === "string" ? errorObject.error.slice(0, 120) : "unknown",
+            errorDescription: typeof errorObject.error_description === "string"
+              ? errorObject.error_description.slice(0, 180) : undefined,
+          }));
           return finish("failed");
         }
         const tokenPayload: unknown = await tokenResponse.json();
