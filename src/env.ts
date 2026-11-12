@@ -41,12 +41,6 @@ export interface Env {
   YOUTUBE_CLIENT_SECRET?: string;
   /** Exact registered Google OAuth callback URI. */
   YOUTUBE_REDIRECT_URI?: string;
-  /** Kick OAuth application client ID. */
-  KICK_CLIENT_ID?: string;
-  /** Kick OAuth application client secret; never commit the value. */
-  KICK_CLIENT_SECRET?: string;
-  /** Exact registered Kick OAuth callback URI. */
-  KICK_REDIRECT_URI?: string;
   /** HMAC secret shared only with the isolated unofficial TikTok LIVE connector bridge. */
   TIKTOK_CONNECTOR_INGEST_SECRET?: string;
   /** Base64-encoded 32-byte AES-256-GCM key for provider tokens; never commit the value. */

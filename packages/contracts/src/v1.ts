@@ -2,7 +2,7 @@
 export const API_VERSION = "v1" as const;
 export const SUPPORTED_MODULES = ["chat", "bsr-song-request"] as const;
 export type ModuleKey = (typeof SUPPORTED_MODULES)[number];
-export const PROVIDERS = ["twitch", "youtube", "kick", "tiktok"] as const;
+export const PROVIDERS = ["twitch", "youtube", "tiktok"] as const;
 export type ProviderKey = (typeof PROVIDERS)[number];
 export type DevicePlatform = "pcvr" | "quest";
 

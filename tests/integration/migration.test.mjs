@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const migrations = ["0001_initial.sql", "0002_auth.sql", "0003_chat_foundation.sql", "0004_provider_oauth_states.sql", "0005_kick_pkce.sql", "0006_provider_events.sql", "0007_youtube_live_chat_cursor.sql", "0008_provider_settings.sql", "0009_device_credentials.sql", "0010_release_updates.sql"].map(name =>
+const migrations = ["0001_initial.sql", "0002_auth.sql", "0003_chat_foundation.sql", "0004_provider_oauth_states.sql", "0005_kick_pkce.sql", "0006_provider_events.sql", "0007_youtube_live_chat_cursor.sql", "0008_provider_settings.sql", "0009_device_credentials.sql", "0010_release_updates.sql", "0011_remove_kick_provider.sql"].map(name =>
   readFileSync(join(root, "migrations", name), "utf8")
 );
 
@@ -34,6 +34,12 @@ test("application, authentication, chat, OAuth-state, and provider-event migrati
     assert.equal(pairingColumns.has("device_credential_digest"), true);
 
     db.prepare("INSERT INTO accounts (id, created_at, updated_at) VALUES (?, ?, ?)").run("acct", "now", "now");
+    for (const table of ["provider_oauth_states", "provider_connections", "integration_health", "chat_messages", "provider_events", "song_requests"]) {
+      const schema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table).sql;
+      assert.doesNotMatch(schema, /kick/i, `Kick provider constraint remains in ${table}`);
+    }
+    assert.throws(() => db.prepare("INSERT INTO provider_oauth_states (state_digest, account_id, provider, created_at, expires_at, consumed_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .run("state", "acct", "kick", "now", "later", null), /CHECK constraint failed/);
     assert.throws(() => db.prepare(
       "INSERT INTO module_settings (id, account_id, module_key, enabled, settings_json, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
     ).run("bad", "acct", "unknown", 0, "{}", "now"), /CHECK constraint failed/);

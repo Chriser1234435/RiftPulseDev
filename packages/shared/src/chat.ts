@@ -57,17 +57,6 @@ export function normalizeYouTubeChatMessage(payload: unknown, channelName = "", 
   });
 }
 
-export function normalizeKickChatMessage(payload: unknown, receivedAt = new Date()): NormalizedChatMessage | null {
-  const root = rec(payload), sender = child(root, "sender"), broadcaster = child(root, "broadcaster");
-  if (!root || !sender || !broadcaster) return null;
-  return normalize({
-    provider: "kick", externalMessageId: root.message_id, channelId: broadcaster.user_id,
-    channelName: broadcaster.username, senderId: sender.user_id, senderName: sender.username,
-    body: root.content, sentAt: root.created_at, receivedAt, verified: sender.is_verified,
-    badges: child(sender, "identity")?.badges,
-  });
-}
-
 export function normalizeTikTokChatMessage(payload: unknown, channelId = "", channelName = "", receivedAt = new Date()): NormalizedChatMessage | null {
   const root = rec(payload), user = child(root, "user") ?? child(root, "userInfo");
   if (!root || !user) return null;
@@ -164,13 +153,12 @@ const PLATFORM_EVENT_KIND: Record<string, ProviderEventKind> = {
   "channel.raid": "raid", "channel.charity_campaign.donate": "donation",
   "channel.followed": "follow", "channel.subscription.new": "subscription",
   "channel.subscription.renewal": "subscription", "channel.subscription.gifts": "gift",
-  "kicks.gifted": "gift",
   "livestream.status.updated": "other", "livestream.metadata.updated": "other",
 };
 
-/** Normalize documented Twitch EventSub and Kick webhook event payloads into the shared event contract. */
+/** Normalize documented Twitch EventSub payloads into the shared event contract. */
 export function normalizePlatformProviderEvent(
-  provider: "twitch" | "kick" | "youtube", eventName: string, payload: unknown,
+  provider: "twitch" | "youtube", eventName: string, payload: unknown,
   externalEventId = "", receivedAt = new Date(),
 ): NormalizedProviderEvent | null {
   const root = rec(payload);
@@ -184,7 +172,7 @@ export function normalizePlatformProviderEvent(
   const user = child(event, "user") ?? child(event, "gifter") ?? child(event, "follower") ?? child(event, "subscriber") ?? child(event, "sender");
   const donation = child(event, "charity_donation") ?? child(event, "donation");
   const gift = child(event, "gift");
-  const rawAmount = eventName === "kicks.gifted" ? null : event.bits ?? event.amount ?? donation?.value ?? donation?.amount;
+  const rawAmount = event.bits ?? event.amount ?? donation?.value ?? donation?.amount;
   const amount = typeof rawAmount === "number" && Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : null;
   const rawQuantity = event.total ?? event.giftees_count ?? event.viewers ?? event.viewer_count ?? event.count ?? gift?.amount;
   const quantity = typeof rawQuantity === "number" && Number.isSafeInteger(rawQuantity) && rawQuantity >= 0 ? rawQuantity : null;

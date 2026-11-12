@@ -8,7 +8,7 @@ import {
 test("exports the intended V1 modules and providers", () => {
   assert.equal(API_VERSION, "v1");
   assert.deepEqual(SUPPORTED_MODULES, ["chat", "bsr-song-request"]);
-  assert.deepEqual(PROVIDERS, ["twitch", "youtube", "kick", "tiktok"]);
+  assert.deepEqual(PROVIDERS, ["twitch", "youtube", "tiktok"]);
   assert.equal(isModuleKey("chat"), true);
   assert.equal(isModuleKey("legacy-module"), false);
   assert.equal(isProviderKey("tiktok"), true);

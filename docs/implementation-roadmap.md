@@ -44,13 +44,12 @@ Status: Step 6 local website/auth foundation complete. Step 7 chat/provider foun
 ## Step 7 - Chat and providers (in progress)
 - [x] Add shared normalized chat message and provider health contracts.
 - [x] Add signed Twitch EventSub callback handling for challenge verification, chat notifications, and revocation, plus OAuth/subscription setup routes; live verification still requires credentials and HTTPS.
-- [x] Add normalizers for Twitch EventSub, YouTube Live Chat, Kick, and TikTok chat payloads plus a shared provider-event contract.
+- [x] Add normalizers for Twitch EventSub, YouTube Live Chat, and TikTok chat payloads plus a shared provider-event contract.
 - [x] Add bounded TTL deduplication and full-jitter reconnect backoff helpers.
 - [x] Aggregate only fresh provider viewer counts; unknown stays null and partial data is explicit.
 - [x] Add D1 chat message persistence with per-account/provider/message uniqueness and viewer-count freshness.
 - [x] Add tested AES-256-GCM provider-token vault and encrypted provider-token persistence helpers.
 - [x] Add authenticated chat-history, provider-health and connection-status APIs plus dashboard chat/provider-health display; remove fake provider connection toggles.
-- [x] Implement signed Kick webhook verification and idempotent ingestion for version 1 chat.message.sent events.
 - [x] Apply the chat foundation migration to the local D1 database and extend schema/unit tests.
 - [x] Add Twitch OAuth authorization-code start/callback, one-time state, token validation, encrypted token storage, connection status API, and disconnect endpoint.
 - [x] Add guarded Twitch EventSub subscription creation with app access tokens and signed HTTPS webhook verification; health only becomes healthy after an enabled subscription or signed callback challenge.
@@ -58,13 +57,11 @@ Status: Step 6 local website/auth foundation complete. Step 7 chat/provider foun
 - [ ] Add scheduled refresh/recovery and pagination-aware subscription reconciliation.
 - [x] Add Google OAuth authorization-code start/callback, offline refresh-token request, YouTube channel identification, and encrypted token storage.
 - [ ] Implement YouTube Live Chat discovery, streaming/list fallback, quota-aware polling, token refresh, and viewer counts.
-- [x] Add Kick OAuth 2.1 authorization-code start/callback with PKCE S256, encrypted verifier state, token introspection, required scope validation, and encrypted token storage.
-- [ ] Implement Kick webhook subscription creation, channel mapping validation, token refresh/recovery, and real end-to-end tests.
 - [x] Add per-account Durable Object WebSocket fan-out for the website and future PCVR/Quest clients.
 - [ ] Add realtime connection to PCVR/Quest mod clients in the mod integration step.
 - [x] Add an isolated Node.js TikTok LIVE bridge with HMAC-signed, timestamp-bounded ingest, normalized chat/event persistence, and realtime provider-event fan-out; live-stream verification remains outstanding.
 - [ ] Run provider mock/integration tests and verify fresh viewer counts end to end.
-- [x] Replace fake provider preview toggles with API-backed status and credential-gated Twitch/YouTube/Kick OAuth actions.
+- [x] Replace fake provider preview toggles with API-backed status and credential-gated Twitch/YouTube OAuth actions.
 
 ## Step 8 - BSR Song Request (not started)
 Implement command parsing, BeatSaver metadata validation, cooldowns, queue rules, and explicit error states.

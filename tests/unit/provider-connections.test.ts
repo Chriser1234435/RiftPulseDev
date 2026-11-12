@@ -106,7 +106,7 @@ test("provider disconnect clears stored token ciphertext", async () => {
 test("provider token storage fails closed for invalid keys or database errors", async () => {
   const db = new FakeDatabase();
   const input = {
-    accountId: "acct-1", provider: "kick" as const, externalAccountId: "channel-1",
+    accountId: "acct-1", provider: "twitch" as const, externalAccountId: "channel-1",
     displayName: null, accessToken: "access", refreshToken: null, tokenExpiresAt: null,
     scopes: [], now: new Date("2026-10-29T12:00:00Z"),
   };
@@ -114,5 +114,5 @@ test("provider token storage fails closed for invalid keys or database errors", 
   db.runResult = { success: false };
   assert.deepEqual(await persistProviderTokens(db, input, randomBytes(32).toString("base64")), { ok: false, reason: "database_error" });
   db.firstResult = { status: "connected", accessTokenCiphertext: "not-an-envelope", refreshTokenCiphertext: null, tokenExpiresAt: null, scopesJson: "[]"};
-  assert.deepEqual(await readProviderTokens(db, "acct-1", "kick", randomBytes(32).toString("base64")), { ok: false, reason: "token_decryption_failed" });
+  assert.deepEqual(await readProviderTokens(db, "acct-1", "twitch", randomBytes(32).toString("base64")), { ok: false, reason: "token_decryption_failed" });
 });

@@ -17,12 +17,11 @@ type ProviderHealth = { provider: ProviderKey; state: ProviderState; viewerCount
 type ProviderConnection = { status: string; displayName: string | null; connectedAt: string | null; configured: boolean; detailCode: string | null };
 type ViewerAggregate = { total: number | null; includedProviders: ProviderKey[]; missingProviders: ProviderKey[]; partial: boolean };
 type ModuleKey = "chat" | "bsr-song-request";
-type ProviderKey = "twitch" | "youtube" | "kick" | "tiktok";
+type ProviderKey = "twitch" | "youtube" | "tiktok";
 type Provider = { key: ProviderKey; name: string; short: string; className: string; note: string };
 const providers: Provider[] = [
   { key: "twitch", name: "Twitch", short: "T", className: "twitch", note: "Live chat + viewers" },
   { key: "youtube", name: "YouTube", short: "▶", className: "youtube", note: "Live chat + viewers" },
-  { key: "kick", name: "Kick", short: "K", className: "kick", note: "Live chat + viewers" },
   { key: "tiktok", name: "TikTok LIVE", short: "♪", className: "tiktok", note: "Unofficial · best effort" },
 ];
 type ProviderEventPayload = {
@@ -70,7 +69,6 @@ function App() {
   const [providerConnections, setProviderConnections] = useState<Record<ProviderKey, ProviderConnection>>({
     twitch: { status: "disconnected", displayName: null, connectedAt: null, configured: false, detailCode: "oauth_credentials_not_configured" },
     youtube: { status: "disconnected", displayName: null, connectedAt: null, configured: false, detailCode: null },
-    kick: { status: "disconnected", displayName: null, connectedAt: null, configured: false, detailCode: null },
     tiktok: { status: "disconnected", displayName: null, connectedAt: null, configured: false, detailCode: "unofficial_connector_not_configured" },
   });
   const [modal, setModal] = useState<"pair" | "provider" | "settings" | "help" | "auth" | null>(null);
@@ -371,13 +369,13 @@ function App() {
     const provider = params.get("provider");
     const status = params.get("status");
     const reason = params.get("reason");
-    if ((provider !== "twitch" && provider !== "youtube" && provider !== "kick") || !status) return;
+    if ((provider !== "twitch" && provider !== "youtube") || !status) return;
 
     setActiveTab("Integrations");
     if (status === "connected" && !user?.id) {
       flash(provider + " returned from authorization, but RiftPulse could not confirm your sign-in. Sign in again and reconnect.");
     } else if (status === "connected") {
-      flash(provider === "twitch" ? "Twitch connected successfully. Enable chat events next." : provider === "youtube" ? "YouTube account authorized. Live-chat polling is still pending." : "Kick account authorized. Webhook subscription setup is still pending.");
+      flash(provider === "twitch" ? "Twitch connected successfully. Enable chat events next." : "YouTube account authorized. Live-chat polling is still pending.");
     } else if (status === "denied") {
       flash(provider + " authorization was canceled.");
     } else if (provider === "twitch") {
@@ -481,25 +479,6 @@ function App() {
       }
       return;
     }
-    if (current.status === "connected" && selectedProvider === "kick" && current.detailCode === "webhook_subscription_pending") {
-      try {
-        const response = await fetch("/api/v1/providers/kick/webhook/subscribe", {
-          method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: "{}",
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error?.message ?? "Could not enable Kick chat events.");
-        await refreshProviderConnections();
-        await refreshProviderHealth();
-        flash(data.status === "subscribed" ? "Kick chat subscription is active. Waiting for a signed chat event." : "Kick subscription setup is pending.");
-      } catch (error) {
-        flash(error instanceof Error ? error.message : "Could not enable Kick chat events.");
-      }
-      return;
-    }
-    if (current.status === "connected" && selectedProvider === "kick" && current.detailCode === "waiting_for_first_event") {
-      flash("Kick subscription is active; waiting for the first signed chat event.");
-      return;
-    }
     if (current.status === "connected" && current.detailCode === "eventsub_verification_pending") {
       flash("Twitch is still verifying the webhook. Check back in a moment.");
       return;
@@ -532,23 +511,6 @@ function App() {
         window.location.assign(authorizationUrl.toString());
       } catch (error) {
         flash(error instanceof Error ? error.message : "Could not start YouTube authorization.");
-      }
-      return;
-    }
-    if (selectedProvider === "kick") {
-      if (!current.configured) {
-        flash("Kick OAuth is not configured in this local workspace yet.");
-        return;
-      }
-      try {
-        const response = await fetch("/api/v1/providers/kick/connect", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: "{}" });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error?.message ?? "Could not start Kick authorization.");
-        const authorizationUrl = new URL(data.authorizationUrl);
-        if (authorizationUrl.origin !== "https://id.kick.com" || authorizationUrl.pathname !== "/oauth/authorize") throw new Error("The authorization URL was not trusted.");
-        window.location.assign(authorizationUrl.toString());
-      } catch (error) {
-        flash(error instanceof Error ? error.message : "Could not start Kick authorization.");
       }
       return;
     }
@@ -871,7 +833,7 @@ function App() {
           </section>
 
           <section className="section-block integrations-block" id="integrations">
-            <div className="section-heading"><div><div className="section-overline">BRING IT TOGETHER</div><h3>Integrations <span className="subtle-count">04</span></h3><p>Your platforms, one connected experience.</p></div><button className="outline-button" onClick={() => openProvider("twitch")}><Plus size={15} /> Connect platform</button></div>
+            <div className="section-heading"><div><div className="section-overline">BRING IT TOGETHER</div><h3>Integrations <span className="subtle-count">03</span></h3><p>Your platforms, one connected experience.</p></div><button className="outline-button" onClick={() => openProvider("twitch")}><Plus size={15} /> Connect platform</button></div>
             <div className="provider-list">
               {providers.map(provider => <div className="provider-row" key={provider.key}>
                 <div className={`provider-icon ${provider.className}`}>{provider.short}</div>
@@ -880,7 +842,7 @@ function App() {
                 <button className={providerConnections[provider.key].status === "connected" ? "disconnect-button" : "connect-button"} onClick={() => openProvider(provider.key)}>{providerConnections[provider.key].status === "connected" ? "Manage" : providerConnections[provider.key].status === "unsupported" ? "Details" : "Connect"}{providerConnections[provider.key].status === "connected" ? <ChevronDown size={14} /> : <ExternalLink size={13} />}</button>
               </div>)}
             </div>
-            <div className="integration-footnote"><ShieldCheck size={15} /><span>Connection status comes from the API. Twitch, YouTube, and Kick still require provider credentials and live-event verification. TikTok LIVE uses an unofficial Node.js bridge that must be running separately; it has not yet been verified against a real live stream.</span></div>
+            <div className="integration-footnote"><ShieldCheck size={15} /><span>Connection status comes from the API. Twitch and YouTube require provider credentials and live-event verification. TikTok LIVE uses an unofficial Node.js bridge that must be running separately; it has not yet been verified against a real live stream.</span></div>
           </section>
 
           <section className="section-block chat-feed-block" id="chat-feed">
@@ -943,13 +905,13 @@ function App() {
             <button className="primary-button modal-submit" disabled={pairCode.length !== 5 || pairStatus === "checking"} onClick={verifyPairing}>{pairStatus === "checking" ? <><RefreshCw size={16} className="spin" /> Verifying…</> : <>Verify code <ArrowUpRight size={15} /></>}</button>
             <p className="modal-footnote">This form never generates pairing codes. Enter only the current code displayed by your own Beat Saber installation.</p>
           </>}
-          {modal === "provider" && <><div className={`modal-icon provider-icon ${providers.find(p => p.key === selectedProvider)?.className}`}>{providers.find(p => p.key === selectedProvider)?.short}</div><div className="modal-eyebrow">PLATFORM INTEGRATION</div><h2 id="modal-title">{providerConnections[selectedProvider].status === "connected" ? "Manage" : "Connect"} {providers.find(p => p.key === selectedProvider)?.name}</h2><p className="modal-copy">{selectedProvider === "twitch" ? (providerConnections.twitch.configured ? "Authorize your Twitch account securely. After authorization, EventSub subscription setup is still required before live messages arrive." : "The Twitch OAuth flow is implemented locally, but app credentials and a token encryption key have not been configured in this workspace.") : selectedProvider === "youtube" ? (providerConnections.youtube.configured ? "Authorize read-only access for your YouTube channel. Live chat and Super Chat/membership events are polled when you refresh the dashboard; viewer counts are not wired yet." : "Google OAuth and YouTube Data API credentials have not been configured in this workspace.") : selectedProvider === "kick" ? (providerConnections.kick.configured ? "Authorize your Kick account using OAuth 2.1 with PKCE. Webhook subscription setup remains in development and will be reported as pending." : "Kick OAuth credentials and a token encryption key have not been configured in this workspace.") : selectedProvider === "tiktok" ? "RiftPulse has a local bridge for TikTok LIVE chat and supported events such as gifts, follows, likes, and shares. The bridge runs as a separate Node.js process and forwards events to this account using signed requests. Start the bridge with the account ID, live username, and the same ingest secret configured on the API. This is unofficial and best-effort; a real LIVE-stream test is still pending." : (providers.find(p => p.key === selectedProvider)?.name + " authorization is not implemented yet. The account will remain disconnected until its secure OAuth flow is ready.")}</p>
+          {modal === "provider" && <><div className={`modal-icon provider-icon ${providers.find(p => p.key === selectedProvider)?.className}`}>{providers.find(p => p.key === selectedProvider)?.short}</div><div className="modal-eyebrow">PLATFORM INTEGRATION</div><h2 id="modal-title">{providerConnections[selectedProvider].status === "connected" ? "Manage" : "Connect"} {providers.find(p => p.key === selectedProvider)?.name}</h2><p className="modal-copy">{selectedProvider === "twitch" ? (providerConnections.twitch.configured ? "Authorize your Twitch account securely. After authorization, EventSub subscription setup is still required before live messages arrive." : "The Twitch OAuth flow is implemented locally, but app credentials and a token encryption key have not been configured in this workspace.") : selectedProvider === "youtube" ? (providerConnections.youtube.configured ? "Authorize read-only access for your YouTube channel. Live chat and Super Chat/membership events are polled when you refresh the dashboard; viewer counts are not wired yet." : "Google OAuth and YouTube Data API credentials have not been configured in this workspace.") : selectedProvider === "tiktok" ? "RiftPulse has a local bridge for TikTok LIVE chat and supported events such as gifts, follows, likes, and shares. The bridge runs as a separate Node.js process and forwards events to this account using signed requests. Start the bridge with the account ID, live username, and the same ingest secret configured on the API. This is unofficial and best-effort; a real LIVE-stream test is still pending." : (providers.find(p => p.key === selectedProvider)?.name + " authorization is not implemented yet. The account will remain disconnected until its secure OAuth flow is ready.")}</p>
             {selectedProvider === "tiktok" && <><div className="warning-note"><ShieldCheck size={16} /><span><b>Unofficial connector</b><br />TikTok LIVE support is best effort and may be unavailable or change without notice.</span></div>
               <div className="field-group"><label htmlFor="tiktok-username">Public TikTok LIVE username</label><input id="tiktok-username" autoComplete="off" maxLength={25} placeholder="yourusername" value={tiktokUsername} onChange={e => setTiktokUsername(e.target.value.replace(/^@/, "").slice(0, 24))} /><small>Enter the username only, without @ or a profile URL. This is saved privately to your RiftPulse account.</small></div>
               <div className="field-group"><label htmlFor="tiktok-account-id">RiftPulse account ID for connector setup</label><input id="tiktok-account-id" readOnly value={tiktokAccountId || user?.id || "Available after sign-in"} /><small>The separate Railway connector must use this account ID, the saved username, and the same ingest secret as the API.</small></div>
               <button className="primary-button modal-submit" disabled={tiktokSaving || !user?.id} onClick={() => void saveTikTokSettings()}>{tiktokSaving ? <><RefreshCw size={16} className="spin" /> Saving…</> : <>Save TikTok username <Check size={15} /></>}</button></>}
             <div className="provider-permissions"><div><Check size={15} /> Chat event capability</div><div><Users size={15} /> Viewer count where supported</div><div><LockKeyhole size={15} /> Secure account authorization</div></div>
-            {selectedProvider !== "tiktok" && <><button className="primary-button modal-submit" disabled={(providerConnections[selectedProvider].status !== "connected" && ((selectedProvider === "twitch" && !providerConnections.twitch.configured) || (selectedProvider === "youtube" && !providerConnections.youtube.configured) || (selectedProvider === "kick" && !providerConnections.kick.configured))) || (providerConnections[selectedProvider].detailCode === "eventsub_verification_pending" || (selectedProvider === "kick" && providerConnections[selectedProvider].detailCode === "waiting_for_first_event"))} onClick={() => void handleProviderAction()}>{providerConnections[selectedProvider].status === "connected" ? selectedProvider === "kick" && providerConnections[selectedProvider].detailCode === "webhook_subscription_pending" ? <><Radio size={16} /> Enable chat events</> : selectedProvider === "kick" && providerConnections[selectedProvider].detailCode === "waiting_for_first_event" ? <><RefreshCw size={16} className="spin" /> Waiting for chat</> : providerConnections[selectedProvider].detailCode === "eventsub_subscription_pending" || providerConnections[selectedProvider].detailCode === "eventsub_subscription_failed" ? <><Radio size={16} /> Enable chat events</> : providerConnections[selectedProvider].detailCode === "eventsub_verification_pending" ? <><RefreshCw size={16} className="spin" /> Waiting for verification</> : <><Unplug size={16} /> Disconnect account</> : selectedProvider === "twitch" && providerConnections.twitch.configured ? <><Link2 size={16} /> Connect with Twitch</> : selectedProvider === "youtube" && providerConnections.youtube.configured ? <><Link2 size={16} /> Connect with YouTube</> : selectedProvider === "kick" && providerConnections.kick.configured ? <><Link2 size={16} /> Connect with Kick</> : <>Not configured yet <LockKeyhole size={15} /></>}</button><p className="modal-footnote">{providerConnections[selectedProvider].status === "connected" && selectedProvider === "twitch" && providerConnections[selectedProvider].detailCode === "eventsub_subscription_pending" ? "Twitch is authorized. Enable the signed webhook subscription to receive live chat." : providerConnections[selectedProvider].status === "connected" && selectedProvider === "twitch" && providerConnections[selectedProvider].detailCode === "eventsub_verification_pending" ? "Twitch is validating the webhook endpoint. The status will update after its signed challenge arrives." : providerConnections[selectedProvider].status === "connected" && selectedProvider === "kick" && providerConnections[selectedProvider].detailCode === "webhook_subscription_pending" ? "Kick is authorized. Enable the webhook subscription to receive live chat." : providerConnections[selectedProvider].status === "connected" && selectedProvider === "kick" && providerConnections[selectedProvider].detailCode === "waiting_for_first_event" ? "The Kick subscription is active; the first signed chat event will confirm delivery." : providerConnections[selectedProvider].status === "connected" && selectedProvider === "youtube" && providerConnections[selectedProvider].detailCode === "live_chat_polling_pending" ? "YouTube is authorized; refresh the dashboard during a live broadcast to poll chat. Viewer counts are not available yet." : providerConnections[selectedProvider].status === "connected" ? "Disconnecting clears stored token ciphertext." : "No external account is contacted until you choose an enabled connection action."}</p></>}
+            {selectedProvider !== "tiktok" && <><button className="primary-button modal-submit" disabled={(providerConnections[selectedProvider].status !== "connected" && ((selectedProvider === "twitch" && !providerConnections.twitch.configured) || (selectedProvider === "youtube" && !providerConnections.youtube.configured))) || (providerConnections[selectedProvider].detailCode === "eventsub_verification_pending")} onClick={() => void handleProviderAction()}>{providerConnections[selectedProvider].status === "connected" ? providerConnections[selectedProvider].detailCode === "eventsub_subscription_pending" || providerConnections[selectedProvider].detailCode === "eventsub_subscription_failed" ? <><Radio size={16} /> Enable chat events</> : providerConnections[selectedProvider].detailCode === "eventsub_verification_pending" ? <><RefreshCw size={16} className="spin" /> Waiting for verification</> : <><Unplug size={16} /> Disconnect account</> : selectedProvider === "twitch" && providerConnections.twitch.configured ? <><Link2 size={16} /> Connect with Twitch</> : selectedProvider === "youtube" && providerConnections.youtube.configured ? <><Link2 size={16} /> Connect with YouTube</>: <>Not configured yet <LockKeyhole size={15} /></>}</button><p className="modal-footnote">{providerConnections[selectedProvider].status === "connected" && selectedProvider === "twitch" && providerConnections[selectedProvider].detailCode === "eventsub_subscription_pending" ? "Twitch is authorized. Enable the signed webhook subscription to receive live chat." : providerConnections[selectedProvider].status === "connected" && selectedProvider === "twitch" && providerConnections[selectedProvider].detailCode === "eventsub_verification_pending" ? "Twitch is validating the webhook endpoint. The status will update after its signed challenge arrives." : providerConnections[selectedProvider].status === "connected" && selectedProvider === "youtube" && providerConnections[selectedProvider].detailCode === "live_chat_polling_pending" ? "YouTube is authorized; refresh the dashboard during a live broadcast to poll chat. Viewer counts are not available yet." : providerConnections[selectedProvider].status === "connected" ? "Disconnecting clears stored token ciphertext." : "No external account is contacted until you choose an enabled connection action."}</p></>}
           </>}
           {modal === "settings" && <><div className="modal-icon purple-modal"><Settings2 size={22} /></div><div className="modal-eyebrow">PREFERENCES</div><h2 id="modal-title">Tune your setup.</h2><p className="modal-copy">Module switches and the BSR command save to your account. Provider OAuth and device preferences remain gated until their integrations are complete.</p>
             <div className="settings-option"><div><b>Automatically save toggles</b><small>Apply module changes immediately.</small></div><button className={`toggle ${autoSave ? "on" : ""}`} role="switch" aria-checked={autoSave} onClick={() => setAutoSave(!autoSave)}><span /></button></div>
@@ -975,7 +937,7 @@ function LegalPage({ kind }: { kind: "privacy" | "terms" }) {
       {privacy ? <>
         <p>This Privacy Policy describes how RiftPulse (“RiftPulse,” “we,” “us,” or “our”) handles information when you use our website, account services, and Beat Saber-related integrations. RiftPulse is a development-stage service; features and data flows may change as features are introduced.</p>
         <h2>1. Information we handle</h2><p>Depending on the features you use, we may handle account details such as email address, display name, and account identifier; device and pairing identifiers, pairing status, and configuration preferences; and technical information such as request logs, browser/device details, IP address, and security events.</p>
-        <h2>2. Connected platform data</h2><p>If you authorize Twitch, YouTube/Google, TikTok LIVE, or Kick, the service may process platform identifiers, usernames, authorization tokens, chat messages, stream status, viewer counts, and event data (such as follows, subscriptions, gifts, or donations) to the extent the integration supports them and the permissions allow. Actual data availability varies by platform and feature.</p>
+        <h2>2. Connected platform data</h2><p>If you authorize Twitch, YouTube/Google, or TikTok LIVE, the service may process platform identifiers, usernames, authorization tokens, chat messages, stream status, viewer counts, and event data (such as follows, subscriptions, gifts, or donations) to the extent the integration supports them and the permissions allow. Actual data availability varies by platform and feature.</p>
         <h2>3. How information is used</h2><p>We use information to operate and secure accounts, complete device pairing, provide integrations and settings sync, deliver chat/event and song-request features, troubleshoot errors, prevent abuse, and maintain or improve RiftPulse.</p>
         <h2>4. Service providers and sharing</h2><p>RiftPulse relies on service providers including Cloudflare and Railway for hosting, infrastructure, and operation. Information may be processed by providers and connected platforms as needed to deliver requested features. We may disclose information when legally required or when reasonably necessary to protect the service, users, or others. We do not sell personal information for money.</p>
         <h2>5. OAuth and third-party accounts</h2><p>When you connect an external account, you grant RiftPulse access within the permissions presented by that platform. You can revoke authorization through the platform's account settings; this may disable RiftPulse features. Third-party services are governed by their own terms and privacy policies.</p>
@@ -988,7 +950,7 @@ function LegalPage({ kind }: { kind: "privacy" | "terms" }) {
         <p>These Terms of Service (“Terms”) govern your use of the RiftPulse website, accounts, software integrations, device pairing, and supported features. By accessing or using RiftPulse, you agree to these Terms. If you do not agree, do not use the service.</p>
         <h2>1. Service description</h2><p>RiftPulse provides tools intended for Beat Saber players and streamers, which may include account and device pairing, streaming-platform connections, chat and event integrations, configurable commands, and song-request features. Features may be changed, suspended, or discontinued as the service develops.</p>
         <h2>2. Eligibility and accounts</h2><p>You must meet the minimum age required by applicable law and the services you connect. If you are a minor, obtain any parent or guardian permission required by law. Keep account credentials secure, provide accurate information, and promptly report suspected unauthorized access.</p>
-        <h2>3. Third-party platform connections</h2><p>Connecting Twitch, YouTube/Google, TikTok LIVE, Kick, or another platform is subject to that platform's terms, policies, and availability. You are responsible for having permission to connect the account and for revoking access when appropriate. RiftPulse does not control third-party services and does not guarantee their continued availability.</p>
+        <h2>3. Third-party platform connections</h2><p>Connecting Twitch, YouTube/Google, TikTok LIVE, or another platform is subject to that platform's terms, policies, and availability. You are responsible for having permission to connect the account and for revoking access when appropriate. RiftPulse does not control third-party services and does not guarantee their continued availability.</p>
         <h2>4. Acceptable use</h2><p>You may not use RiftPulse unlawfully; attempt unauthorized access; disrupt, abuse, or overload the service; circumvent authentication, pairing, or security controls; distribute harmful code; harass or impersonate others; or violate another person's rights. You may not use chat commands or song requests to spam or disrupt a stream.</p>
         <h2>5. User configuration and content</h2><p>You are responsible for the commands, request rules, and moderation settings you configure, and for ensuring your use of connected platforms and content complies with applicable rules and rights. RiftPulse does not claim ownership of Beat Saber, music, or third-party platform content.</p>
         <h2>6. Intellectual property</h2><p>RiftPulse's original software, branding, and website materials are owned by or licensed to RiftPulse, except third-party materials. Do not reproduce or commercially exploit these materials except as permitted by law or applicable license. Third-party marks belong to their respective owners.</p>

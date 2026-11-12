@@ -198,34 +198,7 @@ test("Twitch homepage OAuth response is forwarded to the server callback before 
   }
 });
 
-test("Kick homepage OAuth response is forwarded to the Kick server callback before the SPA loads", async () => {
-  const database = new FakeD1();
-  database.rootOAuthProvider = "kick";
-  const bindings: Env = { ...env(), DB: database, RAILWAY_API_URL: "https://riftpulse-api.test" };
-  const originalFetch = globalThis.fetch;
-  const expectedLocation = "https://app.riftpulse.me/?provider=kick&status=connected";
-  const state = "b".repeat(64);
-  let observedUrl = "";
 
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const upstreamRequest = input instanceof Request ? input : new Request(input, init);
-    observedUrl = upstreamRequest.url;
-    assert.equal(upstreamRequest.method, "GET");
-    assert.equal(upstreamRequest.redirect, "manual");
-    return new Response(null, { status: 303, headers: { location: expectedLocation } });
-  };
-
-  try {
-    const response = await worker.fetch(new Request(
-      "https://app.riftpulse.me/?code=kick-oauth-code&state=" + state + "&scope=user%3Aread",
-    ), bindings);
-    assert.equal(observedUrl, "https://riftpulse-api.test/api/v1/providers/kick/callback?code=kick-oauth-code&state=" + state + "&scope=user%3Aread");
-    assert.equal(response.status, 303);
-    assert.equal(response.headers.get("location"), expectedLocation);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
 
 test("Railway API proxy preserves the JSON Twitch authorization handoff", async () => {
   const bindings: Env = { ...env(), RAILWAY_API_URL: "https://riftpulse-api.test" };

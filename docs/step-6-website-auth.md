@@ -6,7 +6,7 @@ Status: **local website/auth foundation complete**. Real provider integrations a
 - Responsive, dark Beat Saber-inspired RiftPulse dashboard and account screen.
 - Module cards for Chat and BSR Song Request with accessible toggles.
 - Account-specific module settings and BSR command persistence.
-- Provider cards for Twitch, YouTube, Kick, and TikTok LIVE.
+- Provider cards for Twitch, YouTube, and TikTok LIVE.
 - Device pairing dialog, paired-device list, and device revocation.
 - Settings/help dialogs, API health indicator, and reduced-motion styling.
 - Provider cards are preview-only until real OAuth adapters are implemented; TikTok is labelled unofficial/best-effort.
