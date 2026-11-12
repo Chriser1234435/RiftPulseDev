@@ -84,6 +84,19 @@ test("normalizes Twitch and Kick provider events with stable external IDs", () =
   assert.equal(kick?.kind, "follow");
   assert.equal(kick?.channelId, "10");
   assert.equal(kick?.actorName, "Follower");
+
+  const kicksGift = normalizePlatformProviderEvent("kick", "kicks.gifted", {
+    broadcaster: { user_id: 10, username: "StreamerK" },
+    sender: { user_id: 20, username: "Kicker" },
+    gift: { amount: 250, name: "KICKs" },
+    created_at: "2026-10-29T11:59:00Z",
+  }, "kick-gift-event-1", now);
+  assert.equal(kicksGift?.kind, "gift");
+  assert.equal(kicksGift?.actorName, "Kicker");
+  assert.equal(kicksGift?.itemName, "KICKs");
+  assert.equal(kicksGift?.quantity, 250);
+  assert.equal(kicksGift?.amount, null);
+  assert.equal(kicksGift?.currency, null);
   assert.equal(normalizePlatformProviderEvent("kick", "unknown.event", {}, "id", now), null);
 });
 

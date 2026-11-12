@@ -776,7 +776,7 @@ export default {
       authorizationUrl.searchParams.set("response_type", "code");
       if (redirectUri.hostname === "127.0.0.1") authorizationUrl.searchParams.set("redirect", "127.0.0.1");
       authorizationUrl.searchParams.set("redirect_uri", redirectUri.toString());
-      authorizationUrl.searchParams.set("scope", "user:read channel:read events:subscribe");
+      authorizationUrl.searchParams.set("scope", "user:read channel:read events:subscribe kicks:read");
       authorizationUrl.searchParams.set("code_challenge", challenge);
       authorizationUrl.searchParams.set("code_challenge_method", "S256");
       authorizationUrl.searchParams.set("state", state);
@@ -982,7 +982,7 @@ export default {
           || typeof token.refresh_token !== "string" || !token.refresh_token
           || !Number.isFinite(expiresIn) || expiresIn <= 0) return finish("failed");
 
-        const introspectResponse = await fetch("https://api.kick.com/public/v1/token/introspect", {
+        const introspectResponse = await fetch("https://id.kick.com/oauth/token/introspect", {
           method: "POST",
           headers: { authorization: "Bearer " + token.access_token, accept: "application/json" },
         });
@@ -1173,7 +1173,7 @@ export default {
       if (stored.externalAccountId !== connection.externalAccountId) return jsonError(409, "kick_account_mismatch", "Reconnect the intended Kick account before enabling chat events.", requestId);
 
       try {
-        const introspectResponse = await fetch("https://api.kick.com/public/v1/token/introspect", {
+        const introspectResponse = await fetch("https://id.kick.com/oauth/token/introspect", {
           method: "POST",
           headers: { authorization: "Bearer " + stored.accessToken, accept: "application/json" },
         });
@@ -1184,8 +1184,8 @@ export default {
         const data = typeof root.data === "object" && root.data !== null && !Array.isArray(root.data) ? root.data as Record<string, unknown> : {};
         const scopes = typeof data.scope === "string" ? data.scope.split(/\s+/).filter(Boolean) : [];
         if (data.active !== true || data.client_id !== env.KICK_CLIENT_ID || data.token_type !== "user"
-          || !["user:read", "channel:read", "events:subscribe"].every(scope => scopes.includes(scope))) {
-          return jsonError(409, "kick_scope_mismatch", "Reconnect Kick and grant the required chat-event permissions.", requestId);
+          || !["user:read", "channel:read", "events:subscribe", "kicks:read"].every(scope => scopes.includes(scope))) {
+          return jsonError(409, "kick_scope_mismatch", "Reconnect Kick and grant the required chat and KICKs-event permissions.", requestId);
         }
 
         const subscriptionsUrl = new URL("https://api.kick.com/public/v1/events/subscriptions");
@@ -1198,23 +1198,32 @@ export default {
         const existingRoot = typeof existingPayload === "object" && existingPayload !== null && !Array.isArray(existingPayload)
           ? existingPayload as Record<string, unknown> : {};
         const existingData = Array.isArray(existingRoot.data) ? existingRoot.data : [];
-        const alreadySubscribed = existingData.some(item => {
-          if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+        const desiredEvents = [
+          "chat.message.sent",
+          "channel.followed",
+          "channel.subscription.new",
+          "channel.subscription.renewal",
+          "channel.subscription.gifts",
+          "kicks.gifted",
+        ] as const;
+        const subscribedEvents = new Set(existingData.flatMap(item => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) return [];
           const sub = item as Record<string, unknown>;
-          return sub.event === "chat.message.sent" && Number(sub.version) === 1 && sub.method === "webhook";
-        });
+          return sub.method === "webhook" && Number(sub.version) === 1 && typeof sub.event === "string" ? [sub.event] : [];
+        }));
+        const missingEvents = desiredEvents.filter(eventName => !subscribedEvents.has(eventName));
 
-        if (!alreadySubscribed) {
+        if (missingEvents.length > 0) {
           const createResponse = await fetch("https://api.kick.com/public/v1/events/subscriptions", {
             method: "POST",
             headers: { authorization: "Bearer " + stored.accessToken, "content-type": "application/json", accept: "application/json" },
-            body: JSON.stringify({ method: "webhook", events: [{ name: "chat.message.sent", version: 1 }] }),
+            body: JSON.stringify({ method: "webhook", events: missingEvents.map(name => ({ name, version: 1 })) }),
           });
           if (!createResponse.ok) {
             await env.DB.prepare(
               "UPDATE integration_health SET status = 'degraded', observed_at = ?, detail_code = 'webhook_subscription_failed' WHERE account_id = ? AND provider = 'kick'",
             ).bind(new Date().toISOString(), authContext.userId).run();
-            return jsonError(502, "kick_subscription_failed", "Kick did not accept the chat subscription. Check the webhook URL in the Kick developer portal and the events:subscribe permission.", requestId);
+            return jsonError(502, "kick_subscription_failed", "Kick did not accept the chat and stream-event subscriptions. Check the webhook URL and the events:subscribe and kicks:read permissions in the Kick developer app.", requestId);
           }
         }
 
@@ -1223,7 +1232,7 @@ export default {
           "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'kick', 'degraded', NULL, ?, 'waiting_for_first_event', NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'degraded', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = 'waiting_for_first_event', viewer_count_observed_at = NULL",
         ).bind(crypto.randomUUID(), authContext.userId, now).run();
         if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not update Kick chat setup status.", requestId);
-        return Response.json({ status: "subscribed", alreadySubscribed }, { headers: JSON_HEADERS });
+        return Response.json({ status: "subscribed", alreadySubscribed: missingEvents.length === 0, subscribedEvents: desiredEvents }, { headers: JSON_HEADERS });
       } catch {
         return jsonError(502, "kick_subscription_setup_failed", "Could not complete Kick chat setup.", requestId);
       }

@@ -164,6 +164,7 @@ const PLATFORM_EVENT_KIND: Record<string, ProviderEventKind> = {
   "channel.raid": "raid", "channel.charity_campaign.donate": "donation",
   "channel.followed": "follow", "channel.subscription.new": "subscription",
   "channel.subscription.renewal": "subscription", "channel.subscription.gifts": "gift",
+  "kicks.gifted": "gift",
   "livestream.status.updated": "other", "livestream.metadata.updated": "other",
 };
 
@@ -180,16 +181,17 @@ export function normalizePlatformProviderEvent(
   const channelId = id(event.broadcaster_user_id ?? event.to_broadcaster_user_id ?? broadcaster?.user_id);
   const channelName = text(event.broadcaster_user_name ?? event.to_broadcaster_user_name ?? broadcaster?.username, 80);
   if (!channelId) return null;
-  const user = child(event, "user") ?? child(event, "gifter") ?? child(event, "follower") ?? child(event, "subscriber");
+  const user = child(event, "user") ?? child(event, "gifter") ?? child(event, "follower") ?? child(event, "subscriber") ?? child(event, "sender");
   const donation = child(event, "charity_donation") ?? child(event, "donation");
-  const rawAmount = event.bits ?? event.amount ?? donation?.value ?? donation?.amount;
+  const gift = child(event, "gift");
+  const rawAmount = eventName === "kicks.gifted" ? null : event.bits ?? event.amount ?? donation?.value ?? donation?.amount;
   const amount = typeof rawAmount === "number" && Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : null;
-  const rawQuantity = event.total ?? event.giftees_count ?? event.viewers ?? event.viewer_count ?? event.count;
+  const rawQuantity = event.total ?? event.giftees_count ?? event.viewers ?? event.viewer_count ?? event.count ?? gift?.amount;
   const quantity = typeof rawQuantity === "number" && Number.isSafeInteger(rawQuantity) && rawQuantity >= 0 ? rawQuantity : null;
   const occurredAt = event.followed_at ?? event.subscribed_at ?? event.created_at ?? event.started_at ?? event.ended_at ?? event.timestamp;
   const name = text(event.user_name ?? event.user_login ?? event.follower_user_name ?? event.username
     ?? user?.user_name ?? user?.username ?? event.gifter_user_name ?? event.from_broadcaster_user_name, 80);
-  const itemName = text(event.tier ?? event.gift_name ?? event.reward_name ?? (kind === "gift" ? "subscription gift" : ""), 100) || null;
+  const itemName = text(gift?.name ?? event.tier ?? event.gift_name ?? event.reward_name ?? (kind === "gift" ? "subscription gift" : ""), 100) || null;
   const eventId = id(externalEventId || event.id || event.message_id || event.event_id
     || (occurredAt ? eventName + ":" + id(occurredAt) + ":" + id(event.user_id ?? user?.user_id) : ""));
   if (!eventId) return null;
