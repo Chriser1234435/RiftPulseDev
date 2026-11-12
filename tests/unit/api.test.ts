@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import worker from "../../src/index.ts";
 import type { D1Database, D1PreparedStatement, D1Result, Env } from "../../src/env.ts";
+import { createOAuthBasicAuthorization } from "../../packages/shared/src/oauth-state.ts";
 
 type ChallengeRow = {
   id: string; device_id: string; platform: "pcvr" | "quest"; game_version: string;
@@ -98,6 +99,12 @@ class FakeD1 implements D1Database {
   prepare(query: string): D1PreparedStatement { return new FakeStatement(this, query); }
   async batch<T>(_statements: D1PreparedStatement[]): Promise<D1Result<T>[]> { return []; }
 }
+
+test("OAuth client_secret_basic encoding form-encodes both credentials before Base64", () => {
+  const header = createOAuthBasicAuthorization("client:id", "secret+with space");
+  assert.equal(header.slice(0, 6), "Basic ");
+  assert.equal(atob(header.slice(6)), "client%3Aid:secret%2Bwith+space");
+});
 
 const env = (): { DB: FakeD1; PAIRING_HMAC_KEY: string } => ({
   DB: new FakeD1(),

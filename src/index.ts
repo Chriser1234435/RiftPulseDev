@@ -7,7 +7,7 @@ import { persistNormalizedProviderEvent } from "../packages/shared/src/provider-
 import { verifyTikTokConnectorSignature } from "../packages/shared/src/tiktok-connector-signature.ts";
 import { extractKickPublicKey, verifyKickWebhookSignature } from "../packages/shared/src/kick-webhook.ts";
 import { verifyTwitchEventSubSignature } from "../packages/shared/src/twitch-eventsub.ts";
-import { createOAuthState, createPkceChallenge, createPkceVerifier, digestOAuthState } from "../packages/shared/src/oauth-state.ts";
+import { createOAuthState, createPkceChallenge, createPkceVerifier, createOAuthBasicAuthorization, digestOAuthState } from "../packages/shared/src/oauth-state.ts";
 import { beginTwitchOAuth, completeTwitchOAuth } from "../packages/shared/src/twitch-oauth.ts";
 import { decryptProviderToken, encryptProviderToken } from "../packages/shared/src/provider-token-vault.ts";
 import { disconnectProvider, ensureFreshTwitchProviderTokens, persistProviderTokens, readProviderTokens } from "../packages/shared/src/provider-connections.ts";
@@ -777,7 +777,7 @@ export default {
       if (!inserted.success) return jsonError(503, "oauth_state_store_unavailable", "Could not start a secure authorization attempt.", requestId);
 
       const authorizationUrl = new URL("https://id.kick.com/oauth/authorize");
-      authorizationUrl.searchParams.set("client_id", env.KICK_CLIENT_ID);
+      authorizationUrl.searchParams.set("client_id", env.KICK_CLIENT_ID.trim());
       authorizationUrl.searchParams.set("response_type", "code");
       if (redirectUri.hostname === "127.0.0.1") authorizationUrl.searchParams.set("redirect", "127.0.0.1");
       authorizationUrl.searchParams.set("redirect_uri", redirectUriValue);
@@ -978,10 +978,15 @@ export default {
         failureStage = "authorization_code_exchange";
         const tokenResponse = await fetch("https://id.kick.com/oauth/token", {
           method: "POST",
-          headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+          // Kick's token service currently rejects client credentials sent only in
+          // the form body with 401. Authenticate the confidential client using
+          // OAuth client_secret_basic; keep grant parameters in the form body.
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            accept: "application/json",
+            authorization: createOAuthBasicAuthorization(env.KICK_CLIENT_ID.trim(), env.KICK_CLIENT_SECRET.trim()),
+          },
           body: new URLSearchParams({
-            client_id: env.KICK_CLIENT_ID,
-            client_secret: env.KICK_CLIENT_SECRET,
             code,
             grant_type: "authorization_code",
             redirect_uri: redirectUriValue,
@@ -1014,7 +1019,7 @@ export default {
         const introspectRoot = introspectPayload as Record<string, unknown>;
         const introspect = typeof introspectRoot.data === "object" && introspectRoot.data !== null && !Array.isArray(introspectRoot.data)
           ? introspectRoot.data as Record<string, unknown> : {};
-        if (introspect.active !== true || introspect.client_id !== env.KICK_CLIENT_ID || introspect.token_type !== "user"
+        if (introspect.active !== true || introspect.client_id !== env.KICK_CLIENT_ID.trim() || introspect.token_type !== "user"
           || typeof introspect.scope !== "string") return finish("failed");
         const scopes = introspect.scope.split(/\s+/).filter(Boolean);
         if (!["user:read", "channel:read", "events:subscribe", "kicks:read"].every(scope => scopes.includes(scope))) return finish("failed");

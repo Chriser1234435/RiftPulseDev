@@ -27,3 +27,13 @@ export async function createPkceChallenge(verifier: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
   return base64Url(new Uint8Array(digest));
 }
+
+/** Build OAuth 2.0 client_secret_basic credentials using form-url-encoding. */
+export function createOAuthBasicAuthorization(clientId: string, clientSecret: string): string {
+  const formEncode = (value: string): string => new URLSearchParams({ value }).toString().slice("value=".length);
+  const encoded = formEncode(clientId) + ":" + formEncode(clientSecret);
+  const bytes = new TextEncoder().encode(encoded);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return "Basic " + btoa(binary);
+}
