@@ -938,7 +938,9 @@ export default {
       const state = url.searchParams.get("state");
       const cookieState = readCookie(request, "rp_kick_oauth_state");
       const secureCookie = url.protocol === "https:";
+      let failureStage = "callback_validation";
       const finish = (status: string) => {
+        if (status === "failed") console.warn("kick_oauth_failed", JSON.stringify({ stage: failureStage }));
         const response = providerRedirect(env, "kick", status);
         response.headers.append("set-cookie", kickStateCookie(null, secureCookie));
         response.headers.set("cache-control", "no-store");
@@ -947,6 +949,7 @@ export default {
       };
       if (!env.DB || !env.KICK_CLIENT_ID || !env.KICK_CLIENT_SECRET || !env.TOKEN_ENCRYPTION_KEY || !env.APP_BASE_URL
         || !state || state !== cookieState || !/^[a-f0-9]{64}$/i.test(state)) return finish("failed");
+      failureStage = "oauth_state_claim";
       const digest = await digestOAuthState(state);
       const now = new Date();
       const claimedState = await env.DB.prepare(
@@ -954,6 +957,7 @@ export default {
       ).bind(now.toISOString(), digest, now.toISOString()).first<{ account_id: string; code_verifier_ciphertext: string | null }>();
       if (!claimedState?.account_id || !claimedState.code_verifier_ciphertext) return finish("failed");
       if (url.searchParams.has("error")) return finish("denied");
+      failureStage = "authorization_code_validation";
       const code = url.searchParams.get("code");
       if (!code || code.length > 2048) return finish("failed");
 
@@ -969,7 +973,9 @@ export default {
         || redirectUriValue !== new URL(env.APP_BASE_URL).origin) return finish("failed");
 
       try {
+        failureStage = "verifier_decryption";
         const verifier = await decryptProviderToken(claimedState.code_verifier_ciphertext, env.TOKEN_ENCRYPTION_KEY);
+        failureStage = "authorization_code_exchange";
         const tokenResponse = await fetch("https://id.kick.com/oauth/token", {
           method: "POST",
           headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
@@ -982,7 +988,10 @@ export default {
             code_verifier: verifier,
           }),
         });
-        if (!tokenResponse.ok) return finish("failed");
+        if (!tokenResponse.ok) {
+          console.warn("kick_oauth_provider_response", JSON.stringify({ stage: failureStage, status: tokenResponse.status }));
+          return finish("failed");
+        }
         const tokenPayload: unknown = await tokenResponse.json();
         if (!tokenPayload || typeof tokenPayload !== "object" || Array.isArray(tokenPayload)) return finish("failed");
         const token = tokenPayload as Record<string, unknown>;
@@ -991,11 +1000,15 @@ export default {
           || typeof token.refresh_token !== "string" || !token.refresh_token
           || !Number.isFinite(expiresIn) || expiresIn <= 0) return finish("failed");
 
+        failureStage = "token_introspection";
         const introspectResponse = await fetch("https://id.kick.com/oauth/token/introspect", {
           method: "POST",
           headers: { authorization: "Bearer " + token.access_token, accept: "application/json" },
         });
-        if (!introspectResponse.ok) return finish("failed");
+        if (!introspectResponse.ok) {
+          console.warn("kick_oauth_provider_response", JSON.stringify({ stage: failureStage, status: introspectResponse.status }));
+          return finish("failed");
+        }
         const introspectPayload: unknown = await introspectResponse.json();
         if (!introspectPayload || typeof introspectPayload !== "object" || Array.isArray(introspectPayload)) return finish("failed");
         const introspectRoot = introspectPayload as Record<string, unknown>;
@@ -1006,10 +1019,14 @@ export default {
         const scopes = introspect.scope.split(/\s+/).filter(Boolean);
         if (!["user:read", "channel:read", "events:subscribe", "kicks:read"].every(scope => scopes.includes(scope))) return finish("failed");
 
+        failureStage = "user_profile_lookup";
         const userResponse = await fetch("https://api.kick.com/public/v1/users", {
           headers: { authorization: "Bearer " + token.access_token, accept: "application/json" },
         });
-        if (!userResponse.ok) return finish("failed");
+        if (!userResponse.ok) {
+          console.warn("kick_oauth_provider_response", JSON.stringify({ stage: failureStage, status: userResponse.status }));
+          return finish("failed");
+        }
         const userPayload: unknown = await userResponse.json();
         if (!userPayload || typeof userPayload !== "object" || Array.isArray(userPayload)) return finish("failed");
         const userData = (userPayload as Record<string, unknown>).data;
@@ -1020,6 +1037,7 @@ export default {
         const displayName = typeof kickUser.name === "string" ? kickUser.name : typeof kickUser.username === "string" ? kickUser.username : "";
         if (!externalAccountId || !displayName) return finish("failed");
 
+        failureStage = "token_persistence";
         const saved = await persistProviderTokens(env.DB, {
           accountId: claimedState.account_id, provider: "kick", externalAccountId, displayName,
           accessToken: token.access_token, refreshToken: token.refresh_token,
@@ -1027,12 +1045,14 @@ export default {
         }, env.TOKEN_ENCRYPTION_KEY);
         if (!saved.ok) return finish("failed");
 
+        failureStage = "integration_health_update";
         const health = await env.DB.prepare(
           "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'kick', 'degraded', NULL, ?, 'webhook_subscription_pending', NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'degraded', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = 'webhook_subscription_pending', viewer_count_observed_at = NULL",
         ).bind(crypto.randomUUID(), claimedState.account_id, new Date().toISOString()).run();
         if (!health.success) return finish("failed");
         return finish("connected");
-      } catch {
+      } catch (error) {
+        console.error("kick_oauth_unexpected_error", JSON.stringify({ stage: failureStage, errorType: error instanceof Error ? error.name : "unknown" }));
         return finish("failed");
       }
     }
