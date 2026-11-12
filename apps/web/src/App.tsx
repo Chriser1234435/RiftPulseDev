@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
-  Activity, ArrowDownRight, ArrowRight, ArrowUpRight, AudioLines, Bell, Check, ChevronDown,
+  Activity, ArrowDown, ArrowDownRight, ArrowRight, ArrowUpRight, AudioLines, Bell, Check, ChevronDown,
   CircleHelp, Command, Download, ExternalLink, Gamepad2, Headphones, LayoutDashboard,
   Link2, LockKeyhole, LogOut, MessageCircle, Monitor, MoreHorizontal, Music2,
   Plus, Radio, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, Sparkles,
@@ -63,6 +63,18 @@ function providerEventAsChatMessage(value: unknown): ChatMessage | null {
 
 const initialEnabled: Record<ModuleKey, boolean> = { chat: true, "bsr-song-request": true };
 
+const onboardingSteps = [
+  { title: "Welcome to RiftPulse", description: "This quick tour shows you where everything lives. You can skip it now and replay it any time from the question-mark Support button.", target: null },
+  { title: "Your stream at a glance", description: "The overview shows connected platforms, paired devices, enabled modules, and viewer totals when fresh counts are available.", target: "overview" },
+  { title: "Your modules", description: "Chat brings supported platform messages into one experience. BSR Song Request lets viewers request Beat Saber tracks with your chosen chat command. Use the module cards to open their settings.", target: "modules" },
+  { title: "Install the Beat Saber mod", description: "Choose the correct package for your setup: PCVR ZIP for the PC version, or Quest QMOD for standalone. Follow the installation notes on each card.", target: "downloads" },
+  { title: "Connect your platforms", description: "Choose Connect beside Twitch, YouTube, or TikTok LIVE, then follow the authorization or account setup steps. Some platforms need an extra setup action after connecting.", target: "integrations" },
+  { title: "Chat & Events", description: "This is where recent messages and supported stream events appear. Provider health and viewer counts help you see which connections are reporting data.", target: "chat-feed" },
+  { title: "Pair your Beat Saber device", description: "Open RiftPulse in Beat Saber, choose Connect to website, and enter the five-digit code shown in-game. You can manage paired devices here afterward.", target: "devices" },
+  { title: "Tune your preferences", description: "Open Settings in the left navigation to adjust module preferences and your BSR command. Changes to module toggles are saved to your account.", target: "settings" },
+  { title: "Your guide is always here", description: "Finished! Select the round question-mark Support button whenever you want to run this walkthrough again.", target: "support" },
+] as const;
+
 function App() {
   const [activeTab, setActiveTab] = useState("Overview");
   const [enabled, setEnabled] = useState(initialEnabled);
@@ -104,6 +116,11 @@ function App() {
   const [providerHealth, setProviderHealth] = useState<ProviderHealth[]>([]);
   const [viewerAggregate, setViewerAggregate] = useState<ViewerAggregate | null>(null);
   const [healthLoading, setHealthLoading] = useState(true);
+  const [tourOpen, setTourOpen] = useState(false);
+  const [tourStep, setTourStep] = useState(0);
+  const [tourCompleted, setTourCompleted] = useState(false);
+  const [tourSaving, setTourSaving] = useState(false);
+  const [tourTargetRect, setTourTargetRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
 
   const refreshChat = useCallback(async (): Promise<number> => {
     // YouTube is polled using the interval returned by liveChatMessages.list.
@@ -243,6 +260,72 @@ function App() {
       .catch(() => setUser(null))
       .finally(() => setAuthLoaded(true));
   }, []);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setTourOpen(false);
+      setTourCompleted(false);
+      return;
+    }
+    let active = true;
+    let autoOpenTimer: number | undefined;
+    fetch("/api/v1/onboarding", { credentials: "include" })
+      .then(response => response.ok ? response.json() : Promise.reject(new Error("Onboarding status unavailable")))
+      .then(data => {
+        if (!active) return;
+        const completed = data?.completed === true;
+        setTourCompleted(completed);
+        if (!completed) {
+          setTourStep(0);
+          autoOpenTimer = window.setTimeout(() => { if (active) setTourOpen(true); }, 650);
+        }
+      })
+      .catch(() => {
+        // If account preferences cannot be reached, do not interrupt the dashboard.
+        // The user can still launch the guide manually from Support.
+      });
+    return () => { active = false; if (autoOpenTimer !== undefined) window.clearTimeout(autoOpenTimer); };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!tourOpen) { setTourTargetRect(null); return; }
+    const step = onboardingSteps[tourStep];
+    if (!step?.target) { setTourTargetRect(null); return; }
+    const target = document.querySelector<HTMLElement>(`[data-tour-target="${step.target}"]`);
+    if (!target) { setTourTargetRect(null); return; }
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center", inline: "nearest" });
+    const previous = {
+      position: target.style.position,
+      zIndex: target.style.zIndex,
+      boxShadow: target.style.boxShadow,
+      borderRadius: target.style.borderRadius,
+      outline: target.style.outline,
+    };
+    target.style.position = target.style.position || "relative";
+    target.style.zIndex = "10002";
+    target.style.boxShadow = "0 0 0 3px #b59aff, 0 0 34px #a78bfa66, 0 0 0 100vmax rgba(3,5,12,.76)";
+    target.style.borderRadius = target.style.borderRadius || "12px";
+    target.style.outline = "1px solid rgba(207,190,255,.75)";
+    let timer = 0;
+    const update = () => {
+      const rect = target.getBoundingClientRect();
+      setTourTargetRect({ top: rect.top, left: rect.left, width: rect.width, height: rect.height });
+    };
+    timer = window.setTimeout(update, reduceMotion ? 0 : 420);
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+      target.style.position = previous.position;
+      target.style.zIndex = previous.zIndex;
+      target.style.boxShadow = previous.boxShadow;
+      target.style.borderRadius = previous.borderRadius;
+      target.style.outline = previous.outline;
+    };
+  }, [tourOpen, tourStep]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -397,6 +480,42 @@ function App() {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 3000);
   };
+
+  const startTour = () => {
+    setModal(null);
+    setProfileOpen(false);
+    setUpdatesOpen(false);
+    setTourStep(0);
+    setTourOpen(true);
+  };
+
+  const finishTour = async () => {
+    if (tourSaving) return;
+    setTourSaving(true);
+    try {
+      const response = await fetch("/api/v1/onboarding", {
+        method: "POST", credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ completed: true }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error?.message ?? "Could not save your guide progress.");
+      setTourCompleted(true);
+      setTourOpen(false);
+      setTourStep(0);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Could not save your guide progress.");
+    } finally {
+      setTourSaving(false);
+    }
+  };
+
+  const advanceTour = () => {
+    if (tourStep >= onboardingSteps.length - 1) void finishTour();
+    else setTourStep(current => Math.min(current + 1, onboardingSteps.length - 1));
+  };
+
+  const useTourBack = () => setTourStep(current => Math.max(0, current - 1));
 
   useEffect(() => {
     if (!authLoaded) return;
@@ -783,7 +902,7 @@ function App() {
         <nav className="primary-nav">
           {navItems.map(item => {
             const Icon = item.icon;
-            return <button key={item.label} className={`nav-item ${activeTab === item.label ? "active" : ""}`} onClick={() => {
+            return <button key={item.label} data-tour-target={item.label === "Settings" ? "settings" : undefined} className={`nav-item ${activeTab === item.label ? "active" : ""}`} onClick={() => {
               setActiveTab(item.label);
               if (item.label === "Settings") setModal("settings");
               else if (item.label === "Devices") document.getElementById("devices")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -801,20 +920,20 @@ function App() {
           <p>One pulse between your chat and the game.</p>
           <button onClick={() => setModal("help")}>Explore RiftPulse <ArrowUpRight size={14} /></button>
         </div>
-        <button className="nav-item help-nav" onClick={() => setModal("help")}><CircleHelp size={17} /><span>Help & feedback</span></button>
+        <button className="nav-item help-nav" aria-label="Support — replay the getting started guide" onClick={startTour}><CircleHelp size={17} /><span>Support</span></button>
         <div className="sidebar-footer"><div className="avatar"><img className="avatar-image" src="/images/riftpulse-profile.jpg" alt="RiftPulse profile" /></div><div className="footer-profile"><b>{user.name}</b><small>{user.email}</small></div></div>
       </aside>
 
       <main className="main-panel">
         <header className="topbar">
           <div className="breadcrumbs"><span>Workspace</span><span className="crumb-sep">/</span><b>{activeTab}</b></div>
-          <div className="topbar-actions"><div className={`api-pill ${apiStatus}`}><span className="status-dot" />{apiStatus === "online" ? "API operational" : apiStatus === "checking" ? "Checking API" : "API offline"}</div><div className="notification-anchor"><button className={"icon-button notification-button" + (updates.some(update => !update.isRead) ? " has-unread" : "")} aria-label="Updates" aria-haspopup="dialog" aria-expanded={updatesOpen} onClick={() => { const next = !updatesOpen; setUpdatesOpen(next); if (next) void refreshUpdates(); }}><Bell size={17} />{updates.some(update => !update.isRead) && <i />}</button>{updatesOpen && <div className="updates-dropdown" role="dialog" aria-label="RiftPulse updates"><div className="updates-header"><div><b>RiftPulse updates</b><small>Website and mod release notes</small></div><button className="updates-close" aria-label="Close updates" onClick={() => setUpdatesOpen(false)}><X size={15} /></button></div><div className="updates-toolbar"><span>{updates.some(update => !update.isRead) ? updates.filter(update => !update.isRead).length + " new update" + (updates.filter(update => !update.isRead).length === 1 ? "" : "s") : "You’re all caught up"}</span>{updates.some(update => !update.isRead) && <button onClick={() => void markUpdatesRead()}>Mark all read</button>}</div><div className="updates-list">{updatesLoading && updates.length === 0 ? <div className="updates-empty"><RefreshCw size={16} className="spin" /> Loading updates…</div> : updates.length === 0 ? <div className="updates-empty"><Bell size={18} /><b>No updates yet</b><span>Website and mod changes will show up here.</span></div> : updates.map(update => <article className={"update-entry" + (update.isRead ? "" : " unread")} key={update.id}><div className="update-entry-top"><span className={"update-tag " + update.category}>{update.category === "both" ? "Website + Mod" : update.category === "mod" ? "Mod update" : "Website update"}</span><time dateTime={update.publishedAt}>{new Date(update.publishedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</time></div><div className="update-entry-title">{update.title}{update.version && <small>{update.version}</small>}</div><p>{update.summary}</p>{update.changes.length > 0 && <ul>{update.changes.map((change, index) => <li key={update.id + "-" + index}>{change}</li>)}</ul>}</article>)}</div></div>}</div><div className="account-menu-anchor"><button className="avatar top-avatar" onClick={() => setProfileOpen(!profileOpen)} aria-label="Account menu" aria-haspopup="menu" aria-expanded={profileOpen}><img className="avatar-image" src="/images/riftpulse-profile.jpg" alt="" /></button>{profileOpen && <div className="profile-menu account-dropdown" role="menu"><div className="account-dropdown-heading"><div className="avatar"><img className="avatar-image" src="/images/riftpulse-profile.jpg" alt="" /></div><span><b>{user.name}</b><small>{user.email}</small></span></div><div className="profile-menu-title">ACCOUNT</div><button role="menuitem" onClick={() => { setProfileOpen(false); setModal("settings"); }}><Settings2 size={15} /> Preferences</button><button role="menuitem" onClick={() => { void signOut(); }}><LogOut size={15} /> Sign out</button></div>}</div></div>
+          <div className="topbar-actions"><button className="icon-button support-trigger" data-tour-target="support" title="Support and getting started guide" aria-label="Support and getting started guide" onClick={startTour}><CircleHelp size={18} /></button><div className={`api-pill ${apiStatus}`}><span className="status-dot" />{apiStatus === "online" ? "API operational" : apiStatus === "checking" ? "Checking API" : "API offline"}</div><div className="notification-anchor"><button className={"icon-button notification-button" + (updates.some(update => !update.isRead) ? " has-unread" : "")} aria-label="Updates" aria-haspopup="dialog" aria-expanded={updatesOpen} onClick={() => { const next = !updatesOpen; setUpdatesOpen(next); if (next) void refreshUpdates(); }}><Bell size={17} />{updates.some(update => !update.isRead) && <i />}</button>{updatesOpen && <div className="updates-dropdown" role="dialog" aria-label="RiftPulse updates"><div className="updates-header"><div><b>RiftPulse updates</b><small>Website and mod release notes</small></div><button className="updates-close" aria-label="Close updates" onClick={() => setUpdatesOpen(false)}><X size={15} /></button></div><div className="updates-toolbar"><span>{updates.some(update => !update.isRead) ? updates.filter(update => !update.isRead).length + " new update" + (updates.filter(update => !update.isRead).length === 1 ? "" : "s") : "You’re all caught up"}</span>{updates.some(update => !update.isRead) && <button onClick={() => void markUpdatesRead()}>Mark all read</button>}</div><div className="updates-list">{updatesLoading && updates.length === 0 ? <div className="updates-empty"><RefreshCw size={16} className="spin" /> Loading updates…</div> : updates.length === 0 ? <div className="updates-empty"><Bell size={18} /><b>No updates yet</b><span>Website and mod changes will show up here.</span></div> : updates.map(update => <article className={"update-entry" + (update.isRead ? "" : " unread")} key={update.id}><div className="update-entry-top"><span className={"update-tag " + update.category}>{update.category === "both" ? "Website + Mod" : update.category === "mod" ? "Mod update" : "Website update"}</span><time dateTime={update.publishedAt}>{new Date(update.publishedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</time></div><div className="update-entry-title">{update.title}{update.version && <small>{update.version}</small>}</div><p>{update.summary}</p>{update.changes.length > 0 && <ul>{update.changes.map((change, index) => <li key={update.id + "-" + index}>{change}</li>)}</ul>}</article>)}</div></div>}</div><div className="account-menu-anchor"><button className="avatar top-avatar" onClick={() => setProfileOpen(!profileOpen)} aria-label="Account menu" aria-haspopup="menu" aria-expanded={profileOpen}><img className="avatar-image" src="/images/riftpulse-profile.jpg" alt="" /></button>{profileOpen && <div className="profile-menu account-dropdown" role="menu"><div className="account-dropdown-heading"><div className="avatar"><img className="avatar-image" src="/images/riftpulse-profile.jpg" alt="" /></div><span><b>{user.name}</b><small>{user.email}</small></span></div><div className="profile-menu-title">ACCOUNT</div><button role="menuitem" onClick={() => { setProfileOpen(false); setModal("settings"); }}><Settings2 size={15} /> Preferences</button><button role="menuitem" onClick={() => { void signOut(); }}><LogOut size={15} /> Sign out</button></div>}</div></div>
         </header>
 
         <div className="page-content">
           <section className="welcome-row">
             <div><div className="eyebrow"><span className="eyebrow-line" /> YOUR STREAMING COMMAND CENTER</div><h1>Make your stream <span>pulse.</span></h1><p className="welcome-sub">Your setup at a glance. Let's get everything connected.</p></div>
-            <button className="primary-button" onClick={() => { startPairing(); setModal("pair"); }}><Plus size={17} /> Connect a device</button>
+            <div className="welcome-actions">{!tourCompleted && <button className="outline-button get-started-button" onClick={startTour}><WandSparkles size={15} /> Get started</button>}<button className="primary-button" onClick={() => { startPairing(); setModal("pair"); }}><Plus size={17} /> Connect a device</button></div>
           </section>
 
           <section className="hero-card">
@@ -835,14 +954,14 @@ function App() {
             <div className="hero-grid" aria-hidden="true" />
           </section>
 
-          <section className="metrics-grid">
+          <section className="metrics-grid" data-tour-target="overview">
             <MetricCard icon={<Radio size={17} />} label="PLATFORMS CONNECTED" value={String(Object.values(providerConnections).filter(connection => connection.status === "connected").length).padStart(2, "0")} detail="confirmed provider authorizations" />
             <MetricCard icon={<Gamepad2 size={17} />} label="DEVICES PAIRED" value={String(devices.length).padStart(2, "0")} detail={devices.length ? "Active paired devices" : "Connect Beat Saber to begin"} />
             <MetricCard icon={<WandSparkles size={17} />} label="ACTIVE MODULES" value={String(Object.values(enabled).filter(Boolean).length).padStart(2, "0")} detail="Chat + BSR Song Request" />
             <MetricCard icon={<Users size={17} />} label="LIVE VIEWERS" value={viewerAggregate?.total == null ? "—" : String(viewerAggregate.total)} detail={viewerAggregate?.total == null ? (healthLoading ? "Checking provider counts" : "No fresh counts available") : viewerAggregate.partial ? "Partial · some providers unavailable" : "Fresh counts across providers"} muted={viewerAggregate?.total == null} />
           </section>
 
-          <section className="section-block" id="modules">
+          <section className="section-block" id="modules" data-tour-target="modules">
             <div className="section-heading"><div><div className="section-overline">YOUR TOOLKIT</div><h3>Modules <span className="subtle-count">02</span></h3><p>Small tools. Big stream energy.</p></div><button className="text-button" onClick={() => setActiveTab("Modules")}>Manage modules <ArrowUpRight size={15} /></button></div>
             <div className="module-grid">
               <ModuleCard title="Chat" description="Bring Twitch, YouTube, and TikTok LIVE messages into your game." tag="COMMUNITY" icon={<MessageCircle size={21} />} accent="purple" onConfigure={() => { setActiveTab("Integrations"); document.getElementById("chat-feed")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} status="Chat & Events" />
@@ -850,7 +969,7 @@ function App() {
             </div>
           </section>
 
-          <section className="section-block downloads-block" id="downloads">
+          <section className="section-block downloads-block" id="downloads" data-tour-target="downloads">
             <div className="section-heading"><div><div className="section-overline">ALPHA TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Alpha packages for Beat Saber 1.40.8. Quest v0.1.26 fixes stuck HTTPS request locks and restores pending or claimed pairing sessions after restarts. Headset runtime validation is still required.</p></div><span className="settings-badge">PCVR v0.1.19 · Quest v0.1.26</span></div>
             <div className="downloads-grid">
               <article className="panel-card download-card">
@@ -867,7 +986,7 @@ function App() {
             <div className="integration-footnote"><ShieldCheck size={15} /><span>Alpha build for tester validation. Quest pairing and preference sync use the API; actual live chat/provider events, combined viewer counts, ChatIntegrations command execution, and BSR song-request fulfillment remain unfinished. Use a test instance; not a release build.</span></div>
           </section>
 
-          <section className="section-block integrations-block" id="integrations">
+          <section className="section-block integrations-block" id="integrations" data-tour-target="integrations">
             <div className="section-heading"><div><div className="section-overline">BRING IT TOGETHER</div><h3>Integrations <span className="subtle-count">03</span></h3><p>Your platforms, one connected experience.</p></div><button className="outline-button" onClick={() => openProvider("twitch")}><Plus size={15} /> Connect platform</button></div>
             <div className="provider-list">
               {providers.map(provider => <div className="provider-row" key={provider.key}>
@@ -880,7 +999,7 @@ function App() {
             <div className="integration-footnote"><ShieldCheck size={15} /><span>Connection status comes from the API. Twitch uses EventSub webhooks, YouTube polls live chat and supported stream events, and TikTok LIVE uses an unofficial best-effort bridge. A real live-stream test is still needed to confirm end-to-end delivery.</span></div>
           </section>
 
-          <section className="section-block chat-feed-block" id="chat-feed">
+          <section className="section-block chat-feed-block" id="chat-feed" data-tour-target="chat-feed">
             <div className="section-heading">
               <div><div className="section-overline">COMMUNITY PULSE</div><h3>Chat & Events <span className="subtle-count">{chatMessages.length.toString().padStart(2, "0")}</span></h3><p>Live messages and normalized stream events from connected platforms.</p></div>
               <button className="outline-button" onClick={() => { void refreshChat(); void refreshProviderHealth(); }} disabled={chatLoading && healthLoading}><RefreshCw size={14} /> Refresh status</button>
@@ -911,7 +1030,7 @@ function App() {
           </section>
 
           <section className="bottom-grid" id="devices">
-            <div className="panel-card devices-card">
+            <div className="panel-card devices-card" data-tour-target="devices">
               <div className="panel-title"><div><div className="section-overline">YOUR HARDWARE</div><h3>Connected devices</h3></div><button className="icon-button" onClick={() => { startPairing(); setModal("pair"); }} aria-label="Add device"><Plus size={17} /></button></div>
               {devices.length === 0 ? <div className="empty-device"><div className="empty-device-icon"><Monitor size={22} /></div><div><b>No devices paired yet</b><p>Connect Beat Saber to bring RiftPulse into your game.</p><button className="inline-action" onClick={() => { startPairing(); setModal("pair"); }}>Pair your first device <ArrowUpRight size={14} /></button></div></div> : <div className="device-list">{devices.map(device => <div className="device-row" key={device.id}><div className="empty-device-icon"><Gamepad2 size={20}/></div><div><b>{device.label || (device.platform === "pcvr" ? "Beat Saber · PCVR" : "Beat Saber · Quest")}</b><p>Game {device.gameVersion} · Mod {device.modVersion}</p></div><button className="disconnect-button" onClick={() => void revokeDevice(device.id)}>Disconnect</button></div>)}</div>}
             </div>
@@ -922,11 +1041,39 @@ function App() {
             </div>
           </section>
 
-          <footer className="page-footer"><div><span className="footer-pulse" /> RIFTPULSE <span className="footer-version">V0.1.0 · DEVELOPMENT PREVIEW</span></div><div><span>Built for the beat.</span><span className="footer-separator">·</span><a href="/privacy">Privacy</a><span className="footer-separator">·</span><a href="/terms">Terms</a><span className="footer-separator">·</span><button onClick={() => setModal("help")}>Support</button><span className="footer-separator">·</span><button onClick={() => setModal("settings")}>Preferences</button></div></footer>
+          <footer className="page-footer"><div><span className="footer-pulse" /> RIFTPULSE <span className="footer-version">V0.1.0 · DEVELOPMENT PREVIEW</span></div><div><span>Built for the beat.</span><span className="footer-separator">·</span><a href="/privacy">Privacy</a><span className="footer-separator">·</span><a href="/terms">Terms</a><span className="footer-separator">·</span><button onClick={startTour}>Support</button><span className="footer-separator">·</span><button onClick={() => setModal("settings")}>Preferences</button></div></footer>
         </div>
       </main>
 
       {notice && <div className="toast"><Check size={16} />{notice}<button onClick={() => setNotice("")} aria-label="Dismiss"><X size={14} /></button></div>}
+
+      {tourOpen && <div className="onboarding-layer">
+        <div className="onboarding-scrim" aria-hidden="true" />
+        {tourTargetRect && <div className="onboarding-arrow" aria-hidden="true" style={{
+          left: Math.max(12, Math.min(tourTargetRect.left + tourTargetRect.width / 2 - 18, window.innerWidth - 48)),
+          top: Math.max(8, tourTargetRect.top - 46),
+        }}><ArrowDown size={34} strokeWidth={2.6} /></div>}
+        <section className="onboarding-panel" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" aria-describedby="onboarding-description">
+          <div className="onboarding-topline">
+            <div className="onboarding-brand"><span className="onboarding-guide-icon"><ArrowDownRight size={19} /></span><span><b>RIFTPULSE GUIDE</b><small>GETTING STARTED</small></span></div>
+            <span className="onboarding-counter">{String(tourStep + 1).padStart(2, "0")} <i>/</i> {String(onboardingSteps.length).padStart(2, "0")}</span>
+            <button className="icon-button onboarding-close" aria-label="Close guide" title="Close guide" disabled={tourSaving} onClick={() => void finishTour()}><X size={17} /></button>
+          </div>
+          <div className="onboarding-progress"><span style={{ width: ((tourStep + 1) / onboardingSteps.length * 100) + "%" }} /></div>
+          <div className="onboarding-copy">
+            <div className="onboarding-step-label">{tourStep === 0 ? "LET'S GET YOU SET UP" : "STEP " + String(tourStep).padStart(2, "0")}</div>
+            <h2 id="onboarding-title">{onboardingSteps[tourStep].title}</h2>
+            <p id="onboarding-description">{onboardingSteps[tourStep].description}</p>
+          </div>
+          <div className="onboarding-actions">
+            <button className="onboarding-skip" disabled={tourSaving} onClick={() => void finishTour()}>Skip guide</button>
+            <div className="onboarding-nav">
+              {tourStep > 0 && <button className="onboarding-back" disabled={tourSaving} onClick={useTourBack}>Back</button>}
+              <button className="primary-button onboarding-next" disabled={tourSaving} onClick={advanceTour}>{tourSaving ? <><RefreshCw size={15} className="spin" /> Saving…</> : tourStep === onboardingSteps.length - 1 ? <>Finish <Check size={15} /></> : <>Next <ArrowRight size={15} /></>}</button>
+            </div>
+          </div>
+        </section>
+      </div>}
 
       {modal && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setModal(null); }}>
         <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">

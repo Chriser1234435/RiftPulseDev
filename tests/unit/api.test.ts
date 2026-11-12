@@ -123,6 +123,20 @@ test("health and version routes identify the V1 API and only the two V1 modules"
   assert.deepEqual((await version.json()).modules, ["chat", "bsr-song-request"]);
 });
 
+test("onboarding preferences are account-authenticated", async () => {
+  const listing = await call("/api/v1/onboarding");
+  assert.equal(listing.status, 503);
+  assert.equal((await listing.json()).error.code, "auth_not_configured");
+
+  const save = await call("/api/v1/onboarding", {
+    method: "POST",
+    headers: { origin: "https://riftpulse.test", "content-type": "application/json" },
+    body: JSON.stringify({ completed: true }),
+  });
+  assert.equal(save.status, 503);
+  assert.equal((await save.json()).error.code, "auth_not_configured");
+});
+
 test("release update history and read-state routes require an authenticated account", async () => {
   const listing = await call("/api/v1/updates");
   assert.equal(listing.status, 503);

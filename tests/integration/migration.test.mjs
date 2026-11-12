@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const migrations = ["0001_initial.sql", "0002_auth.sql", "0003_chat_foundation.sql", "0004_provider_oauth_states.sql", "0005_kick_pkce.sql", "0006_provider_events.sql", "0007_youtube_live_chat_cursor.sql", "0008_provider_settings.sql", "0009_device_credentials.sql", "0010_release_updates.sql", "0011_remove_kick_provider.sql"].map(name =>
+const migrations = ["0001_initial.sql", "0002_auth.sql", "0003_chat_foundation.sql", "0004_provider_oauth_states.sql", "0005_kick_pkce.sql", "0006_provider_events.sql", "0007_youtube_live_chat_cursor.sql", "0008_provider_settings.sql", "0009_device_credentials.sql", "0010_release_updates.sql", "0011_remove_kick_provider.sql", "0012_onboarding_preferences.sql"].map(name =>
   readFileSync(join(root, "migrations", name), "utf8")
 );
 
@@ -23,7 +23,7 @@ test("application, authentication, chat, OAuth-state, and provider-event migrati
       "accounts", "devices", "pairing_challenges", "provider_connections", "module_settings",
       "chat_commands", "song_requests", "integration_health", "idempotency_keys", "chat_messages", "provider_events",
       "user", "session", "account", "verification", "provider_oauth_states", "youtube_live_chat_cursors",
-      "release_updates", "release_update_reads",
+      "release_updates", "release_update_reads", "account_preferences",
     ];
     for (const table of expected) assert.equal(tables.has(table), true, `missing table: ${table}`);
     const healthColumns = new Set(db.prepare("PRAGMA table_info(integration_health)").all().map(row => row.name));
@@ -68,6 +68,32 @@ test("application, authentication, chat, OAuth-state, and provider-event migrati
       .run("s1", Date.now() + 60_000, "session-token-test", Date.now(), Date.now(), "u1");
     assert.equal(db.prepare("SELECT userId FROM session WHERE token = ?").get("session-token-test").userId, "u1");
     assert.equal(db.prepare("PRAGMA foreign_key_check").all().length, 0);
+  } finally {
+    db.close();
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+
+test("onboarding rollout opts in current sessions and existing inactive accounts stay completed", () => {
+  const temp = mkdtempSync(join(tmpdir(), "riftpulse-onboarding-"));
+  const db = new DatabaseSync(join(temp, "onboarding.sqlite"));
+  try {
+    db.exec("PRAGMA foreign_keys = ON");
+    for (const sql of migrations.slice(0, -1)) db.exec(sql);
+    const now = Date.now();
+    const insertUser = db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 0, ?, ?)");
+    insertUser.run("active-user", "Active", "active@riftpulse.invalid", now, now);
+    insertUser.run("inactive-user", "Inactive", "inactive@riftpulse.invalid", now, now);
+    db.prepare("INSERT INTO session (id, expiresAt, token, createdAt, updatedAt, userId) VALUES (?, ?, ?, ?, ?, ?)")
+      .run("active-session", now + 60_000, "active-session-token", now, now, "active-user");
+    db.exec(migrations.at(-1));
+    const active = JSON.parse(db.prepare("SELECT value_json FROM account_preferences WHERE account_id = ? AND preference_key = 'onboarding_v1'").get("active-user").value_json);
+    const inactive = JSON.parse(db.prepare("SELECT value_json FROM account_preferences WHERE account_id = ? AND preference_key = 'onboarding_v1'").get("inactive-user").value_json);
+    assert.equal(active.completed, false);
+    assert.equal(active.source, "rollout_active_session");
+    assert.equal(inactive.completed, true);
+    assert.equal(inactive.source, "legacy_account");
   } finally {
     db.close();
     rmSync(temp, { recursive: true, force: true });

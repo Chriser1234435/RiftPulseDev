@@ -261,6 +261,46 @@ export default {
       return auth.handler(request);
     }
 
+    if (url.pathname === "/api/v1/onboarding" && (request.method === "GET" || request.method === "POST")) {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Account preference storage is unavailable.", requestId);
+
+      if (request.method === "GET") {
+        const now = new Date().toISOString();
+        const initialized = await env.DB.prepare(
+          "INSERT OR IGNORE INTO account_preferences (account_id, preference_key, value_json, updated_at) VALUES (?, 'onboarding_v1', '{\"completed\":false,\"source\":\"new_account\"}', ?)",
+        ).bind(authContext.userId, now).run();
+        if (!initialized.success) return jsonError(503, "onboarding_store_unavailable", "Could not initialize your getting-started guide.", requestId);
+        const saved = await env.DB.prepare(
+          "SELECT value_json FROM account_preferences WHERE account_id = ? AND preference_key = 'onboarding_v1' LIMIT 1",
+        ).bind(authContext.userId).first<{ value_json: string }>();
+        if (!saved) return jsonError(503, "onboarding_store_unavailable", "Could not load your getting-started guide status.", requestId);
+        let value: unknown = {};
+        try { value = JSON.parse(saved.value_json); } catch { value = {}; }
+        const completed = !!value && typeof value === "object" && !Array.isArray(value)
+          && (value as Record<string, unknown>).completed === true;
+        return Response.json({ completed }, { headers: JSON_HEADERS });
+      }
+
+      if (!isTrustedMutationOrigin(request, env)) return jsonError(403, "untrusted_origin", "Request origin is not trusted.", requestId);
+      if (!isJson(request)) return jsonError(415, "content_type_required", "Send a JSON request body.", requestId);
+      let body: unknown;
+      try { body = await readJson(request); }
+      catch { return jsonError(400, "invalid_json", "Request body must be valid JSON.", requestId); }
+      if (!body || typeof body !== "object" || Array.isArray(body)
+        || Object.keys(body).length !== 1 || typeof (body as Record<string, unknown>).completed !== "boolean") {
+        return jsonError(400, "validation_failed", "completed must be a boolean.", requestId);
+      }
+      const now = new Date().toISOString();
+      const valueJson = JSON.stringify({ completed: (body as Record<string, boolean>).completed, updatedAt: now });
+      const saved = await env.DB.prepare(
+        "INSERT INTO account_preferences (account_id, preference_key, value_json, updated_at) VALUES (?, 'onboarding_v1', ?, ?) ON CONFLICT(account_id, preference_key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at",
+      ).bind(authContext.userId, valueJson, now).run();
+      if (!saved.success) return jsonError(503, "onboarding_store_unavailable", "Could not save your getting-started guide status.", requestId);
+      return Response.json({ completed: (body as Record<string, boolean>).completed, updatedAt: now }, { headers: JSON_HEADERS });
+    }
+
     if (url.pathname === "/api/v1/updates" && request.method === "GET") {
       const authContext = await getAuthContext(request, env);
       if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
