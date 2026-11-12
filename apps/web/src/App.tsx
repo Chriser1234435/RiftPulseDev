@@ -810,7 +810,7 @@ function App() {
           <section className="section-block" id="modules">
             <div className="section-heading"><div><div className="section-overline">YOUR TOOLKIT</div><h3>Modules <span className="subtle-count">02</span></h3><p>Small tools. Big stream energy.</p></div><button className="text-button" onClick={() => setActiveTab("Modules")}>Manage modules <ArrowUpRight size={15} /></button></div>
             <div className="module-grid">
-              <ModuleCard title="Chat" description="Bring Twitch, YouTube, Kick and TikTok LIVE messages into your game." tag="COMMUNITY" icon={<MessageCircle size={21} />} accent="purple" onConfigure={() => { setActiveTab("Integrations"); document.getElementById("chat-feed")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} status="Chat & Events" />
+              <ModuleCard title="Chat" description="Bring Twitch, YouTube, and TikTok LIVE messages into your game." tag="COMMUNITY" icon={<MessageCircle size={21} />} accent="purple" onConfigure={() => { setActiveTab("Integrations"); document.getElementById("chat-feed")?.scrollIntoView({ behavior: "smooth", block: "start" }); }} status="Chat & Events" />
               <ModuleCard title="BSR Song Request" description="Let your viewers request Beat Saber tracks with a simple chat command." tag="INTERACTIVE" icon={<Music2 size={21} />} accent="cyan" onConfigure={() => setModal("settings")} status={`Command: ${command}`} />
             </div>
           </section>
