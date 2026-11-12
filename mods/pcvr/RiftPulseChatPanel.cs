@@ -65,14 +65,9 @@ namespace RiftPulse.Pcvr
 
         private void Update()
         {
-            var sceneName = SceneManager.GetActiveScene().name;
-            var gameplay = sceneName == "GameCore"
-                || sceneName.IndexOf("Gameplay", StringComparison.OrdinalIgnoreCase) >= 0;
-            if (!gameplay)
-            {
-                if (_panel != null) DestroyPanel(savePlacement: true);
-                return;
-            }
+            // Keep the floating chat panel available in menus and gameplay.
+            // It is a world-space screen with its own controller grab handle,
+            // so users can move it at any time instead of only during a song.
 
             if (_moveRequested)
             {
@@ -211,9 +206,12 @@ namespace RiftPulse.Pcvr
                         {
                             RenderFeed(body);
                         }
-                        else if ((int)response.StatusCode == 401 && _panel != null)
+                        else if ((int)response.StatusCode == 401 && _text != null)
                         {
-                            _panel.gameObject.SetActive(false);
+                            // Keep the panel visible before pairing so the user
+                            // can still find and reposition it at any time.
+                            if (_panel != null) _panel.gameObject.SetActive(true);
+                            _text.text = "RIFTPULSE  /  LIVE CHAT\n\nConnect this Beat Saber installation to your RiftPulse account to load chat.";
                         }
                         else if (_text != null)
                         {
@@ -258,8 +256,13 @@ namespace RiftPulse.Pcvr
         {
             var enabledMatch = Regex.Match(json, "\\\"chatEnabled\\\"\\s*:\\s*(true|false)");
             _chatEnabled = !enabledMatch.Success || enabledMatch.Groups[1].Value == "true";
-            if (_panel != null) _panel.gameObject.SetActive(_chatEnabled);
-            if (!_chatEnabled || _text == null) return;
+            if (_panel != null) _panel.gameObject.SetActive(true);
+            if (_text == null) return;
+            if (!_chatEnabled)
+            {
+                _text.text = "RIFTPULSE  /  LIVE CHAT\n\nChat is currently disabled for this installation. Enable the Chat module on app.riftpulse.me.";
+                return;
+            }
 
             var total = "-";
             var viewerMatch = Regex.Match(json, "\\\"total\\\"\\s*:\\s*(null|[0-9]+)");

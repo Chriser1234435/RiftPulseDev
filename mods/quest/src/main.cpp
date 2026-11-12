@@ -62,7 +62,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.27";
+static constexpr const char* MOD_VERSION = "0.1.28";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -807,6 +807,8 @@ static void GeneratePairingCode() {
   }
 }
 
+static void ShowWorldChatPanel();
+
 static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
                                bool firstActivation,
                                bool addedToHierarchy,
@@ -1083,10 +1085,8 @@ static void PollWorldChatPanel() {
 }
 
 void RiftPulse::ChatPanelDriver::Update() {
-  if (!IsRiftPulseGameplayScene()) {
-    if (worldChatPanel) DestroyWorldChatPanel(true);
-    return;
-  }
+  // Keep the world-space chat panel available across the main menu and song
+  // scenes. The FloatingScreen grab handle remains usable at any time.
   if (worldChatNeedsReposition) {
     DestroyWorldChatPanel(false);
     std::remove(WorldChatPlacementPath().c_str());
