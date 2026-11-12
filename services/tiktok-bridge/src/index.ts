@@ -115,7 +115,7 @@ class AccountRunner {
   private requestReconnect(reason: string): void {
     if (this.stopped) return;
     this.roomId = "";
-    this.reportStatus(reason === "connector error" ? "error" : "disconnected");
+    this.reportStatus("disconnected");
     this.reconnectRequested = true;
     console.info(`TikTok connection for a configured account ended (${reason}); reconnect scheduled.`);
     this.reconnectWaiter?.();

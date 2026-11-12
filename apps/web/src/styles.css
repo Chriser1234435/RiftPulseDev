@@ -457,3 +457,19 @@ button,a{touch-action:manipulation}
 @keyframes rp-onboarding-panel-in-right{from{opacity:0;transform:translateY(9px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
 .onboarding-panel{animation:rp-onboarding-panel-in .28s cubic-bezier(.2,.8,.2,1) both}
 @media(orientation:landscape) and (max-height:520px) and (max-width:1024px){html.is-mobile-device .onboarding-panel{animation:rp-onboarding-panel-in-right .28s cubic-bezier(.2,.8,.2,1) both}}
+
+ /* Provider cards: mobile layout should not depend on JS device detection. */
+@media(max-width:600px){
+  .provider-row{display:grid!important;grid-template-columns:38px minmax(0,1fr)!important;grid-template-areas:"icon main" "state button"!important;align-items:center;gap:12px 10px!important;min-width:0;padding:14px!important}
+  .provider-row>.provider-icon{grid-area:icon;width:38px;height:38px}
+  .provider-row>.provider-main{grid-area:main;display:grid;gap:5px;min-width:0;width:100%}
+  .provider-main>b{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+  .provider-main small{font-size:10px;line-height:1.4;overflow-wrap:anywhere}
+  .provider-row>.connection-state{grid-area:state;min-width:0;margin:0!important;font-size:10px;white-space:normal}
+  .provider-row>.connect-button,.provider-row>.disconnect-button{grid-area:button;justify-self:end;width:100%;max-width:112px;min-width:88px;min-height:42px;margin:0!important;box-sizing:border-box;font-size:11px}
+}
+@media(max-width:360px){
+  .provider-row{grid-template-columns:32px minmax(0,1fr)!important;gap:10px 8px!important;padding:11px!important}
+  .provider-row>.provider-icon{width:32px;height:32px}
+  .provider-row>.connect-button,.provider-row>.disconnect-button{max-width:92px;min-width:78px}
+}
