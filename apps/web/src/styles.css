@@ -161,3 +161,46 @@ html.is-mobile-device .section-block{scroll-margin-top:70px}
 .auth-footer a:hover,.page-footer a:hover{color:#b8a4ff;text-decoration:underline}
 @media(max-width:600px){.legal-shell{padding:0 18px 28px}.legal-header{padding:18px 0}.legal-document{margin:32px auto}.legal-document h2{font-size:17px}}
 
+
+
+/* RiftPulse motion system — ambient energy, intentional micro-interactions, and accessible motion. */
+@keyframes rp-page-rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+@keyframes rp-soft-glow{0%,100%{box-shadow:0 0 0 0 #a78bfa00}50%{box-shadow:0 0 28px 1px #a78bfa16}}
+@keyframes rp-gradient-drift{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+@keyframes rp-orbit-spin{to{rotate:360deg}}
+@keyframes rp-orbit-spin-reverse{to{rotate:-360deg}}
+@keyframes rp-pulse-dot{0%,100%{opacity:.65;scale:1}50%{opacity:1;scale:1.45}}
+@keyframes rp-shimmer{0%{transform:translateX(-130%)}100%{transform:translateX(130%)}}
+@keyframes rp-bounce-in{0%{opacity:0;transform:scale(.92) translateY(8px)}70%{transform:scale(1.015) translateY(-2px)}100%{opacity:1;transform:scale(1) translateY(0)}}
+@keyframes rp-notice-in{from{opacity:0;transform:translateY(-8px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes rp-border-flow{0%,100%{background-position:0% 0%}50%{background-position:100% 0%}}
+.page-content{animation:rp-page-rise .48s cubic-bezier(.2,.7,.25,1) both}
+.welcome-row{animation:rp-page-rise .48s .04s cubic-bezier(.2,.7,.25,1) both}
+.hero-card{background-size:180% 180%;animation:rp-gradient-drift 18s ease infinite;transition:border-color .3s,box-shadow .3s}
+.hero-card:hover{border-color:#65508c;box-shadow:0 14px 48px #6e4bb018}
+.orbit-one{animation:rp-orbit-spin 28s linear infinite}.orbit-two{animation:rp-orbit-spin-reverse 36s linear infinite}.orbit-three{animation:rp-orbit-spin 48s linear infinite}
+.art-particle{animation:rp-pulse-dot 3s ease-in-out infinite}.p2{animation-delay:.8s}.p3{animation-delay:1.5s}
+.brand-mark,.workspace-avatar,.module-icon,.metric-icon,.provider-icon,.auth-card-icon,.modal-icon{transition:transform .28s cubic-bezier(.2,.8,.2,1),filter .28s,box-shadow .28s}
+.brand-mark:hover,.workspace-avatar:hover,.module-card:hover .module-icon,.metric-card:hover .metric-icon,.provider-row:hover .provider-icon{transform:translateY(-2px) rotate(-4deg);filter:brightness(1.15);box-shadow:0 7px 22px #8f70e825}
+.primary-button,.hero-button,.outline-button,.configure-button,.icon-button,.nav-item,.toggle,.provider-row,.notification-item,.metric-card,.module-card,.auth-tabs button{transition:transform .22s cubic-bezier(.2,.8,.2,1),background .22s,border-color .22s,color .22s,box-shadow .22s,filter .22s}
+.primary-button:hover{transform:translateY(-2px);box-shadow:0 9px 26px #8b68e53d;filter:brightness(1.12)}
+.primary-button:active,.hero-button:active,.outline-button:active,.configure-button:active{transform:translateY(0) scale(.98)}
+.icon-button:hover{transform:translateY(-1px) scale(1.04)}
+.nav-item:hover{transform:translateX(3px)}.nav-item.active{box-shadow:inset 2px 0 #b49aff}
+.metric-card:hover{transform:translateY(-3px);border-color:#3c3558;box-shadow:0 12px 30px #0002}
+.module-card:hover{transform:translateY(-4px);box-shadow:0 14px 34px #0003}
+.module-card:before,.provider-row:before{content:"";position:absolute;inset:0;pointer-events:none;opacity:0;background:radial-gradient(ellipse at 0% 0%,#a78bfa12,transparent 65%);transition:opacity .3s}
+.module-card:hover:before{opacity:1}
+.toggle span{box-shadow:0 1px 4px #0005}.toggle.on{box-shadow:0 0 0 3px #a78bfa12,0 0 14px #9a7be52a}
+.provider-row{position:relative}.provider-row:hover{background:linear-gradient(90deg,#151a29,#101521);border-color:#34304a}.provider-row:hover:before{opacity:1}
+.auth-card{animation:rp-bounce-in .55s cubic-bezier(.2,.8,.2,1) both;box-shadow:0 24px 80px #0005,0 0 0 1px #a78bfa08;transition:border-color .3s,box-shadow .3s}.auth-card:hover{border-color:#413653;box-shadow:0 28px 90px #0006,0 0 36px #a78bfa0b}
+.auth-tabs button.active{animation:rp-bounce-in .22s ease-out both}
+.auth-submit{position:relative;overflow:hidden}.auth-submit:after{content:"";position:absolute;inset:0;background:linear-gradient(105deg,transparent 25%,#ffffff22 50%,transparent 75%);transform:translateX(-130%)}.auth-submit:hover:after{animation:rp-shimmer .7s ease}
+.profile-menu,.notification-dropdown,.modal-panel,.toast,.dropdown-panel{animation:rp-notice-in .2s cubic-bezier(.2,.8,.2,1) both;transform-origin:top right}
+.modal-backdrop{animation:rp-page-rise .16s ease-out both}.modal-panel{transform-origin:center;animation:rp-bounce-in .28s cubic-bezier(.2,.8,.2,1) both}
+.status-dot,.module-status i,.connection-state .status-dot{animation:rp-pulse-dot 2.6s ease-in-out infinite}
+.loading-ring,.spin{animation:spin .8s linear infinite}
+.section-block{animation:rp-page-rise .45s cubic-bezier(.2,.7,.25,1) both;animation-timeline:view();animation-range:entry 0% entry 18%}
+/* Motion is reduced to instant feedback when the visitor requests it. */
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important;animation-timeline:auto!important}.hero-card{background-position:50% 50%}}
+@media(hover:none){.module-card:hover,.metric-card:hover,.provider-row:hover{transform:none}.primary-button:hover{transform:none}}
