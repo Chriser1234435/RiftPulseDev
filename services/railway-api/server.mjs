@@ -38,8 +38,11 @@ class RemoteD1Database {
     const result = Array.isArray(payload?.result) ? payload.result[0] : null;
     if (!response.ok || payload?.success !== true || result?.success === false) {
       const error = String(payload?.errors?.[0]?.message || result?.error || `D1 query failed (${response.status}).`);
-      // Keep D1 quota and SQL failures diagnosable without logging statement text or bound values.
-      console.error("cloudflare_d1_query_failed", JSON.stringify({ httpStatus: response.status, error: error.slice(0, 220) }));
+      // Log only a coarse SQL operation/table signature: never statement text or bound values.
+      const normalizedSql = sql.trim().replace(/\\s+/g, " ");
+      const operation = normalizedSql.match(/^(SELECT|INSERT|UPDATE|DELETE|REPLACE|PRAGMA)\\b/i)?.[1]?.toUpperCase() ?? "OTHER";
+      const table = normalizedSql.match(/\\b(?:FROM|INTO|UPDATE|JOIN)\\s+["`]?([A-Za-z_][A-Za-z0-9_]*)/i)?.[1] ?? "unknown";
+      console.error("cloudflare_d1_query_failed", JSON.stringify({ httpStatus: response.status, operation, table, error: error.slice(0, 220) }));
       return { success: false, results: [], error };
     }
     return { success: true, results: result?.results ?? [], meta: result?.meta ?? {} };

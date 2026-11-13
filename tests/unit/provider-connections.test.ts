@@ -13,7 +13,7 @@ class FakeStatement implements D1PreparedStatement {
   private readonly query: string;
   constructor(db: FakeDatabase, query: string) { this.db = db; this.query = query; }
   bind(...values: unknown[]): D1PreparedStatement { this.values = values; this.db.lastQuery = this.query; this.db.lastValues = values; return this; }
-  async first<T>(): Promise<T | null> { return this.db.firstResult as T | null; }
+  async first<T>(): Promise<T | null> { if (this.db.firstError) throw this.db.firstError; return this.db.firstResult as T | null; }
   async all<T>(): Promise<D1Result<T>> { return { success: true, results: [] }; }
   async run<T>(): Promise<D1Result<T>> { return this.db.runResult; }
 }
@@ -22,6 +22,7 @@ class FakeDatabase implements D1Database {
   lastQuery = "";
   lastValues: unknown[] = [];
   firstResult: unknown = null;
+  firstError: Error | null = null;
   runResult: D1Result = { success: true, meta: { changes: 1 } };
   prepare(query: string): D1PreparedStatement { return new FakeStatement(this, query); }
   async batch<T>(): Promise<D1Result<T>[]> { return []; }
@@ -93,6 +94,14 @@ test("Twitch token refresh validates the rotated token and persists only encrypt
   assert.match(db.lastQuery, /access_token_ciphertext/);
   assert.equal(JSON.stringify(db.lastValues).includes("new-access"), false);
   assert.equal(JSON.stringify(db.lastValues).includes("new-refresh"), false);
+});
+
+test("provider token reads distinguish a missing connection from a database read failure", async () => {
+  const db = new FakeDatabase();
+  const key = randomBytes(32).toString("base64");
+  assert.deepEqual(await readProviderTokens(db, "acct-1", "youtube", key), { ok: false, reason: "not_connected" });
+  db.firstError = new Error("D1 read rejected");
+  assert.deepEqual(await readProviderTokens(db, "acct-1", "youtube", key), { ok: false, reason: "database_error" });
 });
 
 test("provider disconnect clears stored token ciphertext", async () => {

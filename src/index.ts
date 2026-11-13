@@ -1283,7 +1283,16 @@ export default {
       }
 
       const current = await readProviderTokens(env.DB, authContext.userId, "youtube", env.TOKEN_ENCRYPTION_KEY);
-      if (!current.ok) return jsonError(409, "youtube_not_connected", "Connect a YouTube channel before polling its live chat.", requestId);
+      if (!current.ok) {
+        console.warn("youtube_token_read_failed", JSON.stringify({ requestId, reason: current.reason }));
+        if (current.reason === "database_error") {
+          return jsonError(503, "youtube_database_read_failed", "RiftPulse could not read the saved YouTube authorization from Cloudflare D1. Check database access and try again.", requestId);
+        }
+        if (current.reason === "token_decryption_failed") {
+          return jsonError(409, "youtube_token_encryption_mismatch", "RiftPulse could not decrypt the saved YouTube authorization. The token-encryption key may have changed; reconnect YouTube after database access is restored.", requestId);
+        }
+        return jsonError(409, "youtube_not_connected", "No active YouTube authorization is saved for this RiftPulse account. Connect YouTube before polling live chat.", requestId);
+      }
       let accessToken = current.accessToken;
       const now = new Date();
       if (!current.tokenExpiresAt || !Number.isFinite(Date.parse(current.tokenExpiresAt)) || Date.parse(current.tokenExpiresAt) <= now.getTime() + 5 * 60_000) {
