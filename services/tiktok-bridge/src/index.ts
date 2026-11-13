@@ -40,6 +40,11 @@ class AccountRunner {
   private channelName: string;
   private queue = Promise.resolve();
   private stopped = false;
+  private lastReportedStatus: "connected" | "disconnected" | "error" | null = null;
+  private lastReportedChannelId = "";
+  private lastStatusAttemptStatus: "connected" | "disconnected" | "error" | null = null;
+  private lastStatusAttemptChannelId = "";
+  private lastStatusAttemptAt = 0;
   private reconnectWaiter: (() => void) | null = null;
   private retryWaiter: (() => void) | null = null;
   private reconnectRequested = false;
@@ -68,14 +73,30 @@ class AccountRunner {
   }
 
   private reportStatus(status: "connected" | "disconnected" | "error", channelId?: string): void {
+    const reportedChannelId = channelId ?? "";
+    if (this.lastReportedStatus === status && this.lastReportedChannelId === reportedChannelId) return;
+    // Retry failed status writes at most once per minute. Only mark a status as
+    // reported after the API confirms it, so a temporary D1 outage can recover.
+    if (this.lastStatusAttemptStatus === status && this.lastStatusAttemptChannelId === reportedChannelId
+      && Date.now() - this.lastStatusAttemptAt < 60_000) return;
+    this.lastStatusAttemptStatus = status;
+    this.lastStatusAttemptChannelId = reportedChannelId;
+    this.lastStatusAttemptAt = Date.now();
     void fetch(statusUrl, {
       method: "POST",
       headers: { authorization: "Bearer " + secret, "content-type": "application/json" },
       body: JSON.stringify({ accountId: this.accountId, username: this.username, status, ...(channelId ? { channelId } : {}) }),
       signal: AbortSignal.timeout(5_000),
     }).then(response => {
-      if (!response.ok) console.warn("TikTok status update was rejected (HTTP " + response.status + ").");
-    }).catch(() => console.warn("TikTok status update failed; the next connection sync will retry."));
+      if (!response.ok) {
+        console.warn("TikTok status update was rejected (HTTP " + response.status + ").");
+        return;
+      }
+      if (this.lastStatusAttemptStatus === status && this.lastStatusAttemptChannelId === reportedChannelId) {
+        this.lastReportedStatus = status;
+        this.lastReportedChannelId = reportedChannelId;
+      }
+    }).catch(() => console.warn("TikTok status update failed; retry is rate-limited to once per minute."));
   }
 
   private enqueue(kind: "chat" | "event" | "viewers", payload: unknown, eventName?: string): void {

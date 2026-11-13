@@ -134,6 +134,43 @@ function readCookie(request: Request, name: string): string | null {
   return null;
 }
 
+function youtubeApiErrorReason(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const root = payload as Record<string, unknown>;
+  const error = root.error && typeof root.error === "object" && !Array.isArray(root.error)
+    ? root.error as Record<string, unknown> : null;
+  if (!error) return null;
+  const errors = Array.isArray(error.errors) ? error.errors : [];
+  const item = errors.find(value => value && typeof value === "object" && !Array.isArray(value)
+    && typeof (value as Record<string, unknown>).reason === "string") as Record<string, unknown> | undefined;
+  const candidate = typeof item?.reason === "string" ? item.reason
+    : typeof error.status === "string" ? error.status : null;
+  return candidate && /^[A-Za-z0-9_.-]{1,80}$/.test(candidate) ? candidate : null;
+}
+
+function youtubeApiDetailCode(reason: string | null, stage: "broadcast" | "live_chat"): string {
+  const normalized = (reason ?? "http_error").replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/_+/g, "_").slice(0, 48);
+  return `youtube_${stage}_${normalized}`;
+}
+
+async function writeYouTubeHealth(
+  db: NonNullable<Env["DB"]>,
+  accountId: string,
+  status: "healthy" | "degraded",
+  detailCode: string | null,
+  now: Date,
+): Promise<boolean> {
+  const observedAt = now.toISOString();
+  // Health is a heartbeat, not an event log. Persist state transitions immediately,
+  // but cap unchanged-state writes to one per minute to protect the D1 daily allowance.
+  const heartbeatCutoff = new Date(now.getTime() - 60_000).toISOString();
+  const result = await db.prepare(
+    "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'youtube', ?, NULL, ?, ?, NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = excluded.status, viewer_count = NULL, observed_at = excluded.observed_at, detail_code = excluded.detail_code, viewer_count_observed_at = NULL WHERE integration_health.status <> excluded.status OR integration_health.detail_code IS NOT excluded.detail_code OR integration_health.observed_at <= ?",
+  ).bind(crypto.randomUUID(), accountId, status, observedAt, detailCode, heartbeatCutoff).run();
+  return result.success;
+}
+
 function youtubeStateCookie(state: string | null, secure: boolean): string {
   // Google returns to the app homepage, so the state cookie must be sent there.
   const base = "rp_youtube_oauth_state=" + (state ?? "") + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + (state ? "600" : "0");
@@ -623,14 +660,14 @@ export default {
       const now = new Date().toISOString();
       const isConnected = value.status === "connected";
       const connection = await env.DB.prepare(
-        "INSERT INTO provider_connections (id, account_id, provider, external_account_id, display_name, status, connected_at, updated_at) VALUES (?, ?, 'tiktok', ?, ?, ?, ?, ?) ON CONFLICT(account_id, provider) DO UPDATE SET external_account_id = CASE WHEN excluded.status = 'connected' THEN excluded.external_account_id ELSE provider_connections.external_account_id END, display_name = excluded.display_name, status = excluded.status, connected_at = CASE WHEN excluded.status = 'connected' THEN COALESCE(provider_connections.connected_at, excluded.connected_at) ELSE provider_connections.connected_at END, updated_at = excluded.updated_at",
+        "INSERT INTO provider_connections (id, account_id, provider, external_account_id, display_name, status, connected_at, updated_at) VALUES (?, ?, 'tiktok', ?, ?, ?, ?, ?) ON CONFLICT(account_id, provider) DO UPDATE SET external_account_id = CASE WHEN excluded.status = 'connected' THEN excluded.external_account_id ELSE provider_connections.external_account_id END, display_name = excluded.display_name, status = excluded.status, connected_at = CASE WHEN excluded.status = 'connected' THEN COALESCE(provider_connections.connected_at, excluded.connected_at) ELSE provider_connections.connected_at END, updated_at = excluded.updated_at WHERE provider_connections.status <> excluded.status OR provider_connections.display_name IS NOT excluded.display_name OR (excluded.status = 'connected' AND provider_connections.external_account_id IS NOT excluded.external_account_id)",
       ).bind(crypto.randomUUID(), value.accountId, typeof value.channelId === "string" ? value.channelId : null, requestedUsername, isConnected ? "connected" : value.status === "error" ? "error" : "disconnected", isConnected ? now : null, now).run();
       if (!connection.success) return jsonError(503, "provider_connection_store_unavailable", "Could not update TikTok connection status.", requestId);
       const healthStatus = isConnected ? "healthy" : value.status === "error" ? "error" : "disconnected";
       const detail = isConnected ? null : value.status === "error" ? "connector_error" : "tiktok_stream_offline";
       const health = await env.DB.prepare(
-        "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'tiktok', ?, NULL, ?, ?, NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = excluded.status, viewer_count = NULL, observed_at = excluded.observed_at, detail_code = excluded.detail_code, viewer_count_observed_at = NULL",
-      ).bind(crypto.randomUUID(), value.accountId, healthStatus, now, detail).run();
+        "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'tiktok', ?, NULL, ?, ?, NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = excluded.status, viewer_count = NULL, observed_at = excluded.observed_at, detail_code = excluded.detail_code, viewer_count_observed_at = NULL WHERE integration_health.status <> excluded.status OR integration_health.detail_code IS NOT excluded.detail_code OR integration_health.observed_at <= ?",
+      ).bind(crypto.randomUUID(), value.accountId, healthStatus, now, detail, new Date(Date.now() - 60_000).toISOString()).run();
       if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not update TikTok health status.", requestId);
       return Response.json({ status: healthStatus }, { headers: JSON_HEADERS });
     }
@@ -702,15 +739,15 @@ export default {
         }
       }
       const connection = await env.DB.prepare(
-        "INSERT INTO provider_connections (id, account_id, provider, external_account_id, display_name, status, connected_at, updated_at) VALUES (?, ?, 'tiktok', ?, ?, 'connected', ?, ?) ON CONFLICT(account_id, provider) DO UPDATE SET external_account_id = excluded.external_account_id, display_name = excluded.display_name, status = 'connected', connected_at = COALESCE(provider_connections.connected_at, excluded.connected_at), updated_at = excluded.updated_at"
+        "INSERT INTO provider_connections (id, account_id, provider, external_account_id, display_name, status, connected_at, updated_at) VALUES (?, ?, 'tiktok', ?, ?, 'connected', ?, ?) ON CONFLICT(account_id, provider) DO UPDATE SET external_account_id = excluded.external_account_id, display_name = excluded.display_name, status = 'connected', connected_at = COALESCE(provider_connections.connected_at, excluded.connected_at), updated_at = excluded.updated_at WHERE provider_connections.status <> 'connected' OR provider_connections.external_account_id IS NOT excluded.external_account_id OR provider_connections.display_name IS NOT excluded.display_name"
       ).bind(crypto.randomUUID(), body.accountId, body.channelId, body.channelName, now.toISOString(), now.toISOString()).run();
       if (!connection.success) return jsonError(503, "provider_connection_store_unavailable", "Could not update TikTok connector status.", requestId);
       const viewerCount = (body.kind === "viewers" || (body.kind === "event" && eventKind === "viewer_count"))
         && normalizedViewerCount !== null && Number.isSafeInteger(normalizedViewerCount) && normalizedViewerCount >= 0
         ? normalizedViewerCount : null;
       const health = await env.DB.prepare(
-        "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'tiktok', 'healthy', ?, ?, NULL, ?) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'healthy', viewer_count = COALESCE(excluded.viewer_count, integration_health.viewer_count), observed_at = excluded.observed_at, detail_code = NULL, viewer_count_observed_at = COALESCE(excluded.viewer_count_observed_at, integration_health.viewer_count_observed_at)"
-      ).bind(crypto.randomUUID(), body.accountId, viewerCount, now.toISOString(), viewerCount === null ? null : now.toISOString()).run();
+        "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'tiktok', 'healthy', ?, ?, NULL, ?) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'healthy', viewer_count = COALESCE(excluded.viewer_count, integration_health.viewer_count), observed_at = excluded.observed_at, detail_code = NULL, viewer_count_observed_at = COALESCE(excluded.viewer_count_observed_at, integration_health.viewer_count_observed_at) WHERE integration_health.status <> 'healthy' OR integration_health.detail_code IS NOT NULL OR (excluded.viewer_count IS NOT NULL AND integration_health.viewer_count IS NOT excluded.viewer_count) OR integration_health.observed_at <= ?"
+      ).bind(crypto.randomUUID(), body.accountId, viewerCount, now.toISOString(), viewerCount === null ? null : now.toISOString(), new Date(now.getTime() - 60_000).toISOString()).run();
       if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not update TikTok connector health.", requestId);
       return Response.json({ status: eventKind === "viewer_count" ? "accepted" : inserted ? "accepted" : "duplicate", kind: body.kind, eventKind }, { headers: JSON_HEADERS });
     }
@@ -1285,9 +1322,20 @@ export default {
         broadcastUrl.searchParams.set("part", "snippet");
         broadcastUrl.searchParams.set("broadcastStatus", "active");
         broadcastUrl.searchParams.set("mine", "true");
+        // The YouTube API defaults broadcastType to "event" when mine/broadcastStatus
+        // are used. Include persistent broadcasts as well as scheduled events.
+        broadcastUrl.searchParams.set("broadcastType", "all");
         broadcastUrl.searchParams.set("maxResults", "5");
         const broadcastResponse = await fetch(broadcastUrl, { headers: { authorization: "Bearer " + accessToken, accept: "application/json" } });
-        if (!broadcastResponse.ok) return jsonError(502, "youtube_live_broadcast_lookup_failed", "YouTube could not list the active broadcast. Check API access and quota.", requestId);
+        if (!broadcastResponse.ok) {
+          const errorPayload: unknown = await broadcastResponse.json().catch(() => null);
+          const reason = youtubeApiErrorReason(errorPayload);
+          const detailCode = youtubeApiDetailCode(reason, "broadcast");
+          console.error("youtube_broadcast_api_error", JSON.stringify({ requestId, status: broadcastResponse.status, reason }));
+          await writeYouTubeHealth(env.DB, authContext.userId, "degraded", detailCode, new Date()).catch(() => false);
+          return jsonError(502, "youtube_live_broadcast_lookup_failed",
+            `YouTube broadcast lookup returned HTTP ${broadcastResponse.status}${reason ? ` (${reason})` : ""}. Check YouTube Data API v3 access and quota.`, requestId);
+        }
         const broadcastPayload: unknown = await broadcastResponse.json();
         const broadcastItems = broadcastPayload && typeof broadcastPayload === "object" && !Array.isArray(broadcastPayload)
           ? (broadcastPayload as Record<string, unknown>).items : null;
@@ -1302,9 +1350,7 @@ export default {
         const liveChatId = typeof snippet?.liveChatId === "string" ? snippet.liveChatId : "";
         if (!liveChatId) {
           await env.DB.prepare("DELETE FROM youtube_live_chat_cursors WHERE account_id = ?").bind(authContext.userId).run();
-          await env.DB.prepare(
-            "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'youtube', 'degraded', NULL, ?, 'no_active_live_chat', NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'degraded', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = 'no_active_live_chat', viewer_count_observed_at = NULL",
-          ).bind(crypto.randomUUID(), authContext.userId, new Date().toISOString()).run();
+          await writeYouTubeHealth(env.DB, authContext.userId, "degraded", "no_active_live_chat", new Date());
           return Response.json({ status: "not_live", insertedMessages: 0, insertedEvents: 0, pollAfterMs: 15_000 }, { headers: JSON_HEADERS });
         }
 
@@ -1318,10 +1364,13 @@ export default {
         if (pageToken) messagesUrl.searchParams.set("pageToken", pageToken);
         const messagesResponse = await fetch(messagesUrl, { headers: { authorization: "Bearer " + accessToken, accept: "application/json" } });
         if (!messagesResponse.ok) {
-          await env.DB.prepare(
-            "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'youtube', 'degraded', NULL, ?, 'live_chat_api_error', NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'degraded', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = 'live_chat_api_error', viewer_count_observed_at = NULL",
-          ).bind(crypto.randomUUID(), authContext.userId, new Date().toISOString()).run();
-          return jsonError(502, "youtube_live_chat_fetch_failed", "YouTube could not return live chat messages. Check the channel's live-chat availability and API quota.", requestId);
+          const errorPayload: unknown = await messagesResponse.json().catch(() => null);
+          const reason = youtubeApiErrorReason(errorPayload);
+          const detailCode = youtubeApiDetailCode(reason, "live_chat");
+          console.error("youtube_live_chat_api_error", JSON.stringify({ requestId, status: messagesResponse.status, reason }));
+          await writeYouTubeHealth(env.DB, authContext.userId, "degraded", detailCode, new Date()).catch(() => false);
+          return jsonError(502, "youtube_live_chat_fetch_failed",
+            `YouTube live-chat API returned HTTP ${messagesResponse.status}${reason ? ` (${reason})` : ""}. Check that Live Chat is enabled and the authorized account owns the active broadcast.`, requestId);
         }
         const messagesPayload: unknown = await messagesResponse.json();
         if (!messagesPayload || typeof messagesPayload !== "object" || Array.isArray(messagesPayload)) return jsonError(502, "youtube_live_chat_invalid_response", "YouTube returned an invalid live-chat response.", requestId);
@@ -1348,15 +1397,13 @@ export default {
         }
         const nextPageToken = typeof payload.nextPageToken === "string" && payload.nextPageToken.length <= 2048 ? payload.nextPageToken : null;
         const savedCursor = await env.DB.prepare(
-          "INSERT INTO youtube_live_chat_cursors (account_id, live_chat_id, next_page_token, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET live_chat_id = excluded.live_chat_id, next_page_token = excluded.next_page_token, updated_at = excluded.updated_at",
+          "INSERT INTO youtube_live_chat_cursors (account_id, live_chat_id, next_page_token, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET live_chat_id = excluded.live_chat_id, next_page_token = excluded.next_page_token, updated_at = excluded.updated_at WHERE youtube_live_chat_cursors.live_chat_id IS NOT excluded.live_chat_id OR youtube_live_chat_cursors.next_page_token IS NOT excluded.next_page_token",
         ).bind(authContext.userId, liveChatId, nextPageToken, receivedAt.toISOString()).run();
         if (!savedCursor.success) return jsonError(503, "youtube_cursor_store_failed", "Could not save the YouTube live-chat cursor.", requestId);
-        const health = await env.DB.prepare(
-          "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'youtube', 'healthy', NULL, ?, NULL, NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'healthy', observed_at = excluded.observed_at, detail_code = NULL",
-        ).bind(crypto.randomUUID(), authContext.userId, receivedAt.toISOString()).run();
-        if (!health.success) return jsonError(503, "youtube_health_update_failed", "Could not update YouTube provider health.", requestId);
+        const healthUpdated = await writeYouTubeHealth(env.DB, authContext.userId, "healthy", null, receivedAt);
+        if (!healthUpdated) return jsonError(503, "youtube_health_update_failed", "Could not update YouTube provider health.", requestId);
         const pollingIntervalMillis = typeof payload.pollingIntervalMillis === "number" && Number.isFinite(payload.pollingIntervalMillis)
-          ? Math.max(5_000, Math.min(60_000, payload.pollingIntervalMillis)) : 10_000;
+          ? Math.max(5_000, Math.min(300_000, payload.pollingIntervalMillis)) : 10_000;
         return Response.json({ status: "polled", insertedMessages, insertedEvents, pollAfterMs: pollingIntervalMillis }, { headers: JSON_HEADERS });
       } catch {
         return jsonError(502, "youtube_poll_failed", "YouTube live-chat polling failed.", requestId);

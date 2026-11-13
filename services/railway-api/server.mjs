@@ -37,7 +37,10 @@ class RemoteD1Database {
     const payload = await response.json().catch(() => null);
     const result = Array.isArray(payload?.result) ? payload.result[0] : null;
     if (!response.ok || payload?.success !== true || result?.success === false) {
-      return { success: false, results: [], error: payload?.errors?.[0]?.message || result?.error || `D1 query failed (${response.status}).` };
+      const error = String(payload?.errors?.[0]?.message || result?.error || `D1 query failed (${response.status}).`);
+      // Keep D1 quota and SQL failures diagnosable without logging statement text or bound values.
+      console.error("cloudflare_d1_query_failed", JSON.stringify({ httpStatus: response.status, error: error.slice(0, 220) }));
+      return { success: false, results: [], error };
     }
     return { success: true, results: result?.results ?? [], meta: result?.meta ?? {} };
   }

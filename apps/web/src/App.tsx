@@ -133,7 +133,7 @@ function App() {
       if (pollResponse?.ok) {
         const pollData = await pollResponse.json().catch(() => ({}));
         if (typeof pollData.pollAfterMs === "number" && Number.isFinite(pollData.pollAfterMs)) {
-          pollAfterMs = Math.max(5_000, Math.min(60_000, pollData.pollAfterMs));
+          pollAfterMs = Math.max(5_000, Math.min(300_000, pollData.pollAfterMs));
         }
       }
       const response = await fetch("/api/v1/chat/messages", { credentials: "include" });
