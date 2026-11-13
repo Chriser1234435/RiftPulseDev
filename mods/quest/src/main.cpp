@@ -1123,21 +1123,20 @@ static bool CreateWorldChatPanel() {
   auto root = worldChatPanel->get_rectTransform();
   // Match the proven PCVR renderer: regular TextMeshProUGUI children on the
   // world-space screen instead of menu-only curved text components.
-  worldChatTitle = CreateWorldChatText(
-      "RiftPulse Quest Chat Title", 4.0f, 27.0f, 84.0f, 8.0f, 3.0f,
-      TMPro::TextAlignmentOptions::TopLeft);
+  // Keep the title and feed on a single text surface like PCVR; Quest's
+  // separate title field caused clipping on the smaller world-space panel.
+  worldChatTitle = nullptr;
   worldChatText = CreateWorldChatText(
-      "RiftPulse Quest Chat Feed", 0.0f, -5.0f, 102.0f, 54.0f, 2.45f,
+      "RiftPulse Quest Chat Feed", 0.0f, -4.0f, 102.0f, 55.0f, 2.45f,
       TMPro::TextAlignmentOptions::TopLeft);
-  if (!worldChatTitle || !worldChatText) {
+  if (!worldChatText) {
     DestroyWorldChatPanel(true);
     return false;
   }
   CreateQuestPlatformMark(root);
   // The native subdued grab tab moves the complete panel; no lock button.
   ApplyWorldChatLockState();
-  worldChatTitle->set_text(StringW("QUEST / RIFTPULSE LIVE CHAT"));
-  worldChatText->set_text(StringW("COMBINED VIEWERS  -\n\nWaiting for your stream messages..."));
+  worldChatText->set_text(StringW("<size=150%><b>PULSING RIFT</b></size>\nQUEST / LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages..."));
   return true;
 }
 static size_t FindMatchingJsonArrayEnd(const std::string& json, size_t start) {
@@ -1160,7 +1159,8 @@ static size_t FindMatchingJsonArrayEnd(const std::string& json, size_t start) {
   return std::string::npos;
 }
 static void RenderWorldChatFeed(const std::string& response) {
-  const bool enabled = response.find("\"chatEnabled\":true") != std::string::npos;
+  const std::regex enabledRegex("\"chatEnabled\"\\s*:\\s*true");
+  const bool enabled = std::regex_search(response, enabledRegex);
   worldChatModuleEnabled = enabled;
   if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(true);
   if (!enabled) {
@@ -1176,7 +1176,9 @@ static void RenderWorldChatFeed(const std::string& response) {
     totalViewers = viewerMatch[1].str();
   }
 
-  std::string output = "QUEST / RIFTPULSE LIVE CHAT\n";
+  // Easter-egg styling: large "PULSING RIFT" heading, while the feed remains legible.
+  std::string output = "<size=150%><b>PULSING RIFT</b></size>\n";
+  output += "QUEST  /  LIVE CHAT\n";
   output += "COMBINED VIEWERS  " + totalViewers + "\n";
   output += "----------------------------\n";
 
