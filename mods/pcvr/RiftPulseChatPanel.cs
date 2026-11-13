@@ -26,13 +26,7 @@ namespace RiftPulse.Pcvr
 
         private FloatingScreen? _panel;
         private TextMeshProUGUI? _text;
-        private Button? _lockButton;
-        private Image? _lockBody;
-        private Image? _lockShackleLeft;
-        private Image? _lockShackleRight;
-        private Image? _lockShackleTop;
         private static Sprite? _whiteSprite;
-        private bool _panelLocked = false;
         private bool _requestInFlight;
         private bool _moveRequested;
         private bool _chatEnabled = true;
@@ -227,7 +221,6 @@ namespace RiftPulse.Pcvr
                 position = new Vector3(parsed[0], parsed[1], parsed[2]);
                 rotation = new Quaternion(parsed[3], parsed[4], parsed[5], parsed[6]);
                 // Ignore legacy lock-state data; the panel is now always grab-movable.
-                _panelLocked = false;
             }
             catch { }
         }
@@ -263,11 +256,6 @@ namespace RiftPulse.Pcvr
             Destroy(_panel.gameObject);
             _panel = null;
             _text = null;
-            _lockButton = null;
-            _lockBody = null;
-            _lockShackleLeft = null;
-            _lockShackleRight = null;
-            _lockShackleTop = null;
         }
 
         private async Task RefreshFeed()
