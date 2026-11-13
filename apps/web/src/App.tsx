@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+﻿import { useCallback, useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   Activity, ArrowDown, ArrowDownRight, ArrowRight, ArrowUpRight, AudioLines, Bell, Check, ChevronDown,
@@ -1018,7 +1018,7 @@ function App() {
           </section>
 
           <section className="section-block downloads-block" id="downloads" data-tour-target="downloads">
-            <div className="section-heading"><div><div className="section-overline">ALPHA TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Alpha packages for Beat Saber 1.40.8. PCVR v0.1.25 and Quest v0.1.32 add a world-space chat panel with the native rounded grab bar for whole-panel movement, saved placement, platform icons, and combined viewer totals. Real-headset validation is still required.</p></div><span className="settings-badge">PCVR v0.1.25 / Quest v0.1.32</span></div>
+            <div className="section-heading"><div><div className="section-overline">ALPHA TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Alpha packages for Beat Saber 1.40.8. PCVR v0.1.25 and Quest v0.1.32 add a world-space chat panel with the native rounded grab bar for whole-panel movement, saved placement, platform icons, and combined viewer totals. Real-headset validation is still required.</p></div><span className="settings-badge">PCVR v0.1.26 / Quest v0.1.32</span></div>
             <div className="downloads-grid">
               <article className="panel-card download-card">
                 <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR</b><small>Windows / Beat Saber 1.40.8 (PCVR)</small></div><span className="download-state">v0.1.25 | ZIP built</span></div>
@@ -1146,7 +1146,7 @@ function App() {
           {modal === "settings" && <><div className="modal-icon purple-modal"><Settings2 size={22} /></div><div className="modal-eyebrow">PREFERENCES</div><h2 id="modal-title">Tune your setup.</h2><p className="modal-copy">Module switches and the BSR command save to your account. Provider OAuth and device preferences remain gated until their integrations are complete.</p>
             <div className="settings-option"><div><b>Automatically save toggles</b><small>Apply module changes immediately.</small></div><button className={`toggle ${autoSave ? "on" : ""}`} role="switch" aria-checked={autoSave} onClick={() => setAutoSave(!autoSave)}><span /></button></div>
             <div className="field-group"><label htmlFor="command-input">BSR song request command</label><input id="command-input" value={command} maxLength={20} onChange={e => setCommand(e.target.value.replace(/\s/g, ""))} placeholder="!bsr" /><small>Saved to your account when you choose Save. Format: ! followed by letters, numbers, _ or -.</small></div>
-            <div className="settings-option"><div><b>Reduced motion</b><small>Respect your device's motion preference.</small></div><span className="settings-badge">PCVR v0.1.25 / Quest v0.1.32</span></div>
+            <div className="settings-option"><div><b>Reduced motion</b><small>Respect your device's motion preference.</small></div><span className="settings-badge">PCVR v0.1.26 / Quest v0.1.32</span></div>
             <button className="primary-button modal-submit" onClick={() => void saveSettings()}>Save settings to account <Check size={15} /></button>
           </>}
           {modal === "help" && <><div className="modal-icon purple-modal"><Headphones size={22} /></div><div className="modal-eyebrow">RIFTPULSE GUIDE</div><h2 id="modal-title">Ready when you are.</h2><p className="modal-copy">RiftPulse connects your livestream community with Beat Saber. V1 is focused on two modules: in-game Chat and BSR Song Request.</p><div className="help-list"><div><MessageCircle size={18} /><span><b>Chat</b><small>Bring supported live messages into your game.</small></span></div><div><Music2 size={18} /><span><b>BSR Song Request</b><small>Queue viewer song requests with configurable commands.</small></span></div><div><Gamepad2 size={18} /><span><b>Pair your game</b><small>Use the in-game five-digit pairing flow once the mod is installed.</small></span></div></div><button className="primary-button modal-submit" onClick={() => { setModal(null); startPairing(); setModal("pair"); }}>Connect a device <ArrowUpRight size={15} /></button></>}

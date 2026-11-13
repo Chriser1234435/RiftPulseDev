@@ -193,6 +193,9 @@ namespace RiftPulse.Pcvr
             }
             if (handle == null) return;
             handle.SetActive(true);
+            // Slim the stock controller grab target into a subtle top tab.
+            handle.transform.localScale = new Vector3(0.42f, 0.14f, 1f);
+            handle.transform.localPosition = new Vector3(0f, 34f, 0f);
             var handleImage = handle.GetComponent<Image>();
             if (handleImage != null)
             {
