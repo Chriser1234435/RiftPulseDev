@@ -13,8 +13,12 @@
 #include "UnityEngine/Texture2D.hpp"
 #include "UnityEngine/Rect.hpp"
 #include "UnityEngine/UI/Image.hpp"
+#include "UnityEngine/Resources.hpp"
 #include "System/Type.hpp"
 #include "UnityEngine/Time.hpp"
+#include "UnityEngine/BoxCollider.hpp"
+#include "UnityEngine/Collider.hpp"
+#include "UnityEngine/Mathf.hpp"
 #include "UnityEngine/MeshRenderer.hpp"
 #include "UnityEngine/Material.hpp"
 #include "UnityEngine/Object.hpp"
@@ -877,8 +881,9 @@ MOD_EXTERN_FUNC void setup(CModInfo *info) noexcept {
 DEFINE_TYPE(RiftPulse, ChatPanelDriver);
 
 static BSML::FloatingScreen* worldChatPanel = nullptr;
-static TMPro::TextMeshProUGUI* worldChatTitle = nullptr;
-static TMPro::TextMeshProUGUI* worldChatText = nullptr;
+static HMUI::CurvedTextMeshPro* worldChatTitle = nullptr;
+static HMUI::CurvedTextMeshPro* worldChatText = nullptr;
+static HMUI::CurvedTextMeshPro* worldChatHandleLabel = nullptr;
 static UnityEngine::UI::Button* worldChatLockButton = nullptr;
 static UnityEngine::UI::Image* worldChatLockBody = nullptr;
 static UnityEngine::RectTransform* worldChatLockShackleRightRect = nullptr;
@@ -891,6 +896,8 @@ static bool worldChatModuleEnabled = true;
 static bool worldChatPairingPromptVisible = false;
 static float worldChatNextPoll = 0.0f;
 static float worldChatNextPlacementSave = 0.0f;
+
+static bool EnsureWorldChatDriver();
 
 static std::string WorldChatPlacementPath() {
   const auto base = static_cast<std::string>(UnityEngine::Application::get_persistentDataPath());
@@ -1015,17 +1022,44 @@ static void ApplyWorldChatLockState() {
   if (!worldChatPanel) return;
   worldChatPanel->set_ShowHandle(true);
   worldChatPanel->set_HighlightHandle(true);
+
   auto* handle = worldChatPanel->handle;
-  if (handle) {
-    handle->SetActive(true);
-    auto transform = handle->get_transform();
-    if (transform) {
-      // Use native full-size controller grab handle (no compressed white square).
-      // Stock movable handle restored and placed below chat content.
-      transform->set_localPosition(UnityEngine::Vector3(0.0f, -34.0f, 0.0f));
+  if (!handle) return;
+  handle->SetActive(true);
+  auto handleTransform = handle->get_transform();
+  if (handleTransform) {
+    handleTransform->set_localPosition(UnityEngine::Vector3(0.0f, -33.5f, 0.0f));
+    handleTransform->set_localRotation(UnityEngine::Quaternion::get_identity());
+    handleTransform->set_localScale(UnityEngine::Vector3(1.0f, 1.0f, 1.0f));
+  }
+
+  // BSML's FloatingScreenHandle owns the VR pointer event component. Keep it
+  // and its collider, hide its white mesh, and put a rounded capsule under it.
+  auto* nativeRenderer = handle->GetComponent<UnityEngine::MeshRenderer*>();
+  if (nativeRenderer) nativeRenderer->set_enabled(false);
+
+  auto* hitBox = handle->GetComponent<UnityEngine::BoxCollider*>();
+  if (!hitBox) hitBox = handle->AddComponent<UnityEngine::BoxCollider*>();
+  if (hitBox) {
+    hitBox->set_center(UnityEngine::Vector3(0.0f, 0.0f, 0.0f));
+    hitBox->set_size(UnityEngine::Vector3(30.0f, 4.5f, 4.5f));
+  }
+
+  auto capsule = UnityEngine::GameObject::CreatePrimitive(UnityEngine::PrimitiveType::Capsule);
+  if (capsule) {
+    auto capsuleTransform = capsule->get_transform();
+    capsuleTransform->SetParent(handleTransform, false);
+    capsuleTransform->set_localPosition(UnityEngine::Vector3(0.0f, 0.0f, 0.0f));
+    capsuleTransform->set_localRotation(UnityEngine::Quaternion::Euler(0.0f, 0.0f, 90.0f));
+    capsuleTransform->set_localScale(UnityEngine::Vector3(4.5f, 30.0f, 4.5f));
+
+    auto* capsuleCollider = capsule->GetComponent<UnityEngine::Collider*>();
+    if (capsuleCollider) UnityEngine::Object::Destroy(capsuleCollider);
+    auto* capsuleRenderer = capsule->GetComponent<UnityEngine::MeshRenderer*>();
+    if (capsuleRenderer) {
+      auto material = capsuleRenderer->get_material();
+      if (material) material->set_color(UnityEngine::Color(0.035f, 0.12f, 0.18f, 0.96f));
     }
-    auto* image = handle->GetComponent<UnityEngine::UI::Image*>();
-    if (image) image->set_color(UnityEngine::Color(0.16f, 0.19f, 0.25f, 0.58f));
   }
 }
 
@@ -1072,6 +1106,7 @@ static void DestroyWorldChatPanel(bool savePlacement) {
   worldChatPanel = nullptr;
   worldChatTitle = nullptr;
   worldChatText = nullptr;
+  worldChatHandleLabel = nullptr;
   worldChatLockButton = nullptr;
   worldChatLockBody = nullptr;
   worldChatLockShackleRightRect = nullptr;
@@ -1121,24 +1156,26 @@ static bool CreateWorldChatPanel() {
   UnityEngine::Object::DontDestroyOnLoad(worldChatPanel->get_gameObject());
 
   auto root = worldChatPanel->get_rectTransform();
-  // Match the proven PCVR renderer: regular TextMeshProUGUI children on the
-  // world-space screen instead of menu-only curved text components.
-  // Keep the title and feed on a single text surface like PCVR; Quest's
-  // separate title field caused clipping on the smaller world-space panel.
-  worldChatTitle = nullptr;
-  worldChatText = CreateWorldChatText(
-      "RiftPulse Quest Chat Feed", 0.0f, -4.0f, 102.0f, 55.0f, 2.45f,
-      TMPro::TextAlignmentOptions::TopLeft);
-  if (!worldChatText) {
+  worldChatTitle = BSML::Lite::CreateText(
+      root, StringW("QUEST / RIFTPULSE LIVE CHAT"), 3.0f,
+      UnityEngine::Vector2(0.0f, 27.0f), UnityEngine::Vector2(96.0f, 8.0f));
+  worldChatText = BSML::Lite::CreateText(
+      root, StringW("COMBINED VIEWERS  -\n\nWaiting for your stream messages..."), 2.45f,
+      UnityEngine::Vector2(0.0f, -5.0f), UnityEngine::Vector2(104.0f, 50.0f));
+  worldChatHandleLabel = BSML::Lite::CreateText(
+      root, StringW("<b>PULSING RIFT</b>"), 2.6f,
+      UnityEngine::Vector2(0.0f, -33.5f), UnityEngine::Vector2(29.0f, 5.0f));
+  if (!worldChatTitle || !worldChatText || !worldChatHandleLabel) {
     DestroyWorldChatPanel(true);
     return false;
   }
+  worldChatHandleLabel->set_alignment(TMPro::TextAlignmentOptions::Center);
+  worldChatHandleLabel->set_color(UnityEngine::Color(0.34f, 0.88f, 1.0f, 1.0f));
   CreateQuestPlatformMark(root);
-  // The native subdued grab tab moves the complete panel; no lock button.
   ApplyWorldChatLockState();
-  worldChatText->set_text(StringW("<size=150%><b>PULSING RIFT</b></size>\nQUEST / LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages..."));
   return true;
 }
+
 static size_t FindMatchingJsonArrayEnd(const std::string& json, size_t start) {
   if (start >= json.size() || json[start] != '[') return std::string::npos;
   size_t depth = 0;
@@ -1155,6 +1192,25 @@ static size_t FindMatchingJsonArrayEnd(const std::string& json, size_t start) {
     if (ch == '"') inString = true;
     else if (ch == '[') ++depth;
     else if (ch == ']' && --depth == 0) return i;
+  }
+  return std::string::npos;
+}
+static size_t FindMatchingJsonObjectEnd(const std::string& json, size_t start) {
+  if (start >= json.size() || json[start] != '{') return std::string::npos;
+  size_t depth = 0;
+  bool inString = false;
+  bool escaped = false;
+  for (size_t i = start; i < json.size(); ++i) {
+    const char ch = json[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch == '\\') escaped = true;
+      else if (ch == '"') inString = false;
+      continue;
+    }
+    if (ch == '"') inString = true;
+    else if (ch == '{') ++depth;
+    else if (ch == '}' && --depth == 0) return i;
   }
   return std::string::npos;
 }
@@ -1186,19 +1242,24 @@ static void RenderWorldChatFeed(const std::string& response) {
   const auto arrayStart = messagesStart == std::string::npos ? std::string::npos : response.find('[', messagesStart);
   const auto arrayEnd = FindMatchingJsonArrayEnd(response, arrayStart);
   if (arrayStart != std::string::npos && arrayEnd != std::string::npos) {
-    const auto messagesJson = response.substr(arrayStart + 1, arrayEnd - arrayStart - 1);
-    const std::regex objectRegex("\\{[^{}]*\\}");
+    size_t cursor = arrayStart + 1;
     size_t rendered = 0;
-    for (std::sregex_iterator it(messagesJson.begin(), messagesJson.end(), objectRegex), end; it != end && rendered < 8; ++it) {
-      const auto object = it->str();
+    while (cursor < arrayEnd && rendered < 8) {
+      while (cursor < arrayEnd && (std::isspace(static_cast<unsigned char>(response[cursor])) || response[cursor] == ',')) ++cursor;
+      const auto objectStart = response.find('{', cursor);
+      if (objectStart == std::string::npos || objectStart >= arrayEnd) break;
+      const auto objectEnd = FindMatchingJsonObjectEnd(response, objectStart);
+      if (objectEnd == std::string::npos || objectEnd > arrayEnd) break;
+      const auto object = response.substr(objectStart, objectEnd - objectStart + 1);
+      cursor = objectEnd + 1;
       const auto provider = ReadJsonStringField(object, "provider");
       const auto sender = ReadJsonStringField(object, "senderName");
       const auto message = ReadJsonStringField(object, "text");
       if (sender.empty() || message.empty()) continue;
-      const auto icon = provider == "twitch" ? "<color=#9146FF>●</color>"
-          : provider == "youtube" ? "<color=#FF0033>▶</color>"
-          : provider == "tiktok" ? "<color=#25F4EE>♪</color>"
-          : "<color=#B8C4D8>●</color>";
+      const auto icon = provider == "twitch" ? "[TW]"
+          : provider == "youtube" ? "[YT]"
+          : provider == "tiktok" ? "[TT]"
+          : "[LIVE]";
       output += icon + std::string(" ") + EscapeChatRichText(sender, 28) + "\n";
       output += EscapeChatRichText(message, 115) + "\n\n";
       ++rendered;
@@ -1236,6 +1297,12 @@ void RiftPulse::ChatPanelDriver::Update() {
     worldChatNeedsReposition = false;
   }
   if (!worldChatPanel && !CreateWorldChatPanel()) return;
+  if (worldChatHandleLabel) {
+    const float pulse = (UnityEngine::Mathf::Sin(UnityEngine::Time::get_realtimeSinceStartup() * 2.2f) + 1.0f) * 0.5f;
+    worldChatHandleLabel->set_color(UnityEngine::Color::Lerp(
+        UnityEngine::Color(0.20f, 0.62f, 0.82f, 1.0f),
+        UnityEngine::Color(0.55f, 0.96f, 1.0f, 1.0f), pulse));
+  }
   if (!isPaired) {
     if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(true);
     if (!worldChatPairingPromptVisible) {

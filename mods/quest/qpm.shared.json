@@ -5,7 +5,9 @@
                    "sharedDir":  "shared",
                    "dependenciesDir":  "extern",
                    "info":  {
-                                "name":  "RiftPulse", "id":  "riftpulse", "version":  "0.1.33",
+                                "name":  "RiftPulse",
+                                "id":  "riftpulse",
+                                "version":  "0.1.34",
                                 "url":  "https://app.riftpulse.me",
                                 "additionalData":  {
                                                        "overrideSoName":  "libriftpulse.so",

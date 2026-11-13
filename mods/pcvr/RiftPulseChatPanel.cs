@@ -26,6 +26,7 @@ namespace RiftPulse.Pcvr
 
         private FloatingScreen? _panel;
         private TextMeshProUGUI? _text;
+        private TextMeshProUGUI? _handleLabel;
         private static Sprite? _whiteSprite;
         private bool _requestInFlight;
         private bool _moveRequested;
@@ -81,6 +82,13 @@ namespace RiftPulse.Pcvr
 
             if (_panel == null && !CreatePanel()) return;
 
+            if (_handleLabel != null)
+            {
+                var pulse = (Mathf.Sin(Time.realtimeSinceStartup * 2.2f) + 1f) * 0.5f;
+                _handleLabel.color = Color.Lerp(
+                    new Color(0.20f, 0.62f, 0.82f, 1f),
+                    new Color(0.55f, 0.96f, 1f, 1f), pulse);
+            }
             if (Time.realtimeSinceStartup >= _nextPollAt && !_requestInFlight)
             {
                 _nextPollAt = Time.realtimeSinceStartup + 3.0f;
@@ -139,11 +147,36 @@ namespace RiftPulse.Pcvr
             _text.text = "PCVR  /  RIFTPULSE LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages...";
 
             CreatePlatformMark(root);
+            CreatePulsingRiftLabel(root);
             ApplyGrabHandleStyle();
             return true;
         }
 
-        private void CreatePlatformMark(RectTransform parent)
+        private void CreatePulsingRiftLabel(RectTransform parent)
+        {
+            var labelObject = new GameObject(
+                "RiftPulse Pulsing Rift Grab Label",
+                typeof(RectTransform),
+                typeof(TextMeshProUGUI));
+            var rect = labelObject.GetComponent<RectTransform>();
+            rect.SetParent(parent, false);
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = new Vector2(0f, -33.5f);
+            rect.sizeDelta = new Vector2(29f, 5f);
+
+            _handleLabel = labelObject.GetComponent<TextMeshProUGUI>();
+            _handleLabel.font = _text != null ? _text.font : null;
+            _handleLabel.fontSize = 2.6f;
+            _handleLabel.alignment = TextAlignmentOptions.Center;
+            _handleLabel.enableWordWrapping = false;
+            _handleLabel.richText = true;
+            _handleLabel.raycastTarget = false;
+            _handleLabel.color = new Color(0.34f, 0.88f, 1f, 1f);
+            _handleLabel.text = "<b>PULSING RIFT</b>";
+        }
+                private void CreatePlatformMark(RectTransform parent)
         {
             // A small, font-independent monitor mark distinguishes the PCVR panel.
             CreateLockPart(parent, "RiftPulse PCVR Monitor Top", new Vector2(6.5f, 0.8f), new Vector2(-47f, 30f));
@@ -184,23 +217,43 @@ namespace RiftPulse.Pcvr
             if (_panel == null) return;
             _panel.ShowHandle = true;
             _panel.HighlightHandle = true;
+
             GameObject? handle = null;
             for (var type = _panel.GetType(); type != null && handle == null; type = type.BaseType)
             {
-                var field = type.GetField("handle",
+                var field = type.GetField(
+                    "handle",
                     BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
                 handle = field?.GetValue(_panel) as GameObject;
             }
             if (handle == null) return;
+
+            // Keep BSML's real pointer/drag component. Replace only its white
+            // renderer with a capsule child and give the native handle a matching hitbox.
             handle.SetActive(true);
-            // Restore stock movable handle, subdued and below the chat text.
-            handle.transform.localPosition = new Vector3(0f, -34f, 0f);
-            var handleImage = handle.GetComponent<Image>();
-            if (handleImage != null)
-            {
-                handleImage.color = new Color(0.16f, 0.19f, 0.25f, 0.58f);
-                handleImage.raycastTarget = true;
-            }
+            handle.transform.localPosition = new Vector3(0f, -33.5f, 0f);
+            handle.transform.localRotation = Quaternion.identity;
+            handle.transform.localScale = Vector3.one;
+
+            var nativeRenderer = handle.GetComponent<MeshRenderer>();
+            if (nativeRenderer != null) nativeRenderer.enabled = false;
+
+            var hitBox = handle.GetComponent<BoxCollider>();
+            if (hitBox == null) hitBox = handle.AddComponent<BoxCollider>();
+            hitBox.center = Vector3.zero;
+            hitBox.size = new Vector3(30f, 4.5f, 4.5f);
+
+            var capsule = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            capsule.name = "RiftPulse Pulsing Rift Rounded Grab Grip";
+            capsule.transform.SetParent(handle.transform, false);
+            capsule.transform.localPosition = Vector3.zero;
+            capsule.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+            capsule.transform.localScale = new Vector3(4.5f, 30f, 4.5f);
+            var capsuleCollider = capsule.GetComponent<Collider>();
+            if (capsuleCollider != null) Destroy(capsuleCollider);
+            var capsuleRenderer = capsule.GetComponent<MeshRenderer>();
+            if (capsuleRenderer != null)
+                capsuleRenderer.material.color = new Color(0.035f, 0.12f, 0.18f, 0.96f);
         }
 
         private void LoadPlacement(ref Vector3 position, ref Quaternion rotation)
@@ -258,6 +311,7 @@ namespace RiftPulse.Pcvr
             Destroy(_panel.gameObject);
             _panel = null;
             _text = null;
+            _handleLabel = null;
         }
 
         private async Task RefreshFeed()
@@ -323,6 +377,28 @@ namespace RiftPulse.Pcvr
             }
             return -1;
         }
+        private static int FindMatchingObjectEnd(string json, int start)
+        {
+            if (start < 0 || start >= json.Length || json[start] != '{') return -1;
+            var depth = 0;
+            var inString = false;
+            var escaped = false;
+            for (var i = start; i < json.Length; i++)
+            {
+                var ch = json[i];
+                if (inString)
+                {
+                    if (escaped) escaped = false;
+                    else if (ch == '\\') escaped = true;
+                    else if (ch == '"') inString = false;
+                    continue;
+                }
+                if (ch == '"') inString = true;
+                else if (ch == '{') depth++;
+                else if (ch == '}' && --depth == 0) return i;
+            }
+            return -1;
+        }
         private void RenderFeed(string json)
         {
             var enabledMatch = Regex.Match(json, "\\\"chatEnabled\\\"\\s*:\\s*(true|false)");
@@ -341,7 +417,7 @@ namespace RiftPulse.Pcvr
                 total = viewerMatch.Groups[1].Value;
 
             var output = new StringBuilder();
-            output.AppendLine("▣  PCVR  /  RIFTPULSE LIVE CHAT");
+            output.AppendLine("PCVR  /  RIFTPULSE LIVE CHAT");
             output.Append("COMBINED VIEWERS  ").AppendLine(total);
             output.AppendLine("----------------------------");
 
@@ -350,11 +426,18 @@ namespace RiftPulse.Pcvr
             var arrayEnd = FindMatchingArrayEnd(json, arrayStart);
             if (arrayStart >= 0 && arrayEnd > arrayStart)
             {
-                var block = json.Substring(arrayStart + 1, arrayEnd - arrayStart - 1);
+                var cursor = arrayStart + 1;
                 var rendered = 0;
-                foreach (Match match in Regex.Matches(block, "\\{[^{}]*\\}"))
+                while (cursor < arrayEnd && rendered < 8)
                 {
-                    var item = match.Value;
+                    while (cursor < arrayEnd && (char.IsWhiteSpace(json[cursor]) || json[cursor] == ','))
+                        cursor++;
+                    var objectStart = json.IndexOf('{', cursor);
+                    if (objectStart < 0 || objectStart >= arrayEnd) break;
+                    var objectEnd = FindMatchingObjectEnd(json, objectStart);
+                    if (objectEnd < 0 || objectEnd > arrayEnd) break;
+                    var item = json.Substring(objectStart, objectEnd - objectStart + 1);
+                    cursor = objectEnd + 1;
                     var sender = ReadString(item, "senderName");
                     var message = ReadString(item, "text");
                     if (sender.Length == 0 || message.Length == 0) continue;
@@ -366,7 +449,7 @@ namespace RiftPulse.Pcvr
                     output.Append(icon).Append(' ').Append(Escape(sender, 28)).AppendLine();
                     output.AppendLine(Escape(message, 115));
                     output.AppendLine();
-                    if (++rendered >= 8) break;
+                    rendered++;
                 }
                 if (rendered == 0) output.AppendLine("No messages yet. Your chat will appear here.");
             }

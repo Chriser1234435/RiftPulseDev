@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 $root = 'C:\Users\chris\Documents\RiftPulse Development\workspace\RiftPulseDev'
 $q = Join-Path $root 'mods\quest'
 $downloads = Join-Path $root 'public\downloads'
@@ -51,4 +51,3 @@ try {
   Write-Output "Quest QMOD $version packaged; JSON parsed; entries: $($check.Entries.FullName -join ', ')"
   Write-Output "QMOD SHA256: $((Get-FileHash $out -Algorithm SHA256).Hash)"
 } finally { $check.Dispose() }
-
