@@ -1,4 +1,4 @@
-import type { Env } from "./env.ts";
+﻿import type { Env } from "./env.ts";
 import { API_VERSION, PROVIDERS, SUPPORTED_MODULES, validateCreatePairingChallenge, validateClaimPairing } from "../packages/contracts/src/v1.ts";
 import type { NormalizedProviderEvent, ProviderHealthSnapshot } from "../packages/contracts/src/chat-v1.ts";
 import { aggregateViewerCounts, emptyProviderHealth, normalizePlatformProviderEvent, normalizeTikTokChatMessage, normalizeTikTokProviderEvent, normalizeTwitchChatMessage, normalizeYouTubeChatMessage, normalizeYouTubeProviderEvent } from "../packages/shared/src/chat.ts";
@@ -1013,6 +1013,11 @@ export default {
         return jsonError(409, "twitch_account_mismatch", "Reconnect the intended Twitch account before enabling chat events.", requestId);
       }
       try {
+        // This endpoint uses webhook transport. Twitch requires an APP access
+        // token for webhook subscriptions; using the broadcaster user token
+        // causes Twitch to reject the create/list calls. The saved broadcaster
+        // user token scopes above are the consent grants that authorize these
+        // subscriptions for this client ID.
         const appTokenResponse = await fetch("https://id.twitch.tv/oauth2/token", {
           method: "POST",
           headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
@@ -1078,10 +1083,12 @@ export default {
             }),
           });
           if (!createResponse.ok) {
+            const twitchErrorBody = (await createResponse.text()).slice(0, 400);
             await env.DB.prepare(
               "UPDATE integration_health SET status = 'degraded', observed_at = ?, detail_code = 'eventsub_subscription_failed' WHERE account_id = ? AND provider = 'twitch'",
             ).bind(new Date().toISOString(), authContext.userId).run();
-            return jsonError(502, "twitch_eventsub_subscription_failed", "Twitch did not accept every requested event subscription. Reconnect Twitch to grant the required scopes and check the callback configuration.", requestId);
+            console.warn("twitch_eventsub_create_failed", JSON.stringify({ type: spec.type, status: createResponse.status, detail: twitchErrorBody }));
+            return jsonError(502, "twitch_eventsub_subscription_failed", "Twitch rejected the " + spec.type + " subscription (HTTP " + createResponse.status + "). " + twitchErrorBody, requestId);
           }
           allEnabled = false;
         }

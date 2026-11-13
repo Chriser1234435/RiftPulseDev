@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
@@ -32,7 +32,7 @@ namespace RiftPulse.Pcvr
         private Image? _lockShackleRight;
         private Image? _lockShackleTop;
         private static Sprite? _whiteSprite;
-        private bool _panelLocked = true;
+        private bool _panelLocked = false;
         private bool _requestInFlight;
         private bool _moveRequested;
         private bool _chatEnabled = true;
@@ -119,7 +119,7 @@ namespace RiftPulse.Pcvr
                 new Vector2(110f, 70f), true, position, rotation, 0f, true);
             if (_panel == null) return false;
 
-            _panel.ShowHandle = !_panelLocked;
+            _panel.ShowHandle = true;
             _panel.HighlightHandle = true;
             DontDestroyOnLoad(_panel.gameObject);
 
@@ -145,8 +145,7 @@ namespace RiftPulse.Pcvr
             _text.text = "PCVR  /  RIFTPULSE LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages...";
 
             CreatePlatformMark(root);
-            CreateLockControl(root);
-            ApplyLockState();
+            ApplyGrabHandleStyle();
             return true;
         }
 
@@ -186,83 +185,25 @@ namespace RiftPulse.Pcvr
             return image;
         }
 
-        private void CreateLockControl(RectTransform parent)
-        {
-            var buttonObject = new GameObject(
-                "RiftPulse Chat Panel Lock",
-                typeof(RectTransform),
-                typeof(Image),
-                typeof(Button));
-            var buttonRect = buttonObject.GetComponent<RectTransform>();
-            buttonRect.SetParent(parent, false);
-            buttonRect.anchorMin = Vector2.one;
-            buttonRect.anchorMax = Vector2.one;
-            buttonRect.pivot = Vector2.one;
-            buttonRect.anchoredPosition = new Vector2(-3f, -3f);
-            buttonRect.sizeDelta = new Vector2(14f, 14f);
-
-            var background = buttonObject.GetComponent<Image>();
-            background.sprite = GetWhiteSprite();
-            background.type = Image.Type.Simple;
-            background.color = new Color(0.08f, 0.12f, 0.20f, 0.98f);
-            background.raycastTarget = true;
-
-            _lockButton = buttonObject.GetComponent<Button>();
-            _lockButton.targetGraphic = background;
-            _lockButton.transition = Selectable.Transition.None;
-            _lockButton.interactable = true;
-            _lockButton.onClick.AddListener(ToggleLock);
-
-            _lockBody = CreateLockPart(buttonRect, "RiftPulse Lock Body", new Vector2(6f, 4.2f), new Vector2(0f, -2.6f));
-            _lockShackleLeft = CreateLockPart(buttonRect, "RiftPulse Lock Shackle Left", new Vector2(1.2f, 3.8f), new Vector2(-2.2f, 1.1f));
-            _lockShackleRight = CreateLockPart(buttonRect, "RiftPulse Lock Shackle Right", new Vector2(1.2f, 3.8f), new Vector2(2.2f, 1.1f));
-            _lockShackleTop = CreateLockPart(buttonRect, "RiftPulse Lock Shackle Top", new Vector2(5.6f, 1.2f), new Vector2(0f, 3f));
-        }
-
-        private void ToggleLock()
-        {
-            _panelLocked = !_panelLocked;
-            ApplyLockState();
-            SavePlacement();
-        }
-
-        private void ApplyLockState()
+        private void ApplyGrabHandleStyle()
         {
             if (_panel == null) return;
-            _panel.ShowHandle = !_panelLocked;
-
-            // BSML exposes the grab target as a backing field rather than a
-            // managed property in this version. Resolve it defensively; ShowHandle
-            // still guarantees the native handle appears if its name changes.
+            _panel.ShowHandle = true;
+            _panel.HighlightHandle = true;
             GameObject? handle = null;
             for (var type = _panel.GetType(); type != null && handle == null; type = type.BaseType)
             {
-                var field = type.GetField(
-                    "handle",
+                var field = type.GetField("handle",
                     BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
                 handle = field?.GetValue(_panel) as GameObject;
             }
-            if (handle != null)
+            if (handle == null) return;
+            handle.SetActive(true);
+            var handleImage = handle.GetComponent<Image>();
+            if (handleImage != null)
             {
-                handle.transform.localScale = new Vector3(0.32f, 0.8f, 1f);
-                handle.transform.localPosition = new Vector3(-46f, 28f, 0f);
-                handle.SetActive(!_panelLocked);
-            }
-
-            if (_lockButton != null)
-            {
-                var background = _lockButton.targetGraphic as Image;
-                if (background != null)
-                    background.color = _panelLocked
-                        ? new Color(0.08f, 0.16f, 0.28f, 0.98f)
-                        : new Color(0.16f, 0.25f, 0.38f, 0.98f);
-            }
-            if (_lockShackleRight != null && _lockShackleTop != null)
-            {
-                _lockShackleRight.rectTransform.anchoredPosition = _panelLocked
-                    ? new Vector2(2.2f, 1.1f) : new Vector2(4.0f, 1.1f);
-                _lockShackleTop.rectTransform.anchoredPosition = _panelLocked
-                    ? new Vector2(0f, 3f) : new Vector2(1.2f, 4f);
+                handleImage.color = new Color(0.20f, 0.24f, 0.31f, 0.70f);
+                handleImage.raycastTarget = true;
             }
         }
 
@@ -285,7 +226,8 @@ namespace RiftPulse.Pcvr
 
                 position = new Vector3(parsed[0], parsed[1], parsed[2]);
                 rotation = new Quaternion(parsed[3], parsed[4], parsed[5], parsed[6]);
-                if (values.Length >= 8) _panelLocked = values[7] != "0";
+                // Ignore legacy lock-state data; the panel is now always grab-movable.
+                _panelLocked = false;
             }
             catch { }
         }
@@ -308,7 +250,7 @@ namespace RiftPulse.Pcvr
                         rotation.y.ToString("R", CultureInfo.InvariantCulture),
                         rotation.z.ToString("R", CultureInfo.InvariantCulture),
                         rotation.w.ToString("R", CultureInfo.InvariantCulture),
-                        _panelLocked ? "1" : "0"
+                        "0"
                     }));
             }
             catch { }

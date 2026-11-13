@@ -1,4 +1,4 @@
-#include "main.hpp"
+﻿#include "main.hpp"
 #include "RiftPulseChatPanel.hpp"
 #include "bsml/shared/BSML/FloatingScreen/FloatingScreen.hpp"
 #include "UnityEngine/PrimitiveType.hpp"
@@ -73,7 +73,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.31";
+static constexpr const char* MOD_VERSION = "0.1.32";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -884,7 +884,7 @@ static UnityEngine::UI::Image* worldChatLockBody = nullptr;
 static UnityEngine::RectTransform* worldChatLockShackleRightRect = nullptr;
 static UnityEngine::RectTransform* worldChatLockShackleTopRect = nullptr;
 static UnityEngine::Sprite* worldChatWhiteSprite = nullptr;
-static bool worldChatLocked = true;
+static bool worldChatLocked = false;
 static bool worldChatRequestInFlight = false;
 static bool worldChatNeedsReposition = false;
 static bool worldChatModuleEnabled = true;
@@ -950,7 +950,7 @@ static void SaveWorldChatPlacement() {
   if (!output) return;
   output << position.x << " " << position.y << " " << position.z << " "
          << rotation.x << " " << rotation.y << " " << rotation.z << " " << rotation.w
-         << " " << (worldChatLocked ? 1 : 0);
+         << " " << 0;
 }
 
 static bool LoadWorldChatPlacement(UnityEngine::Vector3& position,
@@ -961,7 +961,7 @@ static bool LoadWorldChatPlacement(UnityEngine::Vector3& position,
   float qx = 0.0f, qy = 0.0f, qz = 0.0f, qw = 1.0f;
   if (!(input >> px >> py >> pz >> qx >> qy >> qz >> qw)) return false;
   int savedLockState = 1;
-  if (input >> savedLockState) worldChatLocked = savedLockState != 0;
+  worldChatLocked = false;
   position = UnityEngine::Vector3(px, py, pz);
   rotation = UnityEngine::Quaternion(qx, qy, qz, qw);
   return true;
@@ -1013,38 +1013,19 @@ static UnityEngine::UI::Image* CreateWorldChatLockPart(
 
 static void ApplyWorldChatLockState() {
   if (!worldChatPanel) return;
-  worldChatPanel->set_ShowHandle(!worldChatLocked);
-
+  worldChatPanel->set_ShowHandle(true);
+  worldChatPanel->set_HighlightHandle(true);
   auto* handle = worldChatPanel->handle;
   if (handle) {
-    auto handleTransform = handle->get_transform();
-    if (handleTransform) {
-      handleTransform->set_localScale(UnityEngine::Vector3(0.22f, 0.55f, 1.0f));
-      handleTransform->set_localPosition(UnityEngine::Vector3(-46.0f, 28.0f, 0.0f));
+    handle->SetActive(true);
+    auto transform = handle->get_transform();
+    if (transform) {
+      transform->set_localScale(UnityEngine::Vector3(0.42f, 0.14f, 1.0f));
+      transform->set_localPosition(UnityEngine::Vector3(0.0f, 34.0f, 0.0f));
     }
-    handle->SetActive(!worldChatLocked);
+    auto* image = handle->GetComponent<UnityEngine::UI::Image*>();
+    if (image) image->set_color(UnityEngine::Color(0.20f, 0.24f, 0.31f, 0.70f));
   }
-
-  if (worldChatLockButton) {
-    BSML::Lite::SetButtonText(worldChatLockButton, worldChatLocked ? "L" : "U");
-  }
-  if (worldChatLockBody) {
-    worldChatLockBody->set_color(worldChatLocked
-        ? UnityEngine::Color(0.91f, 0.95f, 1.0f, 1.0f)
-        : UnityEngine::Color(0.37f, 0.84f, 1.0f, 1.0f));
-  }
-  if (worldChatLockShackleRightRect && worldChatLockShackleTopRect) {
-    worldChatLockShackleRightRect->set_anchoredPosition(worldChatLocked
-        ? UnityEngine::Vector2(2.2f, 1.1f) : UnityEngine::Vector2(4.0f, 1.1f));
-    worldChatLockShackleTopRect->set_anchoredPosition(worldChatLocked
-        ? UnityEngine::Vector2(0.0f, 3.0f) : UnityEngine::Vector2(1.2f, 4.0f));
-  }
-}
-
-static void ToggleWorldChatLock() {
-  worldChatLocked = !worldChatLocked;
-  ApplyWorldChatLockState();
-  SaveWorldChatPlacement();
 }
 
 static TMPro::TextMeshProUGUI* CreateWorldChatText(
@@ -1134,7 +1115,7 @@ static bool CreateWorldChatPanel() {
   worldChatPanel = BSML::FloatingScreen::CreateFloatingScreen(
       UnityEngine::Vector2(110.0f, 70.0f), true, panelPosition, panelRotation, 0.0f, true);
   if (!worldChatPanel) return false;
-  worldChatPanel->set_ShowHandle(!worldChatLocked);
+  worldChatPanel->set_ShowHandle(true);
   worldChatPanel->set_HighlightHandle(true);
   UnityEngine::Object::DontDestroyOnLoad(worldChatPanel->get_gameObject());
 
@@ -1152,24 +1133,7 @@ static bool CreateWorldChatPanel() {
     return false;
   }
   CreateQuestPlatformMark(root);
-  worldChatLockButton = BSML::Lite::CreateUIButton(
-      root, worldChatLocked ? "L" : "U", "PracticeButton",
-      UnityEngine::Vector2({46.0f, 28.0f}), UnityEngine::Vector2({14.0f, 12.0f}),
-      []() { ToggleWorldChatLock(); });
-  auto* lockButtonRect = worldChatLockButton
-      ? worldChatLockButton->get_gameObject()->GetComponent<UnityEngine::RectTransform*>() : nullptr;
-  if (lockButtonRect) {
-    worldChatLockBody = CreateWorldChatLockPart(lockButtonRect, "RiftPulse Quest Lock Body",
-        UnityEngine::Vector2(6.0f, 4.2f), UnityEngine::Vector2(0.0f, -2.6f));
-    CreateWorldChatLockPart(lockButtonRect, "RiftPulse Quest Lock Shackle Left",
-        UnityEngine::Vector2(1.2f, 3.8f), UnityEngine::Vector2(-2.2f, 1.1f));
-    auto* rightPart = CreateWorldChatLockPart(lockButtonRect, "RiftPulse Quest Lock Shackle Right",
-        UnityEngine::Vector2(1.2f, 3.8f), UnityEngine::Vector2(2.2f, 1.1f));
-    auto* topPart = CreateWorldChatLockPart(lockButtonRect, "RiftPulse Quest Lock Shackle Top",
-        UnityEngine::Vector2(5.6f, 1.2f), UnityEngine::Vector2(0.0f, 3.0f));
-    if (rightPart) worldChatLockShackleRightRect = rightPart->GetComponent<UnityEngine::RectTransform*>();
-    if (topPart) worldChatLockShackleTopRect = topPart->GetComponent<UnityEngine::RectTransform*>();
-  }
+  // The native subdued grab tab moves the complete panel; no lock button.
   ApplyWorldChatLockState();
   worldChatTitle->set_text(StringW("QUEST / RIFTPULSE LIVE CHAT"));
   worldChatText->set_text(StringW("COMBINED VIEWERS  -\n\nWaiting for your stream messages..."));
