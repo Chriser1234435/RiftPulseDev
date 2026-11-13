@@ -186,12 +186,16 @@ class AccountRunner {
         const reason = offline ? "account_offline"
           : /room id|fetchisLive|all sources/i.test(errorMessage) ? "room_lookup_failed"
           : "connection_failed";
-        const nested = error && typeof error === "object" && "errors" in error
-          ? (error as { errors?: unknown[] }).errors : undefined;
+        const errorObject = error && typeof error === "object"
+          ? error as { errors?: unknown[]; config?: { requestErrs?: unknown[] } } : null;
+        const nested = errorObject?.config?.requestErrs ?? errorObject?.errors;
         const causes = Array.isArray(nested)
-          ? nested.slice(0, 3).map(item => {
-              const value = item instanceof Error ? item.message : String(item);
-              return value.replace(/https?:\/\/\S+/gi, "[url]").replace(/[\r\n]+/g, " ").slice(0, 120);
+          ? nested.slice(0, 4).map(item => {
+              const cause = item && typeof item === "object" && "requestErr" in item
+                ? (item as { requestErr?: unknown }).requestErr : item;
+              const causeName = cause instanceof Error ? cause.name : "Error";
+              const value = cause instanceof Error ? cause.message : String(cause);
+              return `${causeName}: ${value.replace(/https?:\/\/\S+/gi, "[url]").replace(/[\r\n]+/g, " ").slice(0, 100)}`;
             })
           : [];
         console.warn("tiktok_live_connection_attempt_failed", JSON.stringify({
