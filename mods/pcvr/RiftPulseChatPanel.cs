@@ -26,8 +26,12 @@ namespace RiftPulse.Pcvr
 
         private FloatingScreen? _panel;
         private TextMeshProUGUI? _text;
-        private TextMeshProUGUI? _lockIcon;
         private Button? _lockButton;
+        private Image? _lockBody;
+        private Image? _lockShackleLeft;
+        private Image? _lockShackleRight;
+        private Image? _lockShackleTop;
+        private static Sprite? _whiteSprite;
         private bool _panelLocked = true;
         private bool _requestInFlight;
         private bool _moveRequested;
@@ -138,11 +142,48 @@ namespace RiftPulse.Pcvr
             _text.alignment = TextAlignmentOptions.TopLeft;
             _text.color = new Color(0.91f, 0.93f, 1f, 1f);
             _text.richText = true;
-            _text.text = "▣  PCVR  /  RIFTPULSE LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages...";
+            _text.text = "PCVR  /  RIFTPULSE LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages...";
 
+            CreatePlatformMark(root);
             CreateLockControl(root);
             ApplyLockState();
             return true;
+        }
+
+        private void CreatePlatformMark(RectTransform parent)
+        {
+            // A small, font-independent monitor mark distinguishes the PCVR panel.
+            CreateLockPart(parent, "RiftPulse PCVR Monitor Top", new Vector2(6.5f, 0.8f), new Vector2(-47f, 30f));
+            CreateLockPart(parent, "RiftPulse PCVR Monitor Bottom", new Vector2(6.5f, 0.8f), new Vector2(-47f, 26.5f));
+            CreateLockPart(parent, "RiftPulse PCVR Monitor Left", new Vector2(0.8f, 4.3f), new Vector2(-50.2f, 28.25f));
+            CreateLockPart(parent, "RiftPulse PCVR Monitor Right", new Vector2(0.8f, 4.3f), new Vector2(-43.8f, 28.25f));
+            CreateLockPart(parent, "RiftPulse PCVR Monitor Stand", new Vector2(0.8f, 1.2f), new Vector2(-47f, 25.3f));
+            CreateLockPart(parent, "RiftPulse PCVR Monitor Foot", new Vector2(3.8f, 0.8f), new Vector2(-47f, 24.5f));
+        }
+
+        private static Sprite GetWhiteSprite()
+        {
+            if (_whiteSprite == null)
+                _whiteSprite = Sprite.Create(Texture2D.whiteTexture, new Rect(0f, 0f, 1f, 1f), new Vector2(0.5f, 0.5f));
+            return _whiteSprite;
+        }
+
+        private Image CreateLockPart(RectTransform parent, string name, Vector2 size, Vector2 position)
+        {
+            var partObject = new GameObject(name, typeof(RectTransform), typeof(Image));
+            var rect = partObject.GetComponent<RectTransform>();
+            rect.SetParent(parent, false);
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = position;
+            rect.sizeDelta = size;
+            var image = partObject.GetComponent<Image>();
+            image.sprite = GetWhiteSprite();
+            image.type = Image.Type.Simple;
+            image.color = new Color(0.91f, 0.95f, 1f, 1f);
+            image.raycastTarget = false;
+            return image;
         }
 
         private void CreateLockControl(RectTransform parent)
@@ -154,33 +195,28 @@ namespace RiftPulse.Pcvr
                 typeof(Button));
             var buttonRect = buttonObject.GetComponent<RectTransform>();
             buttonRect.SetParent(parent, false);
-            buttonRect.anchorMin = new Vector2(1f, 1f);
-            buttonRect.anchorMax = new Vector2(1f, 1f);
-            buttonRect.pivot = new Vector2(1f, 1f);
-            buttonRect.anchoredPosition = new Vector2(-2f, -2f);
-            buttonRect.sizeDelta = new Vector2(8f, 8f);
+            buttonRect.anchorMin = Vector2.one;
+            buttonRect.anchorMax = Vector2.one;
+            buttonRect.pivot = Vector2.one;
+            buttonRect.anchoredPosition = new Vector2(-3f, -3f);
+            buttonRect.sizeDelta = new Vector2(14f, 14f);
 
             var background = buttonObject.GetComponent<Image>();
-            background.color = new Color(0.10f, 0.14f, 0.22f, 0.96f);
+            background.sprite = GetWhiteSprite();
+            background.type = Image.Type.Simple;
+            background.color = new Color(0.08f, 0.12f, 0.20f, 0.98f);
+            background.raycastTarget = true;
+
             _lockButton = buttonObject.GetComponent<Button>();
+            _lockButton.targetGraphic = background;
+            _lockButton.transition = Selectable.Transition.None;
+            _lockButton.interactable = true;
             _lockButton.onClick.AddListener(ToggleLock);
 
-            var iconObject = new GameObject(
-                "RiftPulse Chat Panel Lock Icon",
-                typeof(RectTransform),
-                typeof(TextMeshProUGUI));
-            var iconRect = iconObject.GetComponent<RectTransform>();
-            iconRect.SetParent(buttonRect, false);
-            iconRect.anchorMin = Vector2.zero;
-            iconRect.anchorMax = Vector2.one;
-            iconRect.offsetMin = Vector2.zero;
-            iconRect.offsetMax = Vector2.zero;
-
-            _lockIcon = iconObject.GetComponent<TextMeshProUGUI>();
-            _lockIcon.fontSize = 3.1f;
-            _lockIcon.alignment = TextAlignmentOptions.Center;
-            _lockIcon.color = Color.white;
-            _lockIcon.text = "🔒";
+            _lockBody = CreateLockPart(buttonRect, "RiftPulse Lock Body", new Vector2(6f, 4.2f), new Vector2(0f, -2.6f));
+            _lockShackleLeft = CreateLockPart(buttonRect, "RiftPulse Lock Shackle Left", new Vector2(1.2f, 3.8f), new Vector2(-2.2f, 1.1f));
+            _lockShackleRight = CreateLockPart(buttonRect, "RiftPulse Lock Shackle Right", new Vector2(1.2f, 3.8f), new Vector2(2.2f, 1.1f));
+            _lockShackleTop = CreateLockPart(buttonRect, "RiftPulse Lock Shackle Top", new Vector2(5.6f, 1.2f), new Vector2(0f, 3f));
         }
 
         private void ToggleLock()
@@ -195,21 +231,39 @@ namespace RiftPulse.Pcvr
             if (_panel == null) return;
             _panel.ShowHandle = !_panelLocked;
 
-            // Keep the native controller-grab target, but reduce it to a small
-            // grab tab instead of the large white bar shown by the default style.
-            if (!_panelLocked)
+            // BSML exposes the grab target as a backing field rather than a
+            // managed property in this version. Resolve it defensively; ShowHandle
+            // still guarantees the native handle appears if its name changes.
+            GameObject? handle = null;
+            for (var type = _panel.GetType(); type != null && handle == null; type = type.BaseType)
             {
-                var handleField = typeof(FloatingScreen).GetField(
-                    "handle", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                var handle = handleField?.GetValue(_panel) as GameObject;
-                if (handle != null)
-                {
-                    handle.transform.localScale = new Vector3(0.12f, 1.6f, 1f);
-                    handle.transform.localPosition = new Vector3(-48f, 29f, 0f);
-                }
+                var field = type.GetField(
+                    "handle",
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+                handle = field?.GetValue(_panel) as GameObject;
+            }
+            if (handle != null)
+            {
+                handle.transform.localScale = new Vector3(0.32f, 0.8f, 1f);
+                handle.transform.localPosition = new Vector3(-46f, 28f, 0f);
+                handle.SetActive(!_panelLocked);
             }
 
-            if (_lockIcon != null) _lockIcon.text = _panelLocked ? "🔒" : "🔓";
+            if (_lockButton != null)
+            {
+                var background = _lockButton.targetGraphic as Image;
+                if (background != null)
+                    background.color = _panelLocked
+                        ? new Color(0.08f, 0.16f, 0.28f, 0.98f)
+                        : new Color(0.16f, 0.25f, 0.38f, 0.98f);
+            }
+            if (_lockShackleRight != null && _lockShackleTop != null)
+            {
+                _lockShackleRight.rectTransform.anchoredPosition = _panelLocked
+                    ? new Vector2(2.2f, 1.1f) : new Vector2(4.0f, 1.1f);
+                _lockShackleTop.rectTransform.anchoredPosition = _panelLocked
+                    ? new Vector2(0f, 3f) : new Vector2(1.2f, 4f);
+            }
         }
 
         private void LoadPlacement(ref Vector3 position, ref Quaternion rotation)
@@ -267,8 +321,11 @@ namespace RiftPulse.Pcvr
             Destroy(_panel.gameObject);
             _panel = null;
             _text = null;
-            _lockIcon = null;
             _lockButton = null;
+            _lockBody = null;
+            _lockShackleLeft = null;
+            _lockShackleRight = null;
+            _lockShackleTop = null;
         }
 
         private async Task RefreshFeed()

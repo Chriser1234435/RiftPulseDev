@@ -8,6 +8,11 @@
 #include "UnityEngine/UI/Button.hpp"
 #include "TMPro/TextMeshProUGUI.hpp"
 #include "TMPro/TextAlignmentOptions.hpp"
+#include "TMPro/TMP_Settings.hpp"
+#include "UnityEngine/Sprite.hpp"
+#include "UnityEngine/Texture2D.hpp"
+#include "UnityEngine/Rect.hpp"
+#include "UnityEngine/UI/Image.hpp"
 #include "System/Type.hpp"
 #include "UnityEngine/Time.hpp"
 #include "UnityEngine/MeshRenderer.hpp"
@@ -68,7 +73,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.30";
+static constexpr const char* MOD_VERSION = "0.1.31";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -875,6 +880,10 @@ static BSML::FloatingScreen* worldChatPanel = nullptr;
 static TMPro::TextMeshProUGUI* worldChatTitle = nullptr;
 static TMPro::TextMeshProUGUI* worldChatText = nullptr;
 static UnityEngine::UI::Button* worldChatLockButton = nullptr;
+static UnityEngine::UI::Image* worldChatLockBody = nullptr;
+static UnityEngine::RectTransform* worldChatLockShackleRightRect = nullptr;
+static UnityEngine::RectTransform* worldChatLockShackleTopRect = nullptr;
+static UnityEngine::Sprite* worldChatWhiteSprite = nullptr;
 static bool worldChatLocked = true;
 static bool worldChatRequestInFlight = false;
 static bool worldChatNeedsReposition = false;
@@ -962,20 +971,73 @@ static void SetWorldChatText(const std::string& value) {
   if (worldChatText) worldChatText->set_text(StringW(value));
 }
 
+static UnityEngine::Sprite* GetWorldChatWhiteSprite() {
+  if (!worldChatWhiteSprite) {
+    auto texture = UnityEngine::Texture2D::get_whiteTexture();
+    if (texture) {
+      worldChatWhiteSprite = UnityEngine::Sprite::Create(
+          texture, UnityEngine::Rect(0.0f, 0.0f, 1.0f, 1.0f),
+          UnityEngine::Vector2(0.5f, 0.5f));
+    }
+  }
+  return worldChatWhiteSprite;
+}
+
+static UnityEngine::UI::Image* CreateWorldChatLockPart(
+    UnityEngine::RectTransform* parent, const std::string& name,
+    UnityEngine::Vector2 size, UnityEngine::Vector2 position) {
+  if (!parent || !GetWorldChatWhiteSprite()) return nullptr;
+  ArrayW<System::Type*> componentTypes{
+      static_cast<System::Type*>(csTypeOf(UnityEngine::RectTransform*)),
+      static_cast<System::Type*>(csTypeOf(UnityEngine::UI::Image*))
+  };
+  auto* partObject = UnityEngine::GameObject::New_ctor(StringW(name), componentTypes);
+  if (!partObject) return nullptr;
+  auto* rect = partObject->GetComponent<UnityEngine::RectTransform*>();
+  auto* image = partObject->GetComponent<UnityEngine::UI::Image*>();
+  if (!rect || !image) {
+    UnityEngine::Object::Destroy(partObject);
+    return nullptr;
+  }
+  rect->SetParent(parent, false);
+  rect->set_anchorMin(UnityEngine::Vector2(0.5f, 0.5f));
+  rect->set_anchorMax(UnityEngine::Vector2(0.5f, 0.5f));
+  rect->set_pivot(UnityEngine::Vector2(0.5f, 0.5f));
+  rect->set_anchoredPosition(position);
+  rect->set_sizeDelta(size);
+  image->set_sprite(GetWorldChatWhiteSprite());
+  image->set_color(UnityEngine::Color(0.91f, 0.95f, 1.0f, 1.0f));
+  image->set_raycastTarget(false);
+  return image;
+}
+
 static void ApplyWorldChatLockState() {
   if (!worldChatPanel) return;
   worldChatPanel->set_ShowHandle(!worldChatLocked);
-  if (!worldChatLocked && worldChatPanel->handle) {
-    auto handleTransform = worldChatPanel->handle->get_transform();
+
+  auto* handle = worldChatPanel->handle;
+  if (handle) {
+    auto handleTransform = handle->get_transform();
     if (handleTransform) {
-      // The native BSML handle remains controller-grabbable, but becomes a
-      // small tab rather than the large white bar.
-      handleTransform->set_localScale(UnityEngine::Vector3(0.12f, 1.6f, 1.0f));
-      handleTransform->set_localPosition(UnityEngine::Vector3(-48.0f, 29.0f, 0.0f));
+      handleTransform->set_localScale(UnityEngine::Vector3(0.22f, 0.55f, 1.0f));
+      handleTransform->set_localPosition(UnityEngine::Vector3(-46.0f, 28.0f, 0.0f));
     }
+    handle->SetActive(!worldChatLocked);
   }
+
   if (worldChatLockButton) {
-    BSML::Lite::SetButtonText(worldChatLockButton, worldChatLocked ? "🔒" : "🔓");
+    BSML::Lite::SetButtonText(worldChatLockButton, worldChatLocked ? "L" : "U");
+  }
+  if (worldChatLockBody) {
+    worldChatLockBody->set_color(worldChatLocked
+        ? UnityEngine::Color(0.91f, 0.95f, 1.0f, 1.0f)
+        : UnityEngine::Color(0.37f, 0.84f, 1.0f, 1.0f));
+  }
+  if (worldChatLockShackleRightRect && worldChatLockShackleTopRect) {
+    worldChatLockShackleRightRect->set_anchoredPosition(worldChatLocked
+        ? UnityEngine::Vector2(2.2f, 1.1f) : UnityEngine::Vector2(4.0f, 1.1f));
+    worldChatLockShackleTopRect->set_anchoredPosition(worldChatLocked
+        ? UnityEngine::Vector2(0.0f, 3.0f) : UnityEngine::Vector2(1.2f, 4.0f));
   }
 }
 
@@ -1007,10 +1069,14 @@ static TMPro::TextMeshProUGUI* CreateWorldChatText(
   rect->set_pivot(UnityEngine::Vector2(0.5f, 0.5f));
   rect->set_anchoredPosition(UnityEngine::Vector2(x, y));
   rect->set_sizeDelta(UnityEngine::Vector2(width, height));
+  auto fontAsset = heading ? heading->get_font() : TMPro::TMP_Settings::get_defaultFontAsset();
+  if (!fontAsset) fontAsset = TMPro::TMP_Settings::get_defaultFontAsset();
+  if (fontAsset) text->set_font(fontAsset);
   text->set_fontSize(fontSize);
   text->set_enableWordWrapping(true);
   text->set_alignment(alignment);
   text->set_richText(true);
+  text->set_raycastTarget(false);
   text->set_color(UnityEngine::Color(0.91f, 0.93f, 1.0f, 1.0f));
   return text;
 }
@@ -1025,7 +1091,26 @@ static void DestroyWorldChatPanel(bool savePlacement) {
   worldChatTitle = nullptr;
   worldChatText = nullptr;
   worldChatLockButton = nullptr;
+  worldChatLockBody = nullptr;
+  worldChatLockShackleRightRect = nullptr;
+  worldChatLockShackleTopRect = nullptr;
   worldChatPairingPromptVisible = false;
+}
+
+static void CreateQuestPlatformMark(UnityEngine::RectTransform* parent) {
+  // Font-independent headset silhouette for the Quest Standalone panel.
+  CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Top",
+      UnityEngine::Vector2(7.2f, 1.0f), UnityEngine::Vector2(-47.0f, 30.5f));
+  CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Bottom",
+      UnityEngine::Vector2(5.8f, 1.0f), UnityEngine::Vector2(-47.0f, 26.0f));
+  CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Left",
+      UnityEngine::Vector2(1.2f, 4.2f), UnityEngine::Vector2(-50.0f, 28.2f));
+  CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Right",
+      UnityEngine::Vector2(1.2f, 4.2f), UnityEngine::Vector2(-44.0f, 28.2f));
+  CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Strap Left",
+      UnityEngine::Vector2(1.0f, 2.0f), UnityEngine::Vector2(-51.2f, 28.2f));
+  CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Strap Right",
+      UnityEngine::Vector2(1.0f, 2.0f), UnityEngine::Vector2(-42.8f, 28.2f));
 }
 
 static bool CreateWorldChatPanel() {
@@ -1057,7 +1142,7 @@ static bool CreateWorldChatPanel() {
   // Match the proven PCVR renderer: regular TextMeshProUGUI children on the
   // world-space screen instead of menu-only curved text components.
   worldChatTitle = CreateWorldChatText(
-      "RiftPulse Quest Chat Title", 0.0f, 27.0f, 94.0f, 8.0f, 3.0f,
+      "RiftPulse Quest Chat Title", 4.0f, 27.0f, 84.0f, 8.0f, 3.0f,
       TMPro::TextAlignmentOptions::TopLeft);
   worldChatText = CreateWorldChatText(
       "RiftPulse Quest Chat Feed", 0.0f, -5.0f, 102.0f, 54.0f, 2.45f,
@@ -1066,12 +1151,27 @@ static bool CreateWorldChatPanel() {
     DestroyWorldChatPanel(true);
     return false;
   }
+  CreateQuestPlatformMark(root);
   worldChatLockButton = BSML::Lite::CreateUIButton(
-      root, worldChatLocked ? "🔒" : "🔓", "PracticeButton",
-      UnityEngine::Vector2({47.0f, 29.0f}), UnityEngine::Vector2({8.0f, 7.0f}),
+      root, worldChatLocked ? "L" : "U", "PracticeButton",
+      UnityEngine::Vector2({46.0f, 28.0f}), UnityEngine::Vector2({14.0f, 12.0f}),
       []() { ToggleWorldChatLock(); });
+  auto* lockButtonRect = worldChatLockButton
+      ? worldChatLockButton->get_gameObject()->GetComponent<UnityEngine::RectTransform*>() : nullptr;
+  if (lockButtonRect) {
+    worldChatLockBody = CreateWorldChatLockPart(lockButtonRect, "RiftPulse Quest Lock Body",
+        UnityEngine::Vector2(6.0f, 4.2f), UnityEngine::Vector2(0.0f, -2.6f));
+    CreateWorldChatLockPart(lockButtonRect, "RiftPulse Quest Lock Shackle Left",
+        UnityEngine::Vector2(1.2f, 3.8f), UnityEngine::Vector2(-2.2f, 1.1f));
+    auto* rightPart = CreateWorldChatLockPart(lockButtonRect, "RiftPulse Quest Lock Shackle Right",
+        UnityEngine::Vector2(1.2f, 3.8f), UnityEngine::Vector2(2.2f, 1.1f));
+    auto* topPart = CreateWorldChatLockPart(lockButtonRect, "RiftPulse Quest Lock Shackle Top",
+        UnityEngine::Vector2(5.6f, 1.2f), UnityEngine::Vector2(0.0f, 3.0f));
+    if (rightPart) worldChatLockShackleRightRect = rightPart->GetComponent<UnityEngine::RectTransform*>();
+    if (topPart) worldChatLockShackleTopRect = topPart->GetComponent<UnityEngine::RectTransform*>();
+  }
   ApplyWorldChatLockState();
-  worldChatTitle->set_text(StringW("◉  QUEST  /  RIFTPULSE LIVE CHAT"));
+  worldChatTitle->set_text(StringW("QUEST / RIFTPULSE LIVE CHAT"));
   worldChatText->set_text(StringW("COMBINED VIEWERS  -\n\nWaiting for your stream messages..."));
   return true;
 }
@@ -1111,7 +1211,7 @@ static void RenderWorldChatFeed(const std::string& response) {
     totalViewers = viewerMatch[1].str();
   }
 
-  std::string output = "◉  QUEST  /  RIFTPULSE LIVE CHAT\n";
+  std::string output = "QUEST / RIFTPULSE LIVE CHAT\n";
   output += "COMBINED VIEWERS  " + totalViewers + "\n";
   output += "----------------------------\n";
 

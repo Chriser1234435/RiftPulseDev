@@ -5,7 +5,7 @@
     "id":  "riftpulse",
     "modloader":  "Scotland2",
     "author":  "RiftPulseDev",
-    "version":  "0.1.30",
+    "version":  "0.1.31",
     "packageId":  "com.beatgames.beatsaber",
     "packageVersion":  "1.40.8_7379",
     "description":  "RiftPulse Quest client with account pairing and a movable world-space live chat panel for Beat Saber 1.40.8",
