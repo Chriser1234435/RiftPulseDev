@@ -1329,11 +1329,11 @@ export default {
       try {
         const broadcastUrl = new URL("https://www.googleapis.com/youtube/v3/liveBroadcasts");
         broadcastUrl.searchParams.set("part", "snippet");
+        // YouTube's liveBroadcasts.list accepts exactly ONE of broadcastStatus,
+        // id, or mine. Setting both mine=true and broadcastStatus=active causes
+        // a 400 incompatibleParameters response. The authenticated OAuth token
+        // scopes the active broadcasts returned to the channel owner.
         broadcastUrl.searchParams.set("broadcastStatus", "active");
-        broadcastUrl.searchParams.set("mine", "true");
-        // The YouTube API defaults broadcastType to "event" when mine/broadcastStatus
-        // are used. Include persistent broadcasts as well as scheduled events.
-        broadcastUrl.searchParams.set("broadcastType", "all");
         broadcastUrl.searchParams.set("maxResults", "5");
         const broadcastResponse = await fetch(broadcastUrl, { headers: { authorization: "Bearer " + accessToken, accept: "application/json" } });
         if (!broadcastResponse.ok) {

@@ -3,6 +3,12 @@
 #include "bsml/shared/BSML/FloatingScreen/FloatingScreen.hpp"
 #include "UnityEngine/PrimitiveType.hpp"
 #include "UnityEngine/Camera.hpp"
+#include "UnityEngine/GameObject.hpp"
+#include "UnityEngine/RectTransform.hpp"
+#include "UnityEngine/UI/Button.hpp"
+#include "TMPro/TextMeshProUGUI.hpp"
+#include "TMPro/TextAlignmentOptions.hpp"
+#include "System/Type.hpp"
 #include "UnityEngine/Time.hpp"
 #include "UnityEngine/MeshRenderer.hpp"
 #include "UnityEngine/Material.hpp"
@@ -35,6 +41,7 @@
 #include "System/TimeSpan.hpp"
 #include "custom-types/shared/delegate.hpp"
 #include "beatsaber-hook/shared/utils/il2cpp-utils.hpp"
+#include "beatsaber-hook/shared/utils/il2cpp-type-check.hpp"
 
 #include <array>
 #include <chrono>
@@ -61,7 +68,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.29";
+static constexpr const char* MOD_VERSION = "0.1.30";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -865,8 +872,10 @@ MOD_EXTERN_FUNC void setup(CModInfo *info) noexcept {
 DEFINE_TYPE(RiftPulse, ChatPanelDriver);
 
 static BSML::FloatingScreen* worldChatPanel = nullptr;
-static HMUI::CurvedTextMeshPro* worldChatTitle = nullptr;
-static HMUI::CurvedTextMeshPro* worldChatText = nullptr;
+static TMPro::TextMeshProUGUI* worldChatTitle = nullptr;
+static TMPro::TextMeshProUGUI* worldChatText = nullptr;
+static UnityEngine::UI::Button* worldChatLockButton = nullptr;
+static bool worldChatLocked = true;
 static bool worldChatRequestInFlight = false;
 static bool worldChatNeedsReposition = false;
 static bool worldChatModuleEnabled = true;
@@ -931,7 +940,8 @@ static void SaveWorldChatPlacement() {
   std::ofstream output(WorldChatPlacementPath(), std::ios::out | std::ios::trunc);
   if (!output) return;
   output << position.x << " " << position.y << " " << position.z << " "
-         << rotation.x << " " << rotation.y << " " << rotation.z << " " << rotation.w;
+         << rotation.x << " " << rotation.y << " " << rotation.z << " " << rotation.w
+         << " " << (worldChatLocked ? 1 : 0);
 }
 
 static bool LoadWorldChatPlacement(UnityEngine::Vector3& position,
@@ -941,6 +951,8 @@ static bool LoadWorldChatPlacement(UnityEngine::Vector3& position,
   float px = 0.0f, py = 0.0f, pz = 0.0f;
   float qx = 0.0f, qy = 0.0f, qz = 0.0f, qw = 1.0f;
   if (!(input >> px >> py >> pz >> qx >> qy >> qz >> qw)) return false;
+  int savedLockState = 1;
+  if (input >> savedLockState) worldChatLocked = savedLockState != 0;
   position = UnityEngine::Vector3(px, py, pz);
   rotation = UnityEngine::Quaternion(qx, qy, qz, qw);
   return true;
@@ -948,6 +960,59 @@ static bool LoadWorldChatPlacement(UnityEngine::Vector3& position,
 
 static void SetWorldChatText(const std::string& value) {
   if (worldChatText) worldChatText->set_text(StringW(value));
+}
+
+static void ApplyWorldChatLockState() {
+  if (!worldChatPanel) return;
+  worldChatPanel->set_ShowHandle(!worldChatLocked);
+  if (!worldChatLocked && worldChatPanel->handle) {
+    auto handleTransform = worldChatPanel->handle->get_transform();
+    if (handleTransform) {
+      // The native BSML handle remains controller-grabbable, but becomes a
+      // small tab rather than the large white bar.
+      handleTransform->set_localScale(UnityEngine::Vector3(0.12f, 1.6f, 1.0f));
+      handleTransform->set_localPosition(UnityEngine::Vector3(-48.0f, 29.0f, 0.0f));
+    }
+  }
+  if (worldChatLockButton) {
+    BSML::Lite::SetButtonText(worldChatLockButton, worldChatLocked ? "🔒" : "🔓");
+  }
+}
+
+static void ToggleWorldChatLock() {
+  worldChatLocked = !worldChatLocked;
+  ApplyWorldChatLockState();
+  SaveWorldChatPlacement();
+}
+
+static TMPro::TextMeshProUGUI* CreateWorldChatText(
+    const std::string& objectName, float x, float y, float width, float height,
+    float fontSize, TMPro::TextAlignmentOptions alignment) {
+  if (!worldChatPanel) return nullptr;
+  ArrayW<System::Type*> componentTypes{
+      static_cast<System::Type*>(csTypeOf(UnityEngine::RectTransform*)),
+      static_cast<System::Type*>(csTypeOf(TMPro::TextMeshProUGUI*))
+  };
+  auto* textObject = UnityEngine::GameObject::New_ctor(StringW(objectName), componentTypes);
+  if (!textObject) return nullptr;
+  auto* rect = textObject->GetComponent<UnityEngine::RectTransform*>();
+  auto* text = textObject->GetComponent<TMPro::TextMeshProUGUI*>();
+  if (!rect || !text) {
+    UnityEngine::Object::Destroy(textObject);
+    return nullptr;
+  }
+  rect->SetParent(worldChatPanel->get_rectTransform(), false);
+  rect->set_anchorMin(UnityEngine::Vector2(0.5f, 0.5f));
+  rect->set_anchorMax(UnityEngine::Vector2(0.5f, 0.5f));
+  rect->set_pivot(UnityEngine::Vector2(0.5f, 0.5f));
+  rect->set_anchoredPosition(UnityEngine::Vector2(x, y));
+  rect->set_sizeDelta(UnityEngine::Vector2(width, height));
+  text->set_fontSize(fontSize);
+  text->set_enableWordWrapping(true);
+  text->set_alignment(alignment);
+  text->set_richText(true);
+  text->set_color(UnityEngine::Color(0.91f, 0.93f, 1.0f, 1.0f));
+  return text;
 }
 
 static void DestroyWorldChatPanel(bool savePlacement) {
@@ -959,6 +1024,7 @@ static void DestroyWorldChatPanel(bool savePlacement) {
   worldChatPanel = nullptr;
   worldChatTitle = nullptr;
   worldChatText = nullptr;
+  worldChatLockButton = nullptr;
   worldChatPairingPromptVisible = false;
 }
 
@@ -983,21 +1049,30 @@ static bool CreateWorldChatPanel() {
   worldChatPanel = BSML::FloatingScreen::CreateFloatingScreen(
       UnityEngine::Vector2(110.0f, 70.0f), true, panelPosition, panelRotation, 0.0f, true);
   if (!worldChatPanel) return false;
-  worldChatPanel->set_ShowHandle(true);
+  worldChatPanel->set_ShowHandle(!worldChatLocked);
   worldChatPanel->set_HighlightHandle(true);
   UnityEngine::Object::DontDestroyOnLoad(worldChatPanel->get_gameObject());
 
   auto root = worldChatPanel->get_rectTransform();
-  worldChatTitle = BSML::Lite::CreateText(
-      root, StringW("RIFTPULSE  /  LIVE CHAT"), 3.0f,
-      UnityEngine::Vector2(0.0f, 27.0f), UnityEngine::Vector2(104.0f, 8.0f));
-  worldChatText = BSML::Lite::CreateText(
-      root, StringW("COMBINED VIEWERS  -\n\nWaiting for your stream messages..."), 2.45f,
-      UnityEngine::Vector2(0.0f, -5.0f), UnityEngine::Vector2(104.0f, 54.0f));
+  // Match the proven PCVR renderer: regular TextMeshProUGUI children on the
+  // world-space screen instead of menu-only curved text components.
+  worldChatTitle = CreateWorldChatText(
+      "RiftPulse Quest Chat Title", 0.0f, 27.0f, 94.0f, 8.0f, 3.0f,
+      TMPro::TextAlignmentOptions::TopLeft);
+  worldChatText = CreateWorldChatText(
+      "RiftPulse Quest Chat Feed", 0.0f, -5.0f, 102.0f, 54.0f, 2.45f,
+      TMPro::TextAlignmentOptions::TopLeft);
   if (!worldChatTitle || !worldChatText) {
     DestroyWorldChatPanel(true);
     return false;
   }
+  worldChatLockButton = BSML::Lite::CreateUIButton(
+      root, worldChatLocked ? "🔒" : "🔓", "PracticeButton",
+      UnityEngine::Vector2({47.0f, 29.0f}), UnityEngine::Vector2({8.0f, 7.0f}),
+      []() { ToggleWorldChatLock(); });
+  ApplyWorldChatLockState();
+  worldChatTitle->set_text(StringW("◉  QUEST  /  RIFTPULSE LIVE CHAT"));
+  worldChatText->set_text(StringW("COMBINED VIEWERS  -\n\nWaiting for your stream messages..."));
   return true;
 }
 static size_t FindMatchingJsonArrayEnd(const std::string& json, size_t start) {
@@ -1036,7 +1111,7 @@ static void RenderWorldChatFeed(const std::string& response) {
     totalViewers = viewerMatch[1].str();
   }
 
-  std::string output = "RIFTPULSE  /  LIVE CHAT\n";
+  std::string output = "◉  QUEST  /  RIFTPULSE LIVE CHAT\n";
   output += "COMBINED VIEWERS  " + totalViewers + "\n";
   output += "----------------------------\n";
 
@@ -1053,8 +1128,11 @@ static void RenderWorldChatFeed(const std::string& response) {
       const auto sender = ReadJsonStringField(object, "senderName");
       const auto message = ReadJsonStringField(object, "text");
       if (sender.empty() || message.empty()) continue;
-      const auto tag = provider == "twitch" ? "TW" : provider == "youtube" ? "YT" : provider == "tiktok" ? "TT" : "LIVE";
-      output += std::string("[") + tag + "] " + EscapeChatRichText(sender, 28) + "\n";
+      const auto icon = provider == "twitch" ? "<color=#9146FF>●</color>"
+          : provider == "youtube" ? "<color=#FF0033>▶</color>"
+          : provider == "tiktok" ? "<color=#25F4EE>♪</color>"
+          : "<color=#B8C4D8>●</color>";
+      output += icon + std::string(" ") + EscapeChatRichText(sender, 28) + "\n";
       output += EscapeChatRichText(message, 115) + "\n\n";
       ++rendered;
     }

@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { TikTokLiveConnection, WebcastEvent } from "tiktok-live-connector";
+import { TikTokLiveConnection, UserOfflineError, WebcastEvent } from "tiktok-live-connector";
 
 if (process.env.RIFTPULSE_CONNECTOR_DISABLED === "true") {
   console.info("TikTok connector disabled by configuration; no accounts will be connected.");
@@ -48,13 +48,18 @@ class AccountRunner {
   private reconnectWaiter: (() => void) | null = null;
   private retryWaiter: (() => void) | null = null;
   private reconnectRequested = false;
+  private readonly stopController = new AbortController();
   private runPromise: Promise<void>;
 
   constructor(config: AccountConfig) {
     this.accountId = config.accountId;
     this.username = config.username.replace(/^@/, "");
     this.channelName = this.username;
-    this.connection = new TikTokLiveConnection(this.username, { enableExtendedGiftInfo: true }) as ConnectorWithEvents;
+    const eulerApiKey = process.env.EULER_API_KEY?.trim();
+    this.connection = new TikTokLiveConnection(this.username, {
+      enableExtendedGiftInfo: true,
+      ...(eulerApiKey ? { signApiKey: eulerApiKey } : {}),
+    }) as ConnectorWithEvents;
     this.connection.on(WebcastEvent.CHAT, data => this.enqueue("chat", data));
     this.connection.on(WebcastEvent.FOLLOW, data => this.enqueue("event", data, "follow"));
     this.connection.on(WebcastEvent.GIFT, data => { const gift = data as Record<string, unknown>; const details = gift.giftDetails as Record<string, unknown> | undefined; if (details?.giftType === 1 && gift.repeatEnd !== true && gift.repeatEnd !== 1) return; this.enqueue("event", data, "gift"); });
@@ -144,13 +149,26 @@ class AccountRunner {
 
   private async run(): Promise<void> {
     let attempt = 0;
+    const liveCheckSeconds = Math.max(30, Math.ceil(pollMs / 1000));
     while (!this.stopped) {
       this.reconnectRequested = false;
+      this.roomId = "";
+      this.reportStatus("disconnected");
+
       try {
+        // Do not hammer room lookups while a configured creator is offline.
+        // The connector polls live state at a minimum 30-second interval and
+        // the AbortSignal lets account removal/shutdown stop the wait cleanly.
+        await this.connection.waitUntilLive(liveCheckSeconds, this.stopController.signal);
+        if (this.stopped) break;
+
         const state = await this.connection.connect();
         const roomId = String(state.roomId ?? "");
         if (!roomId) throw new Error("TikTok connector did not return a room ID.");
-        if (!this.reconnectRequested) { this.roomId = roomId; this.reportStatus("connected", roomId); }
+        if (!this.reconnectRequested) {
+          this.roomId = roomId;
+          this.reportStatus("connected", roomId);
+        }
         attempt = 0;
         console.info(`TikTok LIVE connected for configured account @${this.username}; room ID hidden.`);
         await new Promise<void>(resolve => {
@@ -160,13 +178,36 @@ class AccountRunner {
         this.reconnectWaiter = null;
       } catch (error) {
         this.roomId = "";
+        if (this.stopped) break;
         this.reportStatus("disconnected");
-        console.warn(`TikTok connection attempt failed for @${this.username}; account may be offline or connector unavailable.`, error instanceof Error ? error.message : "unknown error");
+        const errorName = error instanceof Error ? error.name : "UnknownError";
+        const errorMessage = error instanceof Error ? error.message : "unknown error";
+        const offline = error instanceof UserOfflineError || /isn't online|not online|offline/i.test(errorMessage);
+        const reason = offline ? "account_offline"
+          : /room id|fetchisLive|all sources/i.test(errorMessage) ? "room_lookup_failed"
+          : "connection_failed";
+        const nested = error && typeof error === "object" && "errors" in error
+          ? (error as { errors?: unknown[] }).errors : undefined;
+        const causes = Array.isArray(nested)
+          ? nested.slice(0, 3).map(item => {
+              const value = item instanceof Error ? item.message : String(item);
+              return value.replace(/https?:\/\/\S+/gi, "[url]").replace(/[\r\n]+/g, " ").slice(0, 120);
+            })
+          : [];
+        console.warn("tiktok_live_connection_attempt_failed", JSON.stringify({
+          reason,
+          errorName,
+          message: errorMessage.replace(/https?:\/\/\S+/gi, "[url]").replace(/[\r\n]+/g, " ").slice(0, 160),
+          causes,
+          eulerApiKeyConfigured: Boolean(process.env.EULER_API_KEY?.trim()),
+        }));
       }
+
       if (this.stopped) break;
       attempt++;
+      const retryDelayMs = Math.min(60_000, pollMs * Math.pow(2, Math.min(attempt, 3)));
       await new Promise<void>(resolve => {
-        const timer = setTimeout(() => { this.retryWaiter = null; resolve(); }, pollMs);
+        const timer = setTimeout(() => { this.retryWaiter = null; resolve(); }, retryDelayMs);
         this.retryWaiter = () => { clearTimeout(timer); this.retryWaiter = null; resolve(); };
       });
       try { await this.connection.disconnect(); } catch { /* already disconnected */ }
@@ -178,6 +219,7 @@ class AccountRunner {
     if (this.stopped) return;
     this.stopped = true;
     this.roomId = "";
+    this.stopController.abort(new Error("TikTok account runner stopped."));
     this.reportStatus("disconnected");
     this.reconnectWaiter?.();
     this.retryWaiter?.();

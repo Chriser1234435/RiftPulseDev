@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
+using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -9,6 +10,7 @@ using BeatSaberMarkupLanguage.FloatingScreen;
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
 namespace RiftPulse.Pcvr
 {
@@ -24,6 +26,9 @@ namespace RiftPulse.Pcvr
 
         private FloatingScreen? _panel;
         private TextMeshProUGUI? _text;
+        private TextMeshProUGUI? _lockIcon;
+        private Button? _lockButton;
+        private bool _panelLocked = true;
         private bool _requestInFlight;
         private bool _moveRequested;
         private bool _chatEnabled = true;
@@ -110,16 +115,17 @@ namespace RiftPulse.Pcvr
                 new Vector2(110f, 70f), true, position, rotation, 0f, true);
             if (_panel == null) return false;
 
-            _panel.ShowHandle = true;
+            _panel.ShowHandle = !_panelLocked;
             _panel.HighlightHandle = true;
             DontDestroyOnLoad(_panel.gameObject);
 
+            var root = _panel.GetComponent<RectTransform>();
             var textObject = new GameObject(
                 "RiftPulse World Chat Text",
                 typeof(RectTransform),
                 typeof(TextMeshProUGUI));
             var rect = textObject.GetComponent<RectTransform>();
-            rect.SetParent(_panel.GetComponent<RectTransform>(), false);
+            rect.SetParent(root, false);
             rect.anchorMin = new Vector2(0.5f, 0.5f);
             rect.anchorMax = new Vector2(0.5f, 0.5f);
             rect.pivot = new Vector2(0.5f, 0.5f);
@@ -131,8 +137,79 @@ namespace RiftPulse.Pcvr
             _text.enableWordWrapping = true;
             _text.alignment = TextAlignmentOptions.TopLeft;
             _text.color = new Color(0.91f, 0.93f, 1f, 1f);
-            _text.text = "RIFTPULSE  /  LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages...";
+            _text.richText = true;
+            _text.text = "▣  PCVR  /  RIFTPULSE LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages...";
+
+            CreateLockControl(root);
+            ApplyLockState();
             return true;
+        }
+
+        private void CreateLockControl(RectTransform parent)
+        {
+            var buttonObject = new GameObject(
+                "RiftPulse Chat Panel Lock",
+                typeof(RectTransform),
+                typeof(Image),
+                typeof(Button));
+            var buttonRect = buttonObject.GetComponent<RectTransform>();
+            buttonRect.SetParent(parent, false);
+            buttonRect.anchorMin = new Vector2(1f, 1f);
+            buttonRect.anchorMax = new Vector2(1f, 1f);
+            buttonRect.pivot = new Vector2(1f, 1f);
+            buttonRect.anchoredPosition = new Vector2(-2f, -2f);
+            buttonRect.sizeDelta = new Vector2(8f, 8f);
+
+            var background = buttonObject.GetComponent<Image>();
+            background.color = new Color(0.10f, 0.14f, 0.22f, 0.96f);
+            _lockButton = buttonObject.GetComponent<Button>();
+            _lockButton.onClick.AddListener(ToggleLock);
+
+            var iconObject = new GameObject(
+                "RiftPulse Chat Panel Lock Icon",
+                typeof(RectTransform),
+                typeof(TextMeshProUGUI));
+            var iconRect = iconObject.GetComponent<RectTransform>();
+            iconRect.SetParent(buttonRect, false);
+            iconRect.anchorMin = Vector2.zero;
+            iconRect.anchorMax = Vector2.one;
+            iconRect.offsetMin = Vector2.zero;
+            iconRect.offsetMax = Vector2.zero;
+
+            _lockIcon = iconObject.GetComponent<TextMeshProUGUI>();
+            _lockIcon.fontSize = 3.1f;
+            _lockIcon.alignment = TextAlignmentOptions.Center;
+            _lockIcon.color = Color.white;
+            _lockIcon.text = "🔒";
+        }
+
+        private void ToggleLock()
+        {
+            _panelLocked = !_panelLocked;
+            ApplyLockState();
+            SavePlacement();
+        }
+
+        private void ApplyLockState()
+        {
+            if (_panel == null) return;
+            _panel.ShowHandle = !_panelLocked;
+
+            // Keep the native controller-grab target, but reduce it to a small
+            // grab tab instead of the large white bar shown by the default style.
+            if (!_panelLocked)
+            {
+                var handleField = typeof(FloatingScreen).GetField(
+                    "handle", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                var handle = handleField?.GetValue(_panel) as GameObject;
+                if (handle != null)
+                {
+                    handle.transform.localScale = new Vector3(0.12f, 1.6f, 1f);
+                    handle.transform.localPosition = new Vector3(-48f, 29f, 0f);
+                }
+            }
+
+            if (_lockIcon != null) _lockIcon.text = _panelLocked ? "🔒" : "🔓";
         }
 
         private void LoadPlacement(ref Vector3 position, ref Quaternion rotation)
@@ -143,7 +220,7 @@ namespace RiftPulse.Pcvr
                 var values = File.ReadAllText(PlacementPath).Split(
                     new[] { ' ', '\r', '\n', '\t' },
                     StringSplitOptions.RemoveEmptyEntries);
-                if (values.Length != 7) return;
+                if (values.Length < 7) return;
 
                 var parsed = new float[7];
                 for (var i = 0; i < parsed.Length; i++)
@@ -154,6 +231,7 @@ namespace RiftPulse.Pcvr
 
                 position = new Vector3(parsed[0], parsed[1], parsed[2]);
                 rotation = new Quaternion(parsed[3], parsed[4], parsed[5], parsed[6]);
+                if (values.Length >= 8) _panelLocked = values[7] != "0";
             }
             catch { }
         }
@@ -176,6 +254,7 @@ namespace RiftPulse.Pcvr
                         rotation.y.ToString("R", CultureInfo.InvariantCulture),
                         rotation.z.ToString("R", CultureInfo.InvariantCulture),
                         rotation.w.ToString("R", CultureInfo.InvariantCulture),
+                        _panelLocked ? "1" : "0"
                     }));
             }
             catch { }
@@ -188,6 +267,8 @@ namespace RiftPulse.Pcvr
             Destroy(_panel.gameObject);
             _panel = null;
             _text = null;
+            _lockIcon = null;
+            _lockButton = null;
         }
 
         private async Task RefreshFeed()
@@ -271,7 +352,7 @@ namespace RiftPulse.Pcvr
                 total = viewerMatch.Groups[1].Value;
 
             var output = new StringBuilder();
-            output.AppendLine("RIFTPULSE  /  LIVE CHAT");
+            output.AppendLine("▣  PCVR  /  RIFTPULSE LIVE CHAT");
             output.Append("COMBINED VIEWERS  ").AppendLine(total);
             output.AppendLine("----------------------------");
 
@@ -289,10 +370,11 @@ namespace RiftPulse.Pcvr
                     var message = ReadString(item, "text");
                     if (sender.Length == 0 || message.Length == 0) continue;
                     var provider = ReadString(item, "provider");
-                    var tag = provider == "twitch" ? "TW"
-                        : provider == "youtube" ? "YT"
-                        : provider == "tiktok" ? "TT" : "LIVE";
-                    output.Append('[').Append(tag).Append("] ").Append(Escape(sender, 28)).AppendLine();
+                    var icon = provider == "twitch" ? "<color=#9146FF>●</color>"
+                        : provider == "youtube" ? "<color=#FF0033>▶</color>"
+                        : provider == "tiktok" ? "<color=#25F4EE>♪</color>"
+                        : "<color=#B8C4D8>●</color>";
+                    output.Append(icon).Append(' ').Append(Escape(sender, 28)).AppendLine();
                     output.AppendLine(Escape(message, 115));
                     output.AppendLine();
                     if (++rendered >= 8) break;
