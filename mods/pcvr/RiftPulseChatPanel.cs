@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
@@ -193,13 +193,12 @@ namespace RiftPulse.Pcvr
             }
             if (handle == null) return;
             handle.SetActive(true);
-            // Slim the stock controller grab target into a subtle top tab.
-            handle.transform.localScale = new Vector3(0.42f, 0.14f, 1f);
-            handle.transform.localPosition = new Vector3(0f, 34f, 0f);
+            // Restore stock movable handle, subdued and below the chat text.
+            handle.transform.localPosition = new Vector3(0f, -34f, 0f);
             var handleImage = handle.GetComponent<Image>();
             if (handleImage != null)
             {
-                handleImage.color = new Color(0.20f, 0.24f, 0.31f, 0.70f);
+                handleImage.color = new Color(0.16f, 0.19f, 0.25f, 0.58f);
                 handleImage.raycastTarget = true;
             }
         }

@@ -1,4 +1,4 @@
-﻿#include "main.hpp"
+#include "main.hpp"
 #include "RiftPulseChatPanel.hpp"
 #include "bsml/shared/BSML/FloatingScreen/FloatingScreen.hpp"
 #include "UnityEngine/PrimitiveType.hpp"
@@ -73,7 +73,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.32";
+static constexpr const char* MOD_VERSION = "0.1.33";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -1020,11 +1020,12 @@ static void ApplyWorldChatLockState() {
     handle->SetActive(true);
     auto transform = handle->get_transform();
     if (transform) {
-      transform->set_localScale(UnityEngine::Vector3(0.42f, 0.14f, 1.0f));
-      transform->set_localPosition(UnityEngine::Vector3(0.0f, 34.0f, 0.0f));
+      // Use native full-size controller grab handle (no compressed white square).
+      // Stock movable handle restored and placed below chat content.
+      transform->set_localPosition(UnityEngine::Vector3(0.0f, -34.0f, 0.0f));
     }
     auto* image = handle->GetComponent<UnityEngine::UI::Image*>();
-    if (image) image->set_color(UnityEngine::Color(0.20f, 0.24f, 0.31f, 0.70f));
+    if (image) image->set_color(UnityEngine::Color(0.16f, 0.19f, 0.25f, 0.58f));
   }
 }
 
