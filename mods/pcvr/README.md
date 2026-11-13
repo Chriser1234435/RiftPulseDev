@@ -1,4 +1,4 @@
-RiftPulse PCVR 0.1.25
+RiftPulse PCVR 0.1.26
 # RiftPulse PCVR alpha adapter 0.1.20
 
 PCVR adapter for Beat Saber 1.40.8. Generates a five-digit pairing code, links the installation to your RiftPulse account, syncs Chat/BSR module preferences, and adds a movable world-space RiftPulse chat panel inside gameplay.
