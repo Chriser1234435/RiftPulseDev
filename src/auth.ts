@@ -1,5 +1,4 @@
 import { betterAuth } from "better-auth";
-import { D1Dialect } from "kysely-d1";
 import type { Env } from "./env.ts";
 
 type AuthInstance = any;
@@ -80,11 +79,9 @@ export function createAuth(env: Env): AuthInstance | null {
         ipAddressHeaders: ["cf-connecting-ip", "x-forwarded-for"],
       },
     },
-    database: {
-      dialect: new D1Dialect({ database: env.DB as never }),
-      type: "sqlite",
-      transaction: false,
-    },
+    // Pass the native D1-shaped binding directly. Better Auth then selects its
+    // D1 adapter and D1-safe index introspector instead of generic SQLite PRAGMAs.
+    database: env.DB as never,
     emailAndPassword: {
       enabled: true,
       minPasswordLength: 8,

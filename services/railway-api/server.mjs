@@ -25,6 +25,11 @@ class RemoteD1Database {
     this.token = process.env.CLOUDFLARE_API_TOKEN;
   }
   prepare(sql) { return new RemoteD1Statement(this, sql); }
+  async exec(sql) {
+    const result = await this.query(sql, []);
+    if (!result.success) throw new Error(result.error || "Cloudflare D1 exec failed.");
+    return { count: result.meta?.changes ?? 0, duration: result.meta?.duration ?? 0 };
+  }
   async query(sql, params = []) {
     if (!this.accountId || !this.databaseId || !this.token) {
       return { success: false, results: [], error: "Cloudflare D1 access is not configured." };
