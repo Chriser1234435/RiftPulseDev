@@ -1075,7 +1075,13 @@ export default {
       if (!env.DB) return jsonError(503, "database_unavailable", "Provider storage is not configured.", requestId);
       const provider = disconnectProviderMatch[1] as typeof PROVIDERS[number];
       if (provider === "tiktok") return jsonError(409, "connector_lifecycle_managed_separately", "TikTok bridge lifecycle is managed separately from OAuth connections.", requestId);
-      if (!await disconnectProvider(env.DB, authContext.userId, provider)) return jsonError(503, "provider_store_unavailable", "Could not disconnect provider.", requestId);
+      if (!await disconnectProvider(env.DB, authContext.userId, provider)) return jsonError(503, "provider_store_unavailable", "Could not disconnect provider.", requestId);      if (provider === "youtube") {
+        const cleanup = await env.DB.batch([
+          env.DB.prepare("DELETE FROM youtube_live_chat_cursors WHERE account_id = ?").bind(authContext.userId),
+          env.DB.prepare("DELETE FROM provider_oauth_states WHERE account_id = ? AND provider = 'youtube'").bind(authContext.userId),
+        ]);
+        if (cleanup.some(result => !result.success)) return jsonError(503, "youtube_disconnect_cleanup_failed", "YouTube was disconnected, but pending authorization or chat cursor cleanup failed.", requestId);
+      }
       const health = await env.DB.prepare(
         "UPDATE integration_health SET status = 'disconnected', viewer_count = NULL, viewer_count_observed_at = NULL, observed_at = ?, detail_code = 'user_disconnected' WHERE account_id = ? AND provider = ?",
       ).bind(new Date().toISOString(), authContext.userId, provider).run();

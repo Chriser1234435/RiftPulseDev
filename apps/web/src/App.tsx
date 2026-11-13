@@ -89,6 +89,7 @@ function App() {
   const [selectedProvider, setSelectedProvider] = useState<ProviderKey>("twitch");
   const [tiktokUsername, setTiktokUsername] = useState("");
   const [tiktokSaving, setTiktokSaving] = useState(false);
+  const [youtubeDisconnecting, setYoutubeDisconnecting] = useState(false);
   const [tiktokAccountId, setTiktokAccountId] = useState("");
   const [notice, setNotice] = useState("");
   const [command, setCommand] = useState("!bsr");
@@ -615,6 +616,28 @@ function App() {
       .catch(() => { if (active) setTiktokAccountId(user.id); });
     return () => { active = false; };
   }, [modal, selectedProvider, user?.id]);
+  const disconnectYouTube = async () => {
+    if (youtubeDisconnecting) return;
+    setYoutubeDisconnecting(true);
+    try {
+      const response = await fetch("/api/v1/providers/youtube", {
+        method: "DELETE", credentials: "include",
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error?.message ?? "Could not clear the saved YouTube authorization.");
+      setProviderConnections(current => ({
+        ...current,
+        youtube: { status: "disconnected", displayName: null, connectedAt: null, configured: current.youtube.configured, detailCode: null },
+      }));
+      await refreshProviderConnections();
+      await refreshProviderHealth();
+      flash("YouTube disconnected. Saved authorization and chat cursor cleared.");
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Could not disconnect YouTube.");
+    } finally {
+      setYoutubeDisconnecting(false);
+    }
+  };
   const handleProviderAction = async () => {
     const provider = providers.find(item => item.key === selectedProvider)!;
     const current = providerConnections[selectedProvider];
@@ -1093,6 +1116,7 @@ function App() {
               <div className="field-group"><label htmlFor="tiktok-account-id">RiftPulse account ID for connector setup</label><input id="tiktok-account-id" readOnly value={tiktokAccountId || user?.id || "Available after sign-in"} /><small>The separate Railway connector must use this account ID, the saved username, and the same ingest secret as the API.</small></div>
               <button className="primary-button modal-submit" disabled={tiktokSaving || !user?.id} onClick={() => void saveTikTokSettings()}>{tiktokSaving ? <><RefreshCw size={16} className="spin" /> Saving…</> : <>Save TikTok username <Check size={15} /></>}</button></>}
             <div className="provider-permissions"><div><Check size={15} /> Chat event capability</div><div><Users size={15} /> Viewer count where supported</div><div><LockKeyhole size={15} /> Secure account authorization</div></div>
+            {selectedProvider === "youtube" && <button className="outline-button modal-submit" disabled={youtubeDisconnecting} onClick={() => void disconnectYouTube()}>{youtubeDisconnecting ? <><RefreshCw size={16} className="spin" /> Clearing authorization…</> : <><Unplug size={16} /> Disconnect / clear YouTube authorization</>}</button>}
             {selectedProvider !== "tiktok" && <><button className="primary-button modal-submit" disabled={(providerConnections[selectedProvider].status !== "connected" && ((selectedProvider === "twitch" && !providerConnections.twitch.configured) || (selectedProvider === "youtube" && !providerConnections.youtube.configured))) || (providerConnections[selectedProvider].detailCode === "eventsub_verification_pending")} onClick={() => void handleProviderAction()}>{providerConnections[selectedProvider].status === "connected" ? providerConnections[selectedProvider].detailCode === "eventsub_subscription_pending" || providerConnections[selectedProvider].detailCode === "eventsub_subscription_failed" ? <><Radio size={16} /> Enable chat events</> : providerConnections[selectedProvider].detailCode === "eventsub_verification_pending" ? <><RefreshCw size={16} className="spin" /> Waiting for verification</> : <><Unplug size={16} /> Disconnect account</> : selectedProvider === "twitch" && providerConnections.twitch.configured ? <><Link2 size={16} /> Connect with Twitch</> : selectedProvider === "youtube" && providerConnections.youtube.configured ? <><Link2 size={16} /> Connect with YouTube</>: <>Not configured yet <LockKeyhole size={15} /></>}</button><p className="modal-footnote">{providerConnections[selectedProvider].status === "connected" && selectedProvider === "twitch" && providerConnections[selectedProvider].detailCode === "eventsub_subscription_pending" ? "Twitch is authorized. Enable the signed webhook subscription to receive live chat." : providerConnections[selectedProvider].status === "connected" && selectedProvider === "twitch" && providerConnections[selectedProvider].detailCode === "eventsub_verification_pending" ? "Twitch is validating the webhook endpoint. The status will update after its signed challenge arrives." : providerConnections[selectedProvider].status === "connected" && selectedProvider === "youtube" && providerConnections[selectedProvider].detailCode === "live_chat_polling_pending" ? "YouTube is authorized. Keep Chat enabled and the dashboard visible during a live broadcast; chat and supported events poll automatically." : providerConnections[selectedProvider].status === "connected" ? "Disconnecting clears stored token ciphertext." : "No external account is contacted until you choose an enabled connection action."}</p></>}
           </>}
           {modal === "settings" && <><div className="modal-icon purple-modal"><Settings2 size={22} /></div><div className="modal-eyebrow">PREFERENCES</div><h2 id="modal-title">Tune your setup.</h2><p className="modal-copy">Module switches and the BSR command save to your account. Provider OAuth and device preferences remain gated until their integrations are complete.</p>
