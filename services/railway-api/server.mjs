@@ -40,9 +40,10 @@ class RemoteD1Database {
       const error = String(payload?.errors?.[0]?.message || result?.error || `D1 query failed (${response.status}).`);
       // Log only a coarse SQL operation/table signature: never statement text or bound values.
       const normalizedSql = sql.trim().replace(/\\s+/g, " ");
-      const operation = normalizedSql.match(/^(SELECT|INSERT|UPDATE|DELETE|REPLACE|PRAGMA)\\b/i)?.[1]?.toUpperCase() ?? "OTHER";
-      const table = normalizedSql.match(/\\b(?:FROM|INTO|UPDATE|JOIN)\\s+["`]?([A-Za-z_][A-Za-z0-9_]*)/i)?.[1] ?? "unknown";
-      console.error("cloudflare_d1_query_failed", JSON.stringify({ httpStatus: response.status, operation, table, error: error.slice(0, 220) }));
+      const operation = normalizedSql.match(/^(SELECT|INSERT|UPDATE|DELETE|REPLACE|PRAGMA|WITH|CREATE|ALTER|DROP|BEGIN|COMMIT|ROLLBACK)\\b/i)?.[1]?.toUpperCase() ?? "OTHER";
+      const table = normalizedSql.match(/\\b(?:FROM|INTO|UPDATE|JOIN|TABLE)\\s+["`]?([A-Za-z_][A-Za-z0-9_]*)/i)?.[1] ?? "unknown";
+      const shape = normalizedSql.replace(/'(?:''|[^'])*'/g, "'?'").slice(0, 180);
+      console.error("cloudflare_d1_query_failed", JSON.stringify({ httpStatus: response.status, operation, table, shape, error: error.slice(0, 220) }));
       return { success: false, results: [], error };
     }
     return { success: true, results: result?.results ?? [], meta: result?.meta ?? {} };
