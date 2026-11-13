@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { TikTokLiveConnection, UserOfflineError, WebcastEvent } from "tiktok-live-connector";
+import { IsLiveRouteConfig, RoomIdRouteConfig, TikTokLiveConnection, UserOfflineError, WebcastEvent } from "tiktok-live-connector";
 
 if (process.env.RIFTPULSE_CONNECTOR_DISABLED === "true") {
   console.info("TikTok connector disabled by configuration; no accounts will be connected.");
@@ -26,15 +26,8 @@ const statusUrl = new URL(accountsUrl);
 statusUrl.pathname = statusUrl.pathname.replace("/accounts", "/status");
 const secret = process.env.TIKTOK_CONNECTOR_INGEST_SECRET!;
 if (secret.length < 32) throw new Error("TIKTOK_CONNECTOR_INGEST_SECRET must be at least 32 characters.");
-const signApiKey = process.env.SIGN_API_KEY?.trim();
-if (!signApiKey) {
-  // Euler Stream's lookup fallback requires its own API key. Do not invoke
-  // an unavailable fallback on every status check; retain TikTok's direct
-  // HTML and API lookup sources and report their precise failure causes.
-  IsLiveRouteConfig.skipFetchRoomIdFromEulerRoute = true;
-  RoomIdRouteConfig.skipFetchRoomIdFromEulerRoute = true;
-  console.info("TikTok Euler lookup fallback disabled: SIGN_API_KEY is not configured; direct TikTok lookups remain enabled.");
-}
+// The connector receives EULER_API_KEY in its constructor below via the
+// supported signApiKey option. Do not mutate the library's global route config.
 const pollMs = Math.max(10_000, Number(process.env.TIKTOK_ACCOUNT_POLL_MS) || 10_000);
 const maxAccounts = Math.max(1, Math.min(50, Number(process.env.TIKTOK_MAX_ACTIVE_ACCOUNTS) || 10));
 
