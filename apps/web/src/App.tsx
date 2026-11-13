@@ -83,6 +83,7 @@ function App() {
     youtube: { status: "disconnected", displayName: null, connectedAt: null, configured: false, detailCode: null },
     tiktok: { status: "disconnected", displayName: null, connectedAt: null, configured: false, detailCode: "unofficial_connector_not_configured" },
   });
+  const [twitchEventSubAutoAttempted, setTwitchEventSubAutoAttempted] = useState(false);
   const [modal, setModal] = useState<"pair" | "provider" | "settings" | "help" | "auth" | null>(null);
   const [pairCode, setPairCode] = useState("");
   const [pairStatus, setPairStatus] = useState<"idle" | "checking" | "success" | "error">("idle");
@@ -391,7 +392,40 @@ function App() {
     };
   }, [user?.id, refreshProviderConnections, refreshProviderHealth]);
 
+  // Automatically subscribe once a Twitch OAuth connection is persisted. This
+  // also retries setup for already-connected accounts with pending/failed health.
+  useEffect(() => {
+    if (!user?.id) {
+      setTwitchEventSubAutoAttempted(false);
+      return;
+    }
+    const twitch = providerConnections.twitch;
+    if (twitch.status !== "connected"
+      || (twitch.detailCode !== "eventsub_subscription_pending" && twitch.detailCode !== "eventsub_subscription_failed")
+      || twitchEventSubAutoAttempted) return;
 
+    setTwitchEventSubAutoAttempted(true);
+    let active = true;
+    void (async () => {
+      try {
+        const response = await fetch("/api/v1/providers/twitch/eventsub/subscribe", {
+          method: "POST", credentials: "include",
+          headers: { "content-type": "application/json" }, body: "{}",
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error?.message ?? "EventSub setup was rejected.");
+        await refreshProviderConnections();
+        await refreshProviderHealth();
+        if (active) flash(data.status === "subscribed"
+          ? "Twitch EventSub is enabled. Chat and stream events are subscribed."
+          : "Twitch EventSub subscriptions were requested. Waiting for Twitch webhook verification.");
+      } catch (error) {
+        if (active) flash(error instanceof Error ? error.message : "Could not enable Twitch EventSub.");
+      }
+    })();
+    return () => { active = false; };
+  }, [user?.id, providerConnections.twitch.status, providerConnections.twitch.detailCode,
+      twitchEventSubAutoAttempted, refreshProviderConnections, refreshProviderHealth]);
 
   useEffect(() => {
     if (!user?.id || !enabled.chat) return;
@@ -553,25 +587,6 @@ function App() {
       void refreshProviderConnections();
       void refreshProviderHealth();
       void refreshChat();
-      if (provider === "twitch" && status === "connected") {
-        void (async () => {
-          try {
-            const response = await fetch("/api/v1/providers/twitch/eventsub/subscribe", {
-              method: "POST", credentials: "include",
-              headers: { "content-type": "application/json" }, body: "{}",
-            });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error?.message ?? "EventSub setup was rejected.");
-            await refreshProviderConnections();
-            await refreshProviderHealth();
-            flash(data.status === "subscribed"
-              ? "Twitch EventSub is enabled. Chat and stream events are subscribed."
-              : "Twitch EventSub subscriptions were requested. Waiting for Twitch webhook verification.");
-          } catch (error) {
-            flash(error instanceof Error ? error.message : "Could not enable Twitch EventSub.");
-          }
-        })();
-      }
     }
     window.requestAnimationFrame(() => {
       document.getElementById("integrations")?.scrollIntoView({ behavior: "smooth", block: "start" });
