@@ -112,13 +112,16 @@ function websocketBuffer(data) {
   return Buffer.from(data);
 }
 
-function makeEulerUrl(username, apiKey) {
+export function makeEulerUrl(username, apiKey) {
   const url = new URL("wss://ws.eulerstream.com");
   url.searchParams.set("uniqueId", username);
   url.searchParams.set("apiKey", apiKey);
   // rawMessages forwards the original TikTok Webcast protobuf frames.
   // The decoder below turns those frames back into typed Webcast events.
   url.searchParams.set("features.rawMessages", "true");
+  // The raw-frame decoder bundled with the protocol package uses the v3 schema.
+  // Euler defaults hosted sockets to v2 unless this is explicitly set.
+  url.searchParams.set("features.schemaVersion", "v3");
   url.searchParams.set("features.normalizeUniqueId", "true");
   url.searchParams.set("features.bundleEvents", "true");
   url.searchParams.set("features.closeInactiveWebSocketAfter", "900");
@@ -194,8 +197,10 @@ export function startTikTokEulerConnector({ worker, env }) {
 
     enqueueFrame(data) {
       if (this.stopped) return;
-      this.queue = this.queue.then(() => this.handleFrame(data)).catch(() => {
-        console.warn("Euler TikTok frame could not be decoded; frame details suppressed.");
+      this.queue = this.queue.then(() => this.handleFrame(data)).catch(error => {
+        const reason = error instanceof Error ? (error.name + ": " + error.message) : "unknown decoder error";
+        const safeReason = reason.split(/base64|use this to create an issue/i)[0].replace(/[\r\n]+/g, " ").slice(0, 180);
+        console.warn("Euler TikTok frame could not be decoded (" + safeReason + ").");
       });
     }
 

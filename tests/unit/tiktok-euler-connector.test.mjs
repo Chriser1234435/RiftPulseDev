@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { compactTikTokPayload, eventForMessage } from "../../services/railway-api/tiktok-euler.mjs";
+import { compactTikTokPayload, eventForMessage, makeEulerUrl } from "../../services/railway-api/tiktok-euler.mjs";
 
 test("compacts a TikTok chat frame to fields used by RiftPulse", () => {
   const compact = compactTikTokPayload({
@@ -51,4 +51,12 @@ test("maps the main Euler raw protobuf event types to RiftPulse ingest types", (
   assert.equal(eventForMessage("WebcastSocialMessage", { common: { displayText: { key: "follow_toast" } } }).eventName, "follow");
   assert.equal(eventForMessage("WebcastSocialMessage", { common: { displayText: { key: "share_toast" } } }).eventName, "share");
   assert.equal(eventForMessage("WebcastSocialMessage", { common: { displayText: { key: "other" } } }), null);
+});
+
+test("requests Euler raw frames using the same v3 schema as its decoder", () => {
+  const url = makeEulerUrl("streamer_name", "test-api-key");
+  assert.equal(url.searchParams.get("features.rawMessages"), "true");
+  assert.equal(url.searchParams.get("features.schemaVersion"), "v3");
+  assert.equal(url.searchParams.get("uniqueId"), "streamer_name");
+  assert.equal(url.searchParams.get("apiKey"), "test-api-key");
 });
