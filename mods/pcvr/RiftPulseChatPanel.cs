@@ -25,6 +25,7 @@ namespace RiftPulse.Pcvr
         private static RiftPulseChatPanel? _instance;
 
         private FloatingScreen? _panel;
+        private TextMeshProUGUI? _title;
         private TextMeshProUGUI? _text;
         private TextMeshProUGUI? _handleLabel;
         private static Sprite? _whiteSprite;
@@ -82,13 +83,11 @@ namespace RiftPulse.Pcvr
 
             if (_panel == null && !CreatePanel()) return;
 
+            var pulse = (Mathf.Sin(Time.realtimeSinceStartup * 2.2f) + 1f) * 0.5f;
+            if (_title != null)
+                _title.color = Color.Lerp(new Color(0.28f, 0.70f, 1f, 1f), new Color(0.72f, 0.48f, 1f, 1f), pulse);
             if (_handleLabel != null)
-            {
-                var pulse = (Mathf.Sin(Time.realtimeSinceStartup * 2.2f) + 1f) * 0.5f;
-                _handleLabel.color = Color.Lerp(
-                    new Color(0.20f, 0.62f, 0.82f, 1f),
-                    new Color(0.55f, 0.96f, 1f, 1f), pulse);
-            }
+                _handleLabel.color = Color.Lerp(new Color(0.20f, 0.62f, 0.82f, 1f), new Color(0.55f, 0.96f, 1f, 1f), pulse);
             if (Time.realtimeSinceStartup >= _nextPollAt && !_requestInFlight)
             {
                 _nextPollAt = Time.realtimeSinceStartup + 3.0f;
@@ -100,6 +99,43 @@ namespace RiftPulse.Pcvr
                 _nextSaveAt = Time.realtimeSinceStartup + 1.5f;
                 SavePlacement();
             }
+        }
+
+        private static TMP_FontAsset? ResolvePanelFont()
+        {
+            var font = TMP_Settings.defaultFontAsset;
+            if (font != null) return font;
+
+            var fonts = Resources.FindObjectsOfTypeAll<TMP_FontAsset>();
+            for (var i = 0; i < fonts.Length; i++)
+                if (fonts[i] != null) return fonts[i];
+            return null;
+        }
+
+        private TextMeshProUGUI CreatePanelText(
+            RectTransform parent, string objectName, Vector2 position, Vector2 size,
+            float fontSize, TextAlignmentOptions alignment)
+        {
+            var textObject = new GameObject(objectName, typeof(RectTransform), typeof(TextMeshProUGUI));
+            var rect = textObject.GetComponent<RectTransform>();
+            rect.SetParent(parent, false);
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.anchoredPosition = position;
+            rect.sizeDelta = size;
+
+            var text = textObject.GetComponent<TextMeshProUGUI>();
+            var font = ResolvePanelFont();
+            if (font != null) text.font = font;
+            text.fontSize = fontSize;
+            text.enableWordWrapping = true;
+            text.alignment = alignment;
+            text.color = new Color(0.91f, 0.93f, 1f, 1f);
+            text.richText = true;
+            text.raycastTarget = false;
+            textObject.SetActive(true);
+            return text;
         }
 
         private bool CreatePanel()
@@ -126,57 +162,25 @@ namespace RiftPulse.Pcvr
             DontDestroyOnLoad(_panel.gameObject);
 
             var root = _panel.GetComponent<RectTransform>();
-            var textObject = new GameObject(
-                "RiftPulse World Chat Text",
-                typeof(RectTransform),
-                typeof(TextMeshProUGUI));
-            var rect = textObject.GetComponent<RectTransform>();
-            rect.SetParent(root, false);
-            rect.anchorMin = new Vector2(0.5f, 0.5f);
-            rect.anchorMax = new Vector2(0.5f, 0.5f);
-            rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.anchoredPosition = new Vector2(0f, -4f);
-            rect.sizeDelta = new Vector2(102f, 55f);
+            _title = CreatePanelText(root, "RiftPulse Pulsing Rift Header",
+                new Vector2(0f, 26f), new Vector2(90f, 8.5f), 5.2f, TextAlignmentOptions.Center);
+            _title.text = "<b>PULSING RIFT</b>";
+            _title.enableWordWrapping = false;
 
-            _text = textObject.GetComponent<TextMeshProUGUI>();
-            _text.fontSize = 2.45f;
-            _text.enableWordWrapping = true;
-            _text.alignment = TextAlignmentOptions.TopLeft;
-            _text.color = new Color(0.91f, 0.93f, 1f, 1f);
-            _text.richText = true;
-            _text.text = "PCVR  /  RIFTPULSE LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages...";
+            _text = CreatePanelText(root, "RiftPulse PCVR Live Chat Feed",
+                new Vector2(0f, -5f), new Vector2(104f, 49f), 2.45f, TextAlignmentOptions.TopLeft);
+            _text.text = "PCVR  /  LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages...";
 
+            _handleLabel = CreatePanelText(root, "RiftPulse PCVR Drag Hint",
+                new Vector2(0f, -33f), new Vector2(28f, 3.5f), 1.65f, TextAlignmentOptions.Center);
+            _handleLabel.text = "DRAG TO MOVE";
+            _handleLabel.enableWordWrapping = false;
             CreatePlatformMark(root);
-            CreatePulsingRiftLabel(root);
             ApplyGrabHandleStyle();
             return true;
         }
 
-        private void CreatePulsingRiftLabel(RectTransform parent)
-        {
-            var labelObject = new GameObject(
-                "RiftPulse Pulsing Rift Grab Label",
-                typeof(RectTransform),
-                typeof(TextMeshProUGUI));
-            var rect = labelObject.GetComponent<RectTransform>();
-            rect.SetParent(parent, false);
-            rect.anchorMin = new Vector2(0.5f, 0.5f);
-            rect.anchorMax = new Vector2(0.5f, 0.5f);
-            rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.anchoredPosition = new Vector2(0f, -33.5f);
-            rect.sizeDelta = new Vector2(29f, 5f);
-
-            _handleLabel = labelObject.GetComponent<TextMeshProUGUI>();
-            _handleLabel.font = _text != null ? _text.font : null;
-            _handleLabel.fontSize = 2.6f;
-            _handleLabel.alignment = TextAlignmentOptions.Center;
-            _handleLabel.enableWordWrapping = false;
-            _handleLabel.richText = true;
-            _handleLabel.raycastTarget = false;
-            _handleLabel.color = new Color(0.34f, 0.88f, 1f, 1f);
-            _handleLabel.text = "<b>PULSING RIFT</b>";
-        }
-                private void CreatePlatformMark(RectTransform parent)
+        private void CreatePlatformMark(RectTransform parent)
         {
             // A small, font-independent monitor mark distinguishes the PCVR panel.
             CreateLockPart(parent, "RiftPulse PCVR Monitor Top", new Vector2(6.5f, 0.8f), new Vector2(-47f, 30f));
@@ -228,32 +232,24 @@ namespace RiftPulse.Pcvr
             }
             if (handle == null) return;
 
-            // Keep BSML's real pointer/drag component. Replace only its white
-            // renderer with a capsule child and give the native handle a matching hitbox.
+            // Keep BSML's native controller drag component and its visible white bar.
+            // Hide no native renderers: the collider alone is not a visible grab handle.
             handle.SetActive(true);
             handle.transform.localPosition = new Vector3(0f, -33.5f, 0f);
             handle.transform.localRotation = Quaternion.identity;
             handle.transform.localScale = Vector3.one;
 
             var nativeRenderer = handle.GetComponent<MeshRenderer>();
-            if (nativeRenderer != null) nativeRenderer.enabled = false;
+            if (nativeRenderer != null)
+            {
+                nativeRenderer.enabled = true;
+                nativeRenderer.material.color = Color.white;
+            }
 
             var hitBox = handle.GetComponent<BoxCollider>();
             if (hitBox == null) hitBox = handle.AddComponent<BoxCollider>();
             hitBox.center = Vector3.zero;
             hitBox.size = new Vector3(30f, 4.5f, 4.5f);
-
-            var capsule = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            capsule.name = "RiftPulse Pulsing Rift Rounded Grab Grip";
-            capsule.transform.SetParent(handle.transform, false);
-            capsule.transform.localPosition = Vector3.zero;
-            capsule.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
-            capsule.transform.localScale = new Vector3(4.5f, 30f, 4.5f);
-            var capsuleCollider = capsule.GetComponent<Collider>();
-            if (capsuleCollider != null) Destroy(capsuleCollider);
-            var capsuleRenderer = capsule.GetComponent<MeshRenderer>();
-            if (capsuleRenderer != null)
-                capsuleRenderer.material.color = new Color(0.035f, 0.12f, 0.18f, 0.96f);
         }
 
         private void LoadPlacement(ref Vector3 position, ref Quaternion rotation)
@@ -310,6 +306,7 @@ namespace RiftPulse.Pcvr
             if (savePlacement) SavePlacement();
             Destroy(_panel.gameObject);
             _panel = null;
+            _title = null;
             _text = null;
             _handleLabel = null;
         }
@@ -417,7 +414,7 @@ namespace RiftPulse.Pcvr
                 total = viewerMatch.Groups[1].Value;
 
             var output = new StringBuilder();
-            output.AppendLine("PCVR  /  RIFTPULSE LIVE CHAT");
+            output.AppendLine("PCVR  /  LIVE CHAT");
             output.Append("COMBINED VIEWERS  ").AppendLine(total);
             output.AppendLine("----------------------------");
 

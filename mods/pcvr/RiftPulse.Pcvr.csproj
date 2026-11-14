@@ -6,7 +6,7 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AssemblyName>RiftPulse.Pcvr</AssemblyName>
     <RootNamespace>RiftPulse.Pcvr</RootNamespace>
-    <Version>0.1.28</Version>
+    <Version>0.1.30</Version>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Plugin.cs" />
@@ -57,6 +57,10 @@
     </Reference>
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>C:\Users\chris\BSManager\BSInstances\1.40.8\Beat Saber_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>C:\Users\chris\BSManager\BSInstances\1.40.8\Beat Saber_Data\Managed\UnityEngine.PhysicsModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
