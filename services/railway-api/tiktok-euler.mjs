@@ -367,10 +367,16 @@ export function startTikTokEulerConnector({ worker, env }) {
         if (this.stopped) break;
         this.attempt += 1;
         const offlineStream = this.lastCloseCode === 4404 || this.lastCloseCode === 4005;
-        const maxDelay = offlineStream ? 1_800_000 : 300_000;
+        const quotaRejected = this.lastCloseCode === 4429;
+        const maxDelay = offlineStream || quotaRejected ? 1_800_000 : 300_000;
         const baseDelay = Math.min(maxDelay, 5_000 * (2 ** Math.min(this.attempt, 12)));
-        // Spread the retry wave so a rate-limited batch doesn't hit Euler again together.
-        const delay = Math.min(maxDelay, Math.round(baseDelay * (0.75 + Math.random() * 0.5)));
+        // Offline creators and quota/cap rejects must hold the full 30-minute
+        // cooldown; only transient network failures use shorter jittered retries.
+        const delay = offlineStream || quotaRejected
+          ? maxDelay
+          : Math.min(maxDelay, Math.round(baseDelay * (0.75 + Math.random() * 0.5)));
+        console.info("Euler TikTok retry scheduled for @" + this.username + " in "
+          + Math.round(delay / 60_000) + " minute(s) (close code " + this.lastCloseCode + ").");
         await this.wait(delay);
       }
       await this.queue;
