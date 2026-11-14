@@ -81,7 +81,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.39";
+static constexpr const char* MOD_VERSION = "0.1.42";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -115,6 +115,13 @@ struct WorldChatPanelSettings {
 };
 static WorldChatPanelSettings worldChatSettings;
 static bool worldChatSettingsLoaded = false;
+// Snapshot headset pose when settings opens. Slider callbacks use this fixed frame,
+// so turning the headset while adjusting values cannot drag the panel along.
+static bool worldChatSettingsPoseCaptured = false;
+static UnityEngine::Vector3 worldChatSettingsCameraPosition;
+static UnityEngine::Vector3 worldChatSettingsCameraRight;
+static UnityEngine::Vector3 worldChatSettingsCameraUp;
+static UnityEngine::Vector3 worldChatSettingsCameraForward;
 static void LoadWorldChatSettings();
 static void SaveWorldChatSettings();
 static void SetWorldChatPanelSetting(int field, float value);
@@ -1165,12 +1172,26 @@ static void ApplyWorldChatSettingsToPanel() {
       worldChatSettings.width, worldChatSettings.height));
 
   auto camera = UnityEngine::Camera::get_main();
-  if (camera && camera->get_transform()) {
+  UnityEngine::Vector3 cameraPosition;
+  UnityEngine::Vector3 right;
+  UnityEngine::Vector3 up;
+  UnityEngine::Vector3 forward;
+  bool havePose = false;
+  if (worldChatSettingsPoseCaptured) {
+    cameraPosition = worldChatSettingsCameraPosition;
+    right = worldChatSettingsCameraRight;
+    up = worldChatSettingsCameraUp;
+    forward = worldChatSettingsCameraForward;
+    havePose = true;
+  } else if (camera && camera->get_transform()) {
     auto cameraTransform = camera->get_transform();
-    const auto cameraPosition = cameraTransform->get_position();
-    const auto up = cameraTransform->get_up();
-    const auto right = cameraTransform->get_right();
-    const auto forward = cameraTransform->get_forward();
+    cameraPosition = cameraTransform->get_position();
+    up = cameraTransform->get_up();
+    right = cameraTransform->get_right();
+    forward = cameraTransform->get_forward();
+    havePose = true;
+  }
+  if (havePose) {
     UnityEngine::Vector3 position(
         cameraPosition.x + right.x * worldChatSettings.x + up.x * worldChatSettings.y + forward.x * worldChatSettings.z,
         cameraPosition.y + right.y * worldChatSettings.x + up.y * worldChatSettings.y + forward.y * worldChatSettings.z,
@@ -1243,6 +1264,7 @@ static void TrackSettingsMenuObject(UnityEngine::GameObject* object) {
 
 static void CloseChatPanelSettings() {
   if (!chatPanelSettingsOpen) return;
+  worldChatSettingsPoseCaptured = false;
   for (auto* object : settingsMenuObjects) {
     if (object) UnityEngine::Object::Destroy(object);
   }
@@ -1256,6 +1278,17 @@ static void CloseChatPanelSettings() {
 static void ShowChatPanelSettings() {
   if (!mainMenuRoot || chatPanelSettingsOpen) return;
   LoadWorldChatSettings();
+  auto camera = UnityEngine::Camera::get_main();
+  if (camera && camera->get_transform()) {
+    auto transform = camera->get_transform();
+    worldChatSettingsCameraPosition = transform->get_position();
+    worldChatSettingsCameraRight = transform->get_right();
+    worldChatSettingsCameraUp = transform->get_up();
+    worldChatSettingsCameraForward = transform->get_forward();
+    worldChatSettingsPoseCaptured = true;
+  } else {
+    worldChatSettingsPoseCaptured = false;
+  }
   for (auto* object : mainMenuObjects) {
     if (object) object->SetActive(false);
   }
