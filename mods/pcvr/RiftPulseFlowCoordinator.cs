@@ -19,7 +19,7 @@ namespace RiftPulse.Pcvr
     {
         private const string ApiBase = "https://app.riftpulse.me/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.1.35";
+        private const string ModVersion = "0.1.36";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 
@@ -147,12 +147,6 @@ namespace RiftPulse.Pcvr
                 ModulePreviewStatus = "Could not save preview switches locally. Check RiftPulse folder permissions.";
                 RefreshUi();
             }
-        }
-
-        [UIAction("open-chat-settings")]
-        public void OpenChatPanelSettings()
-        {
-            RiftPulseFlowCoordinator.ShowChatPanelSettings();
         }
 
         [UIAction("toggle-chat")]
@@ -354,6 +348,12 @@ namespace RiftPulse.Pcvr
 
         internal static string DeviceCredential => LoadOrCreateDeviceCredential();
 
+        [UIAction("open-chat-settings")]
+        public void OpenChatPanelSettings()
+        {
+            RiftPulseFlowCoordinator.ShowChatPanelSettings();
+        }
+
         [UIAction("move-chat-panel")]
         public void MoveChatPanel()
         {
@@ -361,11 +361,7 @@ namespace RiftPulse.Pcvr
             ModulePreviewStatus = "The 3D chat panel will reposition in front of your view when gameplay starts or resumes.";
             RefreshUi();
         }
-        [UIAction("open-chat-settings")]
-        public void OpenChatPanelSettings()
-        {
-            RiftPulseChatSettingsFlowCoordinator.Present();
-        }
+
         private static string LoadOrCreateDeviceId()
         {
             var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RiftPulse");

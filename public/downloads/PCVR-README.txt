@@ -1,4 +1,4 @@
-RiftPulse PCVR 0.1.35
+RiftPulse PCVR 0.1.36
 Windows / Beat Saber PCVR 1.40.8
 
 INSTALL:

@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$version = '0.1.35'
+$version = '0.1.36'
 $project = Join-Path $root 'mods\pcvr\RiftPulse.Pcvr.csproj'
 $manifestPath = Join-Path $root 'mods\pcvr\manifest.json'
 $built = Join-Path $root 'mods\pcvr\bin\Release\net472\RiftPulse.Pcvr.dll'
@@ -24,6 +24,16 @@ $bsmlPath = Join-Path $root 'mods\pcvr\pairing.bsml'
 $controllerPath = Join-Path $root 'mods\pcvr\RiftPulseFlowCoordinator.cs'
 $bsmlText = Get-Content $bsmlPath -Raw
 $controllerText = Get-Content $controllerPath -Raw
+$projectText = Get-Content $project -Raw
+if ($controllerText -notmatch ('ModVersion\s*=\s*"' + [regex]::Escape($version) + '"')) {
+    throw "Pairing controller ModVersion does not match release version $version."
+}
+if ($projectText -notmatch ('<Version>' + [regex]::Escape($version) + '</Version>')) {
+    throw "PCVR project assembly version does not match release version $version."
+}
+if ([regex]::Matches($bsmlText, 'id="customizeChatPanelButton"').Count -ne 1) {
+    throw 'PCVR menu must have exactly one CUSTOMIZE CHAT PANEL button.'
+}
 foreach ($componentId in @('pairingCodeText', 'statusText', 'connectButton', 'customizeChatPanelButton', 'chatToggleButton', 'bsrToggleButton', 'modulePreviewStatus')) {
     if ($bsmlText -notmatch ('id="' + [regex]::Escape($componentId) + '"')) {
         throw "BSML component ID missing: $componentId"
@@ -94,7 +104,7 @@ Copy-Item (Join-Path $downloads 'PCVR-README.txt') (Join-Path $stage 'README.txt
 $versionedZip = Join-Path $downloads "RiftPulse.Pcvr-$version.zip"
 $stableZip = Join-Path $downloads 'RiftPulse.Pcvr.zip'
 foreach ($zip in @($versionedZip, $stableZip)) {
-    if (Test-Path $zip) { Remove-Item $zip -Force }
+    if (Test-Path -LiteralPath $zip -PathType Leaf) { Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue }
 }
 Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $versionedZip -CompressionLevel Optimal
 Copy-Item $versionedZip $stableZip -Force
