@@ -316,9 +316,12 @@ export function startTikTokEulerConnector({ worker, env }) {
           if (done) return;
           done = true;
           if (this.socket === socket) this.socket = null;
+          this.lastCloseCode = code;
           // Surface Euler's connection-cap rejection as an actionable provider error.
           void this.reportStatus(code === 4429 ? "error" : "disconnected");
-          if (code === 4404 || code === 4005) this.attempt = Math.max(this.attempt, 3);
+          // Offline/ended streams should back off up to 30 minutes, not reconnect
+          // every few minutes and consume the shared daily signing quota.
+          if (code === 4404 || code === 4005) this.attempt = Math.max(this.attempt, 4);
           if (code === 4429) this.attempt = Math.max(this.attempt, 5);
           resolve();
         };
@@ -362,9 +365,11 @@ export function startTikTokEulerConnector({ worker, env }) {
         await this.connectOnce();
         if (this.stopped) break;
         this.attempt += 1;
-        const baseDelay = Math.min(300_000, 5_000 * (2 ** Math.min(this.attempt, 6)));
+        const offlineStream = this.lastCloseCode === 4404 || this.lastCloseCode === 4005;
+        const maxDelay = offlineStream ? 1_800_000 : 300_000;
+        const baseDelay = Math.min(maxDelay, 5_000 * (2 ** Math.min(this.attempt, 12)));
         // Spread the retry wave so a rate-limited batch doesn't hit Euler again together.
-        const delay = Math.min(300_000, Math.round(baseDelay * (0.75 + Math.random() * 0.5)));
+        const delay = Math.min(maxDelay, Math.round(baseDelay * (0.75 + Math.random() * 0.5)));
         await this.wait(delay);
       }
       await this.queue;
