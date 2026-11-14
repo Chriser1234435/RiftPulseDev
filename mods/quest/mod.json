@@ -5,7 +5,7 @@
     "id":  "riftpulse",
     "modloader":  "Scotland2",
     "author":  "RiftPulseDev",
-    "version":  "0.1.40",
+    "version":  "0.1.41",
     "packageId":  "com.beatgames.beatsaber",
     "packageVersion":  "1.40.8_7379",
     "description":  "RiftPulse Quest client with saved X/Y/Z position, width, height, slider/stepper controls, and a movable world-space chat panel for Beat Saber 1.40.8; chat panel feed rendering fixes",
@@ -28,7 +28,7 @@
                          {
                              "downloadIfMissing":  "https://github.com/Fernthedev/paperlog/releases/download/v4.8.0/paper2_scotland2.qmod",
                              "id":  "paper2_scotland2",
-                             "version":  "^4.6.1"
+                             "version":  "=4.8.0"
                          }
                      ],
     "modFiles":  [

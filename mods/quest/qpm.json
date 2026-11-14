@@ -6,7 +6,7 @@
     "info":  {
                  "name":  "RiftPulse",
                  "id":  "riftpulse",
-                 "version":  "0.1.39",
+                 "version":  "0.1.41",
                  "url":  "https://app.riftpulse.me",
                  "additionalData":  {
                                         "overrideSoName":  "libriftpulse.so",
@@ -79,7 +79,7 @@
                          },
                          {
                              "id":  "paper2_scotland2",
-                             "versionRange":  "^4.6.1",
+                             "versionRange":  "=4.8.0",
                              "additionalData":  {
 
                                                 }
