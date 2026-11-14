@@ -17,7 +17,7 @@
         <text text="Messages and supported events from your connected platforms." font-size="2.8" align="Center"/>
         <button id="chatToggleButton" text="CHAT MODULE: OFF" on-click="toggle-chat"/>
       <button text="MOVE CHAT PANEL TO VIEW" on-click="move-chat-panel"/>
-      <button text="CUSTOMIZE CHAT PANEL" on-click="open-chat-settings"/>
+      <button id="customizeChatPanelButton" text="CUSTOMIZE CHAT PANEL" on-click="open-chat-settings"/>
       </vertical>
     </horizontal>
     <horizontal bg="round-rect-panel" pad-left="6" pad-right="6" pad-top="5" pad-bottom="5">

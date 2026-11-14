@@ -24,7 +24,7 @@ $bsmlPath = Join-Path $root 'mods\pcvr\pairing.bsml'
 $controllerPath = Join-Path $root 'mods\pcvr\RiftPulseFlowCoordinator.cs'
 $bsmlText = Get-Content $bsmlPath -Raw
 $controllerText = Get-Content $controllerPath -Raw
-foreach ($componentId in @('pairingCodeText', 'statusText', 'connectButton', 'chatToggleButton', 'bsrToggleButton', 'modulePreviewStatus')) {
+foreach ($componentId in @('pairingCodeText', 'statusText', 'connectButton', 'customizeChatPanelButton', 'chatToggleButton', 'bsrToggleButton', 'modulePreviewStatus')) {
     if ($bsmlText -notmatch ('id="' + [regex]::Escape($componentId) + '"')) {
         throw "BSML component ID missing: $componentId"
     }
