@@ -1,11 +1,11 @@
-{
+﻿{
     "$schema":  "https://raw.githubusercontent.com/Lauriethefish/QuestPatcher.QMod/refs/heads/main/QuestPatcher.QMod/Resources/qmod.schema.json",
     "_QPVersion":  "1.2.0",
     "name":  "RiftPulse",
     "id":  "riftpulse",
     "modloader":  "Scotland2",
     "author":  "RiftPulseDev",
-    "version":  "0.1.39",
+    "version":  "0.1.41",
     "packageId":  "com.beatgames.beatsaber",
     "packageVersion":  "1.40.8_7379",
     "description":  "RiftPulse Quest client with saved X/Y/Z position, width, height, slider/stepper controls, and a movable world-space chat panel for Beat Saber 1.40.8",

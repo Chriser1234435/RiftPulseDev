@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
     <LangVersion>latest</LangVersion>
@@ -6,7 +6,7 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AssemblyName>RiftPulse.Pcvr</AssemblyName>
     <RootNamespace>RiftPulse.Pcvr</RootNamespace>
-    <Version>0.1.33</Version>
+    <Version>0.1.37</Version>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Plugin.cs" />
@@ -68,3 +68,4 @@
     </Reference>
   </ItemGroup>
 </Project>
+
