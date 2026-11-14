@@ -19,7 +19,7 @@ namespace RiftPulse.Pcvr
     {
         private const string ApiBase = "https://app.riftpulse.me/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.1.36";
+        private const string ModVersion = "0.1.33";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 
@@ -40,9 +40,6 @@ namespace RiftPulse.Pcvr
         [UIComponent("connectButton")]
         private Button _connectButton = null!;
 
-        [UIComponent("customizeChatPanelButton")]
-        private Button _customizeChatPanelButton = null!;
-
         [UIComponent("chatToggleButton")]
         private Button _chatToggleButton = null!;
 
@@ -53,7 +50,6 @@ namespace RiftPulse.Pcvr
         private TextMeshProUGUI _modulePreviewStatus = null!;
 
         private TextMeshProUGUI? _connectButtonText;
-        private TextMeshProUGUI? _customizeChatPanelButtonText;
         private TextMeshProUGUI? _chatToggleButtonText;
         private TextMeshProUGUI? _bsrToggleButtonText;
 
@@ -63,9 +59,6 @@ namespace RiftPulse.Pcvr
             _connectButtonText = _connectButton != null
                 ? _connectButton.GetComponentInChildren<TextMeshProUGUI>()
                 : null;
-            _customizeChatPanelButtonText = _customizeChatPanelButton != null
-                ? _customizeChatPanelButton.GetComponentInChildren<TextMeshProUGUI>()
-                : null;
             _chatToggleButtonText = _chatToggleButton != null
                 ? _chatToggleButton.GetComponentInChildren<TextMeshProUGUI>()
                 : null;
@@ -74,8 +67,7 @@ namespace RiftPulse.Pcvr
                 : null;
 
             if (_connectButton == null || _pairingCodeText == null || _statusText == null ||
-                _connectButtonText == null || _customizeChatPanelButtonText == null ||
-                _chatToggleButtonText == null || _bsrToggleButtonText == null || _modulePreviewStatus == null)
+                _connectButtonText == null || _chatToggleButtonText == null || _bsrToggleButtonText == null || _modulePreviewStatus == null)
             {
                 StatusText = "A RiftPulse menu control could not initialize. Reinstall the PCVR package and check the BSML dependency.";
             }
@@ -88,7 +80,6 @@ namespace RiftPulse.Pcvr
         {
             if (_pairingCodeText != null) _pairingCodeText.text = PairingCode;
             if (_connectButtonText != null) _connectButtonText.text = _connecting ? "GENERATING CODE..." : "GENERATE PAIRING CODE";
-            if (_customizeChatPanelButtonText != null) _customizeChatPanelButtonText.text = "CUSTOMIZE CHAT PANEL";
             if (_statusText != null) _statusText.text = StatusText;
             if (_chatToggleButtonText != null) _chatToggleButtonText.text = ChatToggleLabel;
             if (_bsrToggleButtonText != null) _bsrToggleButtonText.text = BsrToggleLabel;
@@ -348,12 +339,6 @@ namespace RiftPulse.Pcvr
 
         internal static string DeviceCredential => LoadOrCreateDeviceCredential();
 
-        [UIAction("open-chat-settings")]
-        public void OpenChatPanelSettings()
-        {
-            RiftPulseFlowCoordinator.ShowChatPanelSettings();
-        }
-
         [UIAction("move-chat-panel")]
         public void MoveChatPanel()
         {
@@ -361,7 +346,11 @@ namespace RiftPulse.Pcvr
             ModulePreviewStatus = "The 3D chat panel will reposition in front of your view when gameplay starts or resumes.";
             RefreshUi();
         }
-
+        [UIAction("open-chat-settings")]
+        public void OpenChatPanelSettings()
+        {
+            RiftPulseChatSettingsFlowCoordinator.Present();
+        }
         private static string LoadOrCreateDeviceId()
         {
             var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RiftPulse");
