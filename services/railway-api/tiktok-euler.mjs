@@ -1,6 +1,5 @@
 import { createHmac } from "node:crypto";
 import WebSocket from "ws";
-import { createBaseWebcastPushFrame, deserializeWebSocketMessage } from "tiktok-live-connector";
 
 const MAX_CONCURRENT = 25;
 const MAX_INGEST_BYTES = 14_000;
@@ -11,7 +10,7 @@ const USER_FIELDS = [
 const GIFT_FIELDS = ["giftId", "id", "giftName", "name", "giftType"];
 const ROOT_FIELDS = [
   "msgId", "messageId", "commentId", "id", "roomId", "room_id", "roomName",
-  "comment", "text", "content", "createTime", "create_time", "timestamp",
+  "comment", "message", "text", "content", "createTime", "create_time", "timestamp",
   "isModerator", "isSubscriber", "repeatEnd", "repeatCount", "repeat_count",
   "count", "likeCount", "subMonth", "viewerCount", "totalUser", "total",
   "totalUserCount", "memberCount", "amount", "superChatAmount", "bits",
@@ -77,28 +76,42 @@ export function compactTikTokPayload(source) {
 }
 
 export function eventForMessage(method, data) {
-  switch (method) {
-    case "WebcastChatMessage":
+  const key = String(method).toLowerCase().replace(/[^a-z]/g, "");
+  switch (key) {
+    case "webcastchatmessage":
+    case "chat":
+    case "comment":
       return { kind: "chat", payload: data };
-    case "WebcastGiftMessage":
+    case "webcastgiftmessage":
+    case "gift":
       return { kind: "event", eventName: "gift", payload: data };
-    case "WebcastLikeMessage":
+    case "webcastlikemessage":
+    case "like":
       return { kind: "event", eventName: "like", payload: data };
-    case "WebcastMemberMessage":
+    case "webcastmembermessage":
+    case "member":
+    case "join":
       return { kind: "event", eventName: "member", payload: data };
-    case "WebcastRoomUserSeqMessage":
+    case "webcastroomuserseqmessage":
+    case "roomuser":
+    case "roomupdate":
       return { kind: "viewers", payload: data };
-    case "WebcastSubNotifyMessage":
+    case "webcastsubnotifymessage":
+    case "subnotify":
+    case "subscribe":
+    case "subscription":
       return { kind: "event", eventName: "subNotify", payload: data };
-    case "WebcastSocialMessage": {
-      const key = String(asRecord(asRecord(data)?.common)?.displayText?.key ?? "").toLowerCase();
-      if (key.includes("follow")) return { kind: "event", eventName: "follow", payload: data };
-      if (key.includes("share")) return { kind: "event", eventName: "share", payload: data };
+    case "webcastsocialmessage": {
+      const displayKey = String(asRecord(asRecord(data)?.common)?.displayText?.key ?? "").toLowerCase();
+      if (displayKey.includes("follow")) return { kind: "event", eventName: "follow", payload: data };
+      if (displayKey.includes("share")) return { kind: "event", eventName: "share", payload: data };
       return null;
     }
-    case "WebcastShareMessage":
+    case "webcastsharemessage":
+    case "share":
       return { kind: "event", eventName: "share", payload: data };
-    case "WebcastFollowMessage":
+    case "webcastfollowmessage":
+    case "follow":
       return { kind: "event", eventName: "follow", payload: data };
     default:
       return null;
@@ -112,16 +125,29 @@ function websocketBuffer(data) {
   return Buffer.from(data);
 }
 
+export function parseEulerMessages(data) {
+  const text = websocketBuffer(data).toString("utf8").replace(/^\uFEFF/, "").trim();
+  let envelope;
+  try {
+    envelope = JSON.parse(text);
+  } catch {
+    throw new Error("Expected Euler parsed-JSON message; raw protobuf mode must remain disabled.");
+  }
+  const nestedMessages = asRecord(envelope?.data)?.messages;
+  const entries = Array.isArray(envelope?.messages) ? envelope.messages
+    : Array.isArray(nestedMessages) ? nestedMessages
+      : Array.isArray(envelope) ? envelope
+        : envelope && typeof envelope === "object" ? [envelope] : [];
+  return entries.map(asRecord).filter(Boolean);
+}
+
 export function makeEulerUrl(username, apiKey) {
   const url = new URL("wss://ws.eulerstream.com");
   url.searchParams.set("uniqueId", username);
   url.searchParams.set("apiKey", apiKey);
-  // rawMessages forwards the original TikTok Webcast protobuf frames.
-  // The decoder below turns those frames back into typed Webcast events.
-  url.searchParams.set("features.rawMessages", "true");
-  // The raw-frame decoder bundled with the protocol package uses the v3 schema.
-  // Euler defaults hosted sockets to v2 unless this is explicitly set.
-  url.searchParams.set("features.schemaVersion", "v3");
+  // Use Euler's parsed JSON event envelopes rather than raw protobuf bytes.
+  url.searchParams.set("features.rawMessages", "false");
+  url.searchParams.set("features.schemaVersion", "v2");
   url.searchParams.set("features.normalizeUniqueId", "true");
   url.searchParams.set("features.bundleEvents", "true");
   url.searchParams.set("features.closeInactiveWebSocketAfter", "900");
@@ -170,6 +196,7 @@ export function startTikTokEulerConnector({ worker, env }) {
       this.attempt = 0;
       this.lastStatus = null;
       this.statusQueue = Promise.resolve();
+      this.firstEventAccepted = false;
       this.runPromise = this.run();
     }
 
@@ -236,6 +263,9 @@ export function startTikTokEulerConnector({ worker, env }) {
           const errorBody = await response.json().catch(() => null);
           const code = errorBody?.error?.code ?? "ingest_rejected";
           console.warn("RiftPulse rejected a compact Euler TikTok event (HTTP " + response.status + ", " + String(code).slice(0, 80) + ").");
+        } else if (!this.firstEventAccepted) {
+          this.firstEventAccepted = true;
+          console.info("First Euler TikTok event accepted for @" + this.username + " (" + String(message.eventName ?? message.kind) + ").");
         }
       } catch {
         console.warn("Euler TikTok event could not reach the RiftPulse ingest handler.");
@@ -243,26 +273,20 @@ export function startTikTokEulerConnector({ worker, env }) {
     }
 
     async handleFrame(data) {
-      const frame = await deserializeWebSocketMessage(websocketBuffer(data));
-      const result = frame?.protoMessageFetchResult;
-      if (!result) return;
+      const entries = parseEulerMessages(data);
+      for (const entry of entries) {
+        const method = String(entry.type ?? entry.method ?? entry.name ?? "");
+        const dataObject = asRecord(entry.data)
+          ?? asRecord(entry.payload)
+          ?? asRecord(asRecord(entry.decodedData)?.data);
+        if (!method || !dataObject) continue;
 
-      if (result.needAck && frame.logId && result.internalExt && this.socket?.readyState === WebSocket.OPEN) {
-        const ack = createBaseWebcastPushFrame({
-          logId: frame.logId,
-          payloadEncoding: "pb",
-          payloadType: "ack",
-          payload: Buffer.from(String(result.internalExt), "utf8"),
-        });
-        this.socket.send(Buffer.from(ack.finish()));
-      }
-
-      for (const entry of result.messages ?? []) {
-        const decoded = asRecord(entry?.decodedData);
-        if (!decoded) continue;
-        const method = String(entry.method ?? decoded.type ?? "");
-        const dataObject = asRecord(decoded.data);
-        if (!dataObject) continue;
+        if (method.toLowerCase() === "roominfo" || method.toLowerCase() === "room.info") {
+          const room = asRecord(dataObject.roomInfo) ?? asRecord(dataObject.room);
+          const roomId = scalar(dataObject.roomId ?? dataObject.room_id ?? dataObject.id ?? room?.roomId ?? room?.id, 128);
+          if (roomId !== undefined && String(roomId)) this.channelId = String(roomId);
+          continue;
+        }
 
         const roomId = scalar(dataObject.roomId ?? dataObject.room_id, 128);
         if (roomId !== undefined && String(roomId)) this.channelId = String(roomId);
@@ -270,7 +294,7 @@ export function startTikTokEulerConnector({ worker, env }) {
         const mapped = eventForMessage(method, dataObject);
         if (!mapped) continue;
 
-        const giftDetails = asRecord(dataObject.giftDetails);
+        const giftDetails = asRecord(dataObject.giftDetails) ?? asRecord(dataObject.gift);
         if (mapped.eventName === "gift" && giftDetails?.giftType === 1
           && dataObject.repeatEnd !== true && dataObject.repeatEnd !== 1) continue;
 
