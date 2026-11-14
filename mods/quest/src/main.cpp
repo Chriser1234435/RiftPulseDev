@@ -81,7 +81,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.42";
+static constexpr const char* MOD_VERSION = "0.1.43";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -94,6 +94,7 @@ static UnityEngine::UI::Button* panelSettingsButton = nullptr;
 static UnityEngine::Transform* mainMenuRoot = nullptr;
 static std::vector<UnityEngine::GameObject*> mainMenuObjects;
 static std::vector<UnityEngine::GameObject*> settingsMenuObjects;
+static BSML::FloatingScreen* chatPanelSettingsScreen = nullptr;
 static bool chatPanelSettingsOpen = false;
 
 static std::string deviceId;
@@ -1265,10 +1266,12 @@ static void TrackSettingsMenuObject(UnityEngine::GameObject* object) {
 static void CloseChatPanelSettings() {
   if (!chatPanelSettingsOpen) return;
   worldChatSettingsPoseCaptured = false;
-  for (auto* object : settingsMenuObjects) {
-    if (object) UnityEngine::Object::Destroy(object);
-  }
   settingsMenuObjects.clear();
+  if (chatPanelSettingsScreen) {
+    auto screenObject = chatPanelSettingsScreen->get_gameObject();
+    if (screenObject) UnityEngine::Object::Destroy(screenObject);
+    chatPanelSettingsScreen = nullptr;
+  }
   for (auto* object : mainMenuObjects) {
     if (object) object->SetActive(true);
   }
@@ -1279,16 +1282,42 @@ static void ShowChatPanelSettings() {
   if (!mainMenuRoot || chatPanelSettingsOpen) return;
   LoadWorldChatSettings();
   auto camera = UnityEngine::Camera::get_main();
-  if (camera && camera->get_transform()) {
-    auto transform = camera->get_transform();
-    worldChatSettingsCameraPosition = transform->get_position();
-    worldChatSettingsCameraRight = transform->get_right();
-    worldChatSettingsCameraUp = transform->get_up();
-    worldChatSettingsCameraForward = transform->get_forward();
-    worldChatSettingsPoseCaptured = true;
-  } else {
+  if (!camera || !camera->get_transform()) return;
+  auto cameraTransform = camera->get_transform();
+  worldChatSettingsCameraPosition = cameraTransform->get_position();
+  worldChatSettingsCameraRight = cameraTransform->get_right();
+  worldChatSettingsCameraUp = cameraTransform->get_up();
+  worldChatSettingsCameraForward = cameraTransform->get_forward();
+  worldChatSettingsPoseCaptured = true;
+
+  const auto cameraPosition = worldChatSettingsCameraPosition;
+  const auto forward = worldChatSettingsCameraForward;
+  const auto up = worldChatSettingsCameraUp;
+  UnityEngine::Vector3 screenPosition(
+      cameraPosition.x + forward.x * 1.35f,
+      cameraPosition.y + forward.y * 1.35f,
+      cameraPosition.z + forward.z * 1.35f);
+  const UnityEngine::Vector3 towardPlayer(
+      cameraPosition.x - screenPosition.x,
+      cameraPosition.y - screenPosition.y,
+      cameraPosition.z - screenPosition.z);
+  const auto screenRotation = UnityEngine::Quaternion::LookRotation(towardPlayer, up);
+  chatPanelSettingsScreen = BSML::FloatingScreen::CreateFloatingScreen(
+      UnityEngine::Vector2(92.0f, 68.0f), true, screenPosition, screenRotation, 0.0f, true);
+  if (!chatPanelSettingsScreen) {
     worldChatSettingsPoseCaptured = false;
+    return;
   }
+  chatPanelSettingsScreen->set_ShowHandle(true);
+  chatPanelSettingsScreen->set_HighlightHandle(true);
+  auto settingsRoot = chatPanelSettingsScreen->get_transform();
+  if (!settingsRoot) {
+    UnityEngine::Object::Destroy(chatPanelSettingsScreen->get_gameObject());
+    chatPanelSettingsScreen = nullptr;
+    worldChatSettingsPoseCaptured = false;
+    return;
+  }
+
   for (auto* object : mainMenuObjects) {
     if (object) object->SetActive(false);
   }
@@ -1296,50 +1325,37 @@ static void ShowChatPanelSettings() {
   chatPanelSettingsOpen = true;
 
   auto* title = BSML::Lite::CreateText(
-      mainMenuRoot, "CHAT PANEL SETTINGS", 4.0f,
-      {0.0f, 15.0f}, {58.0f, 6.0f});
-  if (title) TrackSettingsMenuObject(title->get_gameObject());
-
+      settingsRoot, "CHAT PANEL SETTINGS", 4.0f,
+      {0.0f, 25.0f}, {78.0f, 6.0f});
   auto* hint = BSML::Lite::CreateText(
-      mainMenuRoot, "Use arrows or slide. Changes save automatically.",
-      2.2f, {0.0f, 10.0f}, {58.0f, 4.0f});
-  if (hint) TrackSettingsMenuObject(hint->get_gameObject());
+      settingsRoot, "Adjust the chat panel. Changes save automatically.",
+      2.2f, {0.0f, 19.0f}, {78.0f, 4.0f});
 
-  auto* xSetting = BSML::Lite::CreateSliderSetting(
-      mainMenuRoot, "X POSITION (M)", 0.05f, worldChatSettings.x, -2.5f, 2.5f,
-      0.35f, true, UnityEngine::Vector2(0.0f, 5.0f),
+  BSML::Lite::CreateSliderSetting(
+      settingsRoot, "X POSITION (M)", 0.05f, worldChatSettings.x, -2.5f, 2.5f,
+      0.35f, true, UnityEngine::Vector2(0.0f, 12.0f),
       [](float value) { SetWorldChatPanelSetting(0, value); });
-  if (xSetting) TrackSettingsMenuObject(xSetting->get_gameObject());
-
-  auto* ySetting = BSML::Lite::CreateSliderSetting(
-      mainMenuRoot, "Y POSITION (M)", 0.05f, worldChatSettings.y, -2.0f, 2.0f,
-      0.35f, true, UnityEngine::Vector2(0.0f, -2.0f),
+  BSML::Lite::CreateSliderSetting(
+      settingsRoot, "Y POSITION (M)", 0.05f, worldChatSettings.y, -2.0f, 2.0f,
+      0.35f, true, UnityEngine::Vector2(0.0f, 4.0f),
       [](float value) { SetWorldChatPanelSetting(1, value); });
-  if (ySetting) TrackSettingsMenuObject(ySetting->get_gameObject());
-
-  auto* zSetting = BSML::Lite::CreateSliderSetting(
-      mainMenuRoot, "Z DISTANCE (M)", 0.05f, worldChatSettings.z, 0.8f, 4.5f,
-      0.35f, true, UnityEngine::Vector2(0.0f, -9.0f),
+  BSML::Lite::CreateSliderSetting(
+      settingsRoot, "Z DISTANCE (M)", 0.05f, worldChatSettings.z, 0.8f, 4.5f,
+      0.35f, true, UnityEngine::Vector2(0.0f, -4.0f),
       [](float value) { SetWorldChatPanelSetting(2, value); });
-  if (zSetting) TrackSettingsMenuObject(zSetting->get_gameObject());
-
-  auto* widthSetting = BSML::Lite::CreateSliderSetting(
-      mainMenuRoot, "PANEL WIDTH", 2.0f, worldChatSettings.width, 60.0f, 180.0f,
-      0.35f, true, UnityEngine::Vector2(0.0f, -16.0f),
+  BSML::Lite::CreateSliderSetting(
+      settingsRoot, "PANEL WIDTH", 2.0f, worldChatSettings.width, 60.0f, 180.0f,
+      0.35f, true, UnityEngine::Vector2(0.0f, -12.0f),
       [](float value) { SetWorldChatPanelSetting(3, value); });
-  if (widthSetting) TrackSettingsMenuObject(widthSetting->get_gameObject());
-
-  auto* heightSetting = BSML::Lite::CreateSliderSetting(
-      mainMenuRoot, "PANEL HEIGHT", 2.0f, worldChatSettings.height, 40.0f, 120.0f,
-      0.35f, true, UnityEngine::Vector2(0.0f, -23.0f),
+  BSML::Lite::CreateSliderSetting(
+      settingsRoot, "PANEL HEIGHT", 2.0f, worldChatSettings.height, 40.0f, 120.0f,
+      0.35f, true, UnityEngine::Vector2(0.0f, -20.0f),
       [](float value) { SetWorldChatPanelSetting(4, value); });
-  if (heightSetting) TrackSettingsMenuObject(heightSetting->get_gameObject());
 
-  auto* backButton = BSML::Lite::CreateUIButton(
-      mainMenuRoot, "BACK TO RIFTPULSE", "PracticeButton",
-      UnityEngine::Vector2(22.0f, -32.0f), UnityEngine::Vector2(42.0f, 5.2f),
+  BSML::Lite::CreateUIButton(
+      settingsRoot, "BACK TO RIFTPULSE", "PracticeButton",
+      UnityEngine::Vector2(0.0f, -28.0f), UnityEngine::Vector2(48.0f, 5.2f),
       []() { CloseChatPanelSettings(); });
-  if (backButton) TrackSettingsMenuObject(backButton->get_gameObject());
 }
 
 static TMPro::TextMeshProUGUI* CreateWorldChatText(

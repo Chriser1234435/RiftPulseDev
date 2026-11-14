@@ -23,6 +23,11 @@ namespace RiftPulse.Pcvr
         private static float _z = 2.15f;
         private static float _width = 110f;
         private static float _height = 70f;
+        private static bool _settingsPoseCaptured;
+        private static Vector3 _settingsCameraPosition;
+        private static Vector3 _settingsCameraRight;
+        private static Vector3 _settingsCameraUp;
+        private static Vector3 _settingsCameraForward;
 
         private static string SettingsPath
         {
@@ -66,6 +71,29 @@ namespace RiftPulse.Pcvr
         internal static void SetZ(float value) { Load(); _z = Mathf.Clamp(value, 0.8f, 4.5f); SaveAndApply(); }
         internal static void SetWidth(float value) { Load(); _width = Mathf.Clamp(value, 60f, 180f); SaveAndApply(); }
         internal static void SetHeight(float value) { Load(); _height = Mathf.Clamp(value, 40f, 120f); SaveAndApply(); }
+
+        internal static void BeginSettingsEdit()
+        {
+            var camera = Camera.main;
+            if (camera == null) return;
+            var transform = camera.transform;
+            _settingsCameraPosition = transform.position;
+            _settingsCameraRight = transform.right;
+            _settingsCameraUp = transform.up;
+            _settingsCameraForward = transform.forward;
+            _settingsPoseCaptured = true;
+        }
+
+        internal static void EndSettingsEdit() { _settingsPoseCaptured = false; }
+
+        internal static bool TryGetSettingsPose(out Vector3 position, out Vector3 right, out Vector3 up, out Vector3 forward)
+        {
+            position = _settingsCameraPosition;
+            right = _settingsCameraRight;
+            up = _settingsCameraUp;
+            forward = _settingsCameraForward;
+            return _settingsPoseCaptured;
+        }
 
         internal static void SyncPositionFromWorld(Vector3 position, Transform cameraTransform)
         {
@@ -171,15 +199,22 @@ namespace RiftPulse.Pcvr
         {
             if (_panel == null) return;
             var camera = Camera.main;
-            if (camera != null)
+            Vector3 cameraPosition, right, up, forward;
+            var captured = RiftPulseChatPanelPreferences.TryGetSettingsPose(out cameraPosition, out right, out up, out forward);
+            if (captured || camera != null)
             {
-                var cameraTransform = camera.transform;
-                var position = cameraTransform.position
-                    + cameraTransform.right * RiftPulseChatPanelPreferences.X
-                    + cameraTransform.up * RiftPulseChatPanelPreferences.Y
-                    + cameraTransform.forward * RiftPulseChatPanelPreferences.Z;
+                if (!captured)
+                {
+                    var cameraTransform = camera!.transform;
+                    cameraPosition = cameraTransform.position;
+                    right = cameraTransform.right;
+                    up = cameraTransform.up;
+                    forward = cameraTransform.forward;
+                }
+                var position = cameraPosition + right * RiftPulseChatPanelPreferences.X
+                    + up * RiftPulseChatPanelPreferences.Y + forward * RiftPulseChatPanelPreferences.Z;
                 _panel.ScreenPosition = position;
-                _panel.ScreenRotation = Quaternion.LookRotation(cameraTransform.position - position, cameraTransform.up);
+                _panel.ScreenRotation = Quaternion.LookRotation(cameraPosition - position, up);
             }
             _panel.ScreenSize = new Vector2(RiftPulseChatPanelPreferences.Width, RiftPulseChatPanelPreferences.Height);
             if (_text != null)
@@ -454,7 +489,7 @@ namespace RiftPulse.Pcvr
                 var position = _panel.ScreenPosition;
                 var rotation = _panel.ScreenRotation;
                 var camera = Camera.main;
-                if (camera != null)
+                if (camera != null && !RiftPulseChatPanelPreferences.TryGetSettingsPose(out _, out _, out _, out _))
                     RiftPulseChatPanelPreferences.SyncPositionFromWorld(position, camera.transform);
                 File.WriteAllText(
                     PlacementPath,

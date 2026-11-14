@@ -319,10 +319,11 @@ export function startTikTokEulerConnector({ worker, env }) {
           this.lastCloseCode = code;
           // Surface Euler's connection-cap rejection as an actionable provider error.
           void this.reportStatus(code === 4429 ? "error" : "disconnected");
-          // Offline/ended streams should back off up to 30 minutes, not reconnect
-          // every few minutes and consume the shared daily signing quota.
-          if (code === 4404 || code === 4005) this.attempt = Math.max(this.attempt, 4);
-          if (code === 4429) this.attempt = Math.max(this.attempt, 5);
+          // Offline/ended streams and Euler connection-cap rejects should wait
+          // the full 30-minute ceiling. The run loop increments attempt once more;
+          // exponent 9 reaches maxDelay=1,800,000ms and prevents daily signing quota burn.
+          if (code === 4404 || code === 4005) this.attempt = Math.max(this.attempt, 8);
+          if (code === 4429) this.attempt = Math.max(this.attempt, 8);
           resolve();
         };
         socket.on("open", () => {

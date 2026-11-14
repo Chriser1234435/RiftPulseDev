@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using TMPro;
+using UnityEngine;
 using UnityEngine.UI;
 using BeatSaberMarkupLanguage;
 using BeatSaberMarkupLanguage.Attributes;
@@ -19,7 +20,7 @@ namespace RiftPulse.Pcvr
     {
         private const string ApiBase = "https://app.riftpulse.me/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.1.35";
+        private const string ModVersion = "0.1.36";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 
@@ -64,8 +65,22 @@ namespace RiftPulse.Pcvr
                 ? _connectButton.GetComponentInChildren<TextMeshProUGUI>()
                 : null;
             _customizeChatPanelButtonText = _customizeChatPanelButton != null
-                ? _customizeChatPanelButton.GetComponentInChildren<TextMeshProUGUI>()
+                ? _customizeChatPanelButton.GetComponentInChildren<TextMeshProUGUI>(true)
                 : null;
+            if (_customizeChatPanelButton != null)
+            {
+                _customizeChatPanelButton.gameObject.SetActive(true);
+                _customizeChatPanelButton.interactable = true;
+                var buttonImage = _customizeChatPanelButton.GetComponent<Image>();
+                if (buttonImage != null) buttonImage.color = new Color(0.42f, 0.24f, 0.78f, 1f);
+            }
+            if (_customizeChatPanelButtonText != null)
+            {
+                _customizeChatPanelButtonText.gameObject.SetActive(true);
+                _customizeChatPanelButtonText.enabled = true;
+                _customizeChatPanelButtonText.color = Color.white;
+                _customizeChatPanelButtonText.alpha = 1f;
+            }
             _chatToggleButtonText = _chatToggleButton != null
                 ? _chatToggleButton.GetComponentInChildren<TextMeshProUGUI>()
                 : null;
@@ -460,6 +475,7 @@ namespace RiftPulse.Pcvr
         {
             if (firstActivation)
             {
+                RiftPulseChatPanelPreferences.BeginSettingsEdit();
                 SetTitle("Chat Panel Settings");
                 showBackButton = true;
             }
@@ -471,6 +487,7 @@ namespace RiftPulse.Pcvr
 
         protected override void BackButtonWasPressed(ViewController topViewController)
         {
+            RiftPulseChatPanelPreferences.EndSettingsEdit();
             RiftPulseFlowCoordinator.CloseChatPanelSettings(this);
         }
     }
