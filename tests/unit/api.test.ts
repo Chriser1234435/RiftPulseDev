@@ -101,6 +101,7 @@ class FakeStatement implements D1PreparedStatement {
     if (q.includes("from chat_messages") && q.includes("from provider_events")) {
       assert.match(q, /partition by provider, sourcepriority/);
       assert.match(q, /order by sourcepriority asc/);
+      assert.match(q, /order by sourcepriority asc, receivedat asc, id asc limit 8/);
       return { success: true, results: this.db.panelFeed as T[] };
     }
     if (q.includes("from integration_health") || q.includes("group by provider")) {
