@@ -1,4 +1,4 @@
-﻿#include "main.hpp"
+#include "main.hpp"
 #include "RiftPulseChatPanel.hpp"
 #include "bsml/shared/BSML/FloatingScreen/FloatingScreen.hpp"
 #include "UnityEngine/PrimitiveType.hpp"
@@ -81,7 +81,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.41";
+static constexpr const char* MOD_VERSION = "0.1.39";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -869,7 +869,7 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
   if (heading) TrackMainMenuObject(heading->get_gameObject());
 
   instructions = BSML::Lite::CreateText(
-      root, "QUEST CONNECTION  â€¢  BEAT SABER 1.40.8",
+      root, "QUEST CONNECTION  •  BEAT SABER 1.40.8",
       2.4f, {0.0f, 9.0f}, {58.0f, 5.0f});
   if (instructions) TrackMainMenuObject(instructions->get_gameObject());
 
@@ -1547,7 +1547,7 @@ static void PollWorldChatPanel() {
           if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(true);
           SetWorldChatText("DEVICE LINK REQUIRED\n\nThis Quest installation needs to be paired again before it can load chat. Open RiftPulse, choose GENERATE PAIRING CODE, and enter the code on app.riftpulse.me.");
         } else if (worldChatText) {
-          SetWorldChatText(std::string("CHAT FEED PAUSED (HTTP ") + std::to_string(status) + ")\n\nRetrying automatically. Check RiftPulse service status if this continues.");
+          SetWorldChatText("RIFTPULSE  /  CHAT\n\nConnection paused. Retrying...");
         }
       })) {
     worldChatRequestInFlight = false;
@@ -1625,4 +1625,3 @@ MOD_EXTERN_FUNC void late_load() noexcept {
       "RiftPulse", "RiftPulse", "Connect Quest to RiftPulse",
       BuildRiftPulseMenu);
 }
-
