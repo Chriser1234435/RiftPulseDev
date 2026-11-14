@@ -186,7 +186,8 @@ export function startTikTokEulerConnector({ worker, env }) {
   }
 
   class AccountRunner {
-    constructor(account) {
+    constructor(account, startupDelayMs = 0) {
+      this.startupDelayMs = startupDelayMs;
       this.accountId = account.accountId;
       this.username = account.username.replace(/^@/, "");
       this.channelId = this.username;
@@ -341,18 +342,29 @@ export function startTikTokEulerConnector({ worker, env }) {
       });
     }
 
+    async wait(ms) {
+      await new Promise(resolve => {
+        const timer = setTimeout(() => {
+          if (this.retryTimer === timer) this.retryTimer = null;
+          this.retryResolve = null;
+          resolve();
+        }, ms);
+        this.retryTimer = timer;
+        this.retryResolve = resolve;
+        timer.unref?.();
+      });
+    }
+
     async run() {
+      if (this.startupDelayMs > 0 && !this.stopped) await this.wait(this.startupDelayMs);
       while (!this.stopped) {
         await this.connectOnce();
         if (this.stopped) break;
         this.attempt += 1;
-        const delay = Math.min(300_000, 5_000 * (2 ** Math.min(this.attempt, 6)));
-        await new Promise(resolve => {
-          const timer = setTimeout(resolve, delay);
-          timer.unref?.();
-          this.retryTimer = timer;
-        });
-        this.retryTimer = null;
+        const baseDelay = Math.min(300_000, 5_000 * (2 ** Math.min(this.attempt, 6)));
+        // Spread the retry wave so a rate-limited batch doesn't hit Euler again together.
+        const delay = Math.min(300_000, Math.round(baseDelay * (0.75 + Math.random() * 0.5)));
+        await this.wait(delay);
       }
       await this.queue;
     }
@@ -361,6 +373,10 @@ export function startTikTokEulerConnector({ worker, env }) {
       if (this.stopped) return;
       this.stopped = true;
       if (this.retryTimer) clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+      const wakeRetry = this.retryResolve;
+      this.retryResolve = null;
+      wakeRetry?.();
       const socket = this.socket;
       if (socket && socket.readyState !== WebSocket.CLOSED) {
         try { socket.close(1000, "RiftPulse account removed"); } catch {}
@@ -393,9 +409,10 @@ export function startTikTokEulerConnector({ worker, env }) {
         }
       }
 
-      for (const account of desired.values()) {
+      for (const [index, account] of [...desired.values()].entries()) {
         if (runners.has(account.accountId)) continue;
-        const runner = new AccountRunner(account);
+        // Stagger startup handshakes; launching every creator socket at once can trip Euler's cap.
+        const runner = new AccountRunner(account, index * 2_000);
         runners.set(account.accountId, runner);
       }
 
