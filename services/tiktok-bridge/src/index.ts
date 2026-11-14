@@ -28,6 +28,9 @@ const secret = process.env.TIKTOK_CONNECTOR_INGEST_SECRET!;
 if (secret.length < 32) throw new Error("TIKTOK_CONNECTOR_INGEST_SECRET must be at least 32 characters.");
 // The connector receives EULER_API_KEY in its constructor below via the
 // supported signApiKey option. Do not mutate the library's global route config.
+// Community-plan mode: skip Euler fallback routes requiring Business access.
+IsLiveRouteConfig.skipFetchRoomIdFromEulerRoute = true;
+RoomIdRouteConfig.skipFetchRoomIdFromEulerRoute = true;
 const pollMs = Math.max(10_000, Number(process.env.TIKTOK_ACCOUNT_POLL_MS) || 10_000);
 const maxAccounts = Math.max(1, Math.min(50, Number(process.env.TIKTOK_MAX_ACTIVE_ACCOUNTS) || 10));
 
@@ -59,7 +62,8 @@ class AccountRunner {
     this.channelName = this.username;
     const eulerApiKey = process.env.EULER_API_KEY?.trim();
     this.connection = new TikTokLiveConnection(this.username, {
-      enableExtendedGiftInfo: true,
+      // Community tier: disable premium gift-gallery enrichment.
+      enableExtendedGiftInfo: false,
       ...(eulerApiKey ? { signApiKey: eulerApiKey } : {}),
     }) as ConnectorWithEvents;
     this.connection.on(WebcastEvent.CHAT, data => this.enqueue("chat", data));
