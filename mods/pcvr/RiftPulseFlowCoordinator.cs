@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -19,7 +19,7 @@ namespace RiftPulse.Pcvr
     {
         private const string ApiBase = "https://app.riftpulse.me/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.1.20";
+        private const string ModVersion = "0.1.31";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 
@@ -215,7 +215,9 @@ namespace RiftPulse.Pcvr
                         if (!response.IsSuccessStatusCode)
                         {
                             _hasPairedThisSession = false;
-                            ModulePreviewStatus = "Pair this installation before syncing module settings.";
+                            ModulePreviewStatus = (int)response.StatusCode == 401
+                                ? "This PCVR device's pairing record is missing or expired. Choose GENERATE PAIRING CODE and link this installation again to restore its chat feed."
+                                : "Pair this installation before syncing module settings.";
                             RefreshUi();
                             return;
                         }

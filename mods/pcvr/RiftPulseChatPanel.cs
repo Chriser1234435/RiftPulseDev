@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
@@ -25,13 +26,13 @@ namespace RiftPulse.Pcvr
         private static RiftPulseChatPanel? _instance;
 
         private FloatingScreen? _panel;
-        private TextMeshProUGUI? _title;
         private TextMeshProUGUI? _text;
         private TextMeshProUGUI? _handleLabel;
         private static Sprite? _whiteSprite;
         private bool _requestInFlight;
         private bool _moveRequested;
         private bool _chatEnabled = true;
+        private readonly ConcurrentQueue<Action> _pendingUiActions = new ConcurrentQueue<Action>();
         private float _nextPollAt;
         private float _nextSaveAt;
 
@@ -70,9 +71,16 @@ namespace RiftPulse.Pcvr
 
         private void Update()
         {
-            // Keep the floating chat panel available in menus and gameplay.
-            // It is a world-space screen with its own controller grab handle,
-            // so users can move it at any time instead of only during a song.
+            // HttpClient can finish on a worker thread. Apply all Unity and
+            // TextMeshPro changes from this Update loop on the Unity main thread.
+            while (_pendingUiActions.TryDequeue(out var action))
+            {
+                try { action(); }
+                catch (Exception exception)
+                {
+                    Debug.LogWarning("[RiftPulse] Could not update the PCVR chat panel: " + exception.Message);
+                }
+            }
 
             if (_moveRequested)
             {
@@ -82,12 +90,9 @@ namespace RiftPulse.Pcvr
             }
 
             if (_panel == null && !CreatePanel()) return;
+            if (_panel != null && !_panel.gameObject.activeSelf)
+                _panel.gameObject.SetActive(true);
 
-            var pulse = (Mathf.Sin(Time.realtimeSinceStartup * 2.2f) + 1f) * 0.5f;
-            if (_title != null)
-                _title.color = Color.Lerp(new Color(0.28f, 0.70f, 1f, 1f), new Color(0.72f, 0.48f, 1f, 1f), pulse);
-            if (_handleLabel != null)
-                _handleLabel.color = Color.Lerp(new Color(0.20f, 0.62f, 0.82f, 1f), new Color(0.55f, 0.96f, 1f, 1f), pulse);
             if (Time.realtimeSinceStartup >= _nextPollAt && !_requestInFlight)
             {
                 _nextPollAt = Time.realtimeSinceStartup + 3.0f;
@@ -162,19 +167,17 @@ namespace RiftPulse.Pcvr
             DontDestroyOnLoad(_panel.gameObject);
 
             var root = _panel.GetComponent<RectTransform>();
-            _title = CreatePanelText(root, "RiftPulse Pulsing Rift Header",
-                new Vector2(0f, 26f), new Vector2(90f, 8.5f), 5.2f, TextAlignmentOptions.Center);
-            _title.text = "<b>PULSING RIFT</b>";
-            _title.enableWordWrapping = false;
-
+            // Give the actual feed the full panel body; keep the platform mark and
+            // controller grab hint separate so chat never competes with a large title.
             _text = CreatePanelText(root, "RiftPulse PCVR Live Chat Feed",
-                new Vector2(0f, -5f), new Vector2(104f, 49f), 2.45f, TextAlignmentOptions.TopLeft);
+                new Vector2(5f, 0f), new Vector2(90f, 58f), 2.45f, TextAlignmentOptions.TopLeft);
             _text.text = "PCVR  /  LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages...";
 
             _handleLabel = CreatePanelText(root, "RiftPulse PCVR Drag Hint",
                 new Vector2(0f, -33f), new Vector2(28f, 3.5f), 1.65f, TextAlignmentOptions.Center);
             _handleLabel.text = "DRAG TO MOVE";
             _handleLabel.enableWordWrapping = false;
+            _handleLabel.color = new Color(0.34f, 0.88f, 1f, 1f);
             CreatePlatformMark(root);
             ApplyGrabHandleStyle();
             return true;
@@ -306,7 +309,6 @@ namespace RiftPulse.Pcvr
             if (savePlacement) SavePlacement();
             Destroy(_panel.gameObject);
             _panel = null;
-            _title = null;
             _text = null;
             _handleLabel = null;
         }
@@ -316,40 +318,60 @@ namespace RiftPulse.Pcvr
             _requestInFlight = true;
             try
             {
+                string body;
+                int statusCode;
                 using (var request = new HttpRequestMessage(HttpMethod.Get, FeedUrl))
                 {
                     request.Headers.Authorization =
                         new System.Net.Http.Headers.AuthenticationHeaderValue(
                             "Bearer", RiftPulsePairingViewController.DeviceCredential);
-                    using (var response = await Http.SendAsync(request))
+                    using (var response = await Http.SendAsync(request).ConfigureAwait(false))
                     {
-                        var body = await response.Content.ReadAsStringAsync();
-                        if (response.IsSuccessStatusCode)
-                        {
-                            RenderFeed(body);
-                        }
-                        else if ((int)response.StatusCode == 401 && _text != null)
-                        {
-                            // Keep the panel visible before pairing so the user
-                            // can still find and reposition it at any time.
-                            if (_panel != null) _panel.gameObject.SetActive(true);
-                            _text.text = "RIFTPULSE  /  LIVE CHAT\n\nConnect this Beat Saber installation to your RiftPulse account to load chat.";
-                        }
-                        else if (_text != null)
-                        {
-                            _text.text = "RIFTPULSE  /  CHAT\n\nConnection paused. Retrying...";
-                        }
+                        statusCode = (int)response.StatusCode;
+                        body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                     }
                 }
+
+                if (statusCode >= 200 && statusCode < 300)
+                {
+                    _pendingUiActions.Enqueue(() => RenderFeed(body));
+                }
+                else if (statusCode == 401)
+                {
+                    _pendingUiActions.Enqueue(() =>
+                    {
+                        if (_panel != null) _panel.gameObject.SetActive(true);
+                        if (_text != null)
+                        {
+                            _text.gameObject.SetActive(true);
+                            _text.enabled = true;
+                            _text.text = "DEVICE LINK REQUIRED\n\nThis PCVR installation needs to be paired again before it can load chat. Open RiftPulse from the Mods panel, choose GENERATE PAIRING CODE, and enter the code on app.riftpulse.me.";
+                        }
+                    });
+                }
+                else
+                {
+                    _pendingUiActions.Enqueue(() => SetFeedStatus("Chat connection paused (HTTP " + statusCode + "). Retrying..."));
+                }
             }
-            catch
+            catch (Exception exception)
             {
-                if (_text != null) _text.text = "RIFTPULSE  /  CHAT\n\nConnection paused. Retrying...";
+                var detail = exception is TaskCanceledException ? "Request timed out." : "Could not reach the chat feed.";
+                _pendingUiActions.Enqueue(() => SetFeedStatus(detail + " Retrying..."));
             }
             finally
             {
-                _requestInFlight = false;
+                _pendingUiActions.Enqueue(() => _requestInFlight = false);
             }
+        }
+
+        private void SetFeedStatus(string detail)
+        {
+            if (_panel != null) _panel.gameObject.SetActive(true);
+            if (_text == null) return;
+            _text.gameObject.SetActive(true);
+            _text.enabled = true;
+            _text.text = "PCVR  /  LIVE CHAT\n\n" + detail;
         }
 
         private static int FindMatchingArrayEnd(string json, int start)
@@ -402,6 +424,8 @@ namespace RiftPulse.Pcvr
             _chatEnabled = !enabledMatch.Success || enabledMatch.Groups[1].Value == "true";
             if (_panel != null) _panel.gameObject.SetActive(true);
             if (_text == null) return;
+            _text.gameObject.SetActive(true);
+            _text.enabled = true;
             if (!_chatEnabled)
             {
                 _text.text = "RIFTPULSE  /  LIVE CHAT\n\nChat is currently disabled for this installation. Enable the Chat module on app.riftpulse.me.";
@@ -448,7 +472,11 @@ namespace RiftPulse.Pcvr
                     output.AppendLine();
                     rendered++;
                 }
-                if (rendered == 0) output.AppendLine("No messages yet. Your chat will appear here.");
+                if (rendered == 0) output.AppendLine("Waiting for live messages...");
+            }
+            else
+            {
+                output.AppendLine("Chat feed response is missing its messages list.");
             }
 
             _text.text = output.ToString();

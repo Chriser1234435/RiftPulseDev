@@ -3,6 +3,8 @@
 #include "bsml/shared/BSML/FloatingScreen/FloatingScreen.hpp"
 #include "UnityEngine/PrimitiveType.hpp"
 #include "UnityEngine/Camera.hpp"
+#include "UnityEngine/Transform.hpp"
+#include "UnityEngine/Quaternion.hpp"
 #include "UnityEngine/GameObject.hpp"
 #include "UnityEngine/RectTransform.hpp"
 #include "UnityEngine/UI/Button.hpp"
@@ -53,6 +55,7 @@
 #include "beatsaber-hook/shared/utils/il2cpp-type-check.hpp"
 
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -77,7 +80,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.34";
+static constexpr const char* MOD_VERSION = "0.1.37";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -881,9 +884,8 @@ MOD_EXTERN_FUNC void setup(CModInfo *info) noexcept {
 DEFINE_TYPE(RiftPulse, ChatPanelDriver);
 
 static BSML::FloatingScreen* worldChatPanel = nullptr;
-static HMUI::CurvedTextMeshPro* worldChatTitle = nullptr;
-static HMUI::CurvedTextMeshPro* worldChatText = nullptr;
-static HMUI::CurvedTextMeshPro* worldChatHandleLabel = nullptr;
+static TMPro::TextMeshProUGUI* worldChatText = nullptr;
+static TMPro::TextMeshProUGUI* worldChatHandleLabel = nullptr;
 static UnityEngine::UI::Button* worldChatLockButton = nullptr;
 static UnityEngine::UI::Image* worldChatLockBody = nullptr;
 static UnityEngine::RectTransform* worldChatLockShackleRightRect = nullptr;
@@ -975,7 +977,12 @@ static bool LoadWorldChatPlacement(UnityEngine::Vector3& position,
 }
 
 static void SetWorldChatText(const std::string& value) {
-  if (worldChatText) worldChatText->set_text(StringW(value));
+  if (!worldChatText) return;
+  auto textObject = worldChatText->get_gameObject();
+  if (textObject) textObject->SetActive(true);
+  worldChatText->set_enabled(true);
+  if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(true);
+  worldChatText->set_text(StringW(value));
 }
 
 static UnityEngine::Sprite* GetWorldChatWhiteSprite() {
@@ -1033,33 +1040,22 @@ static void ApplyWorldChatLockState() {
     handleTransform->set_localScale(UnityEngine::Vector3(1.0f, 1.0f, 1.0f));
   }
 
-  // BSML's FloatingScreenHandle owns the VR pointer event component. Keep it
-  // and its collider, hide its white mesh, and put a rounded capsule under it.
+  // Keep BSML's stock white grab bar visible. The native handle owns the
+  // controller pointer/drag behaviour, so preserve its renderer and hitbox.
   auto* nativeRenderer = handle->GetComponent<UnityEngine::MeshRenderer*>();
-  if (nativeRenderer) nativeRenderer->set_enabled(false);
+  if (nativeRenderer) {
+    nativeRenderer->set_enabled(true);
+    auto nativeMaterial = nativeRenderer->get_material();
+    if (nativeMaterial) {
+      nativeMaterial->set_color(UnityEngine::Color(1.0f, 1.0f, 1.0f, 1.0f));
+    }
+  }
 
   auto* hitBox = handle->GetComponent<UnityEngine::BoxCollider*>();
   if (!hitBox) hitBox = handle->AddComponent<UnityEngine::BoxCollider*>();
   if (hitBox) {
     hitBox->set_center(UnityEngine::Vector3(0.0f, 0.0f, 0.0f));
     hitBox->set_size(UnityEngine::Vector3(30.0f, 4.5f, 4.5f));
-  }
-
-  auto capsule = UnityEngine::GameObject::CreatePrimitive(UnityEngine::PrimitiveType::Capsule);
-  if (capsule) {
-    auto capsuleTransform = capsule->get_transform();
-    capsuleTransform->SetParent(handleTransform, false);
-    capsuleTransform->set_localPosition(UnityEngine::Vector3(0.0f, 0.0f, 0.0f));
-    capsuleTransform->set_localRotation(UnityEngine::Quaternion::Euler(0.0f, 0.0f, 90.0f));
-    capsuleTransform->set_localScale(UnityEngine::Vector3(4.5f, 30.0f, 4.5f));
-
-    auto* capsuleCollider = capsule->GetComponent<UnityEngine::Collider*>();
-    if (capsuleCollider) UnityEngine::Object::Destroy(capsuleCollider);
-    auto* capsuleRenderer = capsule->GetComponent<UnityEngine::MeshRenderer*>();
-    if (capsuleRenderer) {
-      auto material = capsuleRenderer->get_material();
-      if (material) material->set_color(UnityEngine::Color(0.035f, 0.12f, 0.18f, 0.96f));
-    }
   }
 }
 
@@ -1079,6 +1075,8 @@ static TMPro::TextMeshProUGUI* CreateWorldChatText(
     UnityEngine::Object::Destroy(textObject);
     return nullptr;
   }
+  textObject->SetActive(true);
+  text->set_enabled(true);
   rect->SetParent(worldChatPanel->get_rectTransform(), false);
   rect->set_anchorMin(UnityEngine::Vector2(0.5f, 0.5f));
   rect->set_anchorMax(UnityEngine::Vector2(0.5f, 0.5f));
@@ -1104,7 +1102,6 @@ static void DestroyWorldChatPanel(bool savePlacement) {
     if (gameObject) UnityEngine::Object::Destroy(gameObject);
   }
   worldChatPanel = nullptr;
-  worldChatTitle = nullptr;
   worldChatText = nullptr;
   worldChatHandleLabel = nullptr;
   worldChatLockButton = nullptr;
@@ -1156,20 +1153,24 @@ static bool CreateWorldChatPanel() {
   UnityEngine::Object::DontDestroyOnLoad(worldChatPanel->get_gameObject());
 
   auto root = worldChatPanel->get_rectTransform();
-  worldChatTitle = BSML::Lite::CreateText(
-      root, StringW("QUEST / RIFTPULSE LIVE CHAT"), 3.0f,
-      UnityEngine::Vector2(0.0f, 27.0f), UnityEngine::Vector2(96.0f, 8.0f));
-  worldChatText = BSML::Lite::CreateText(
-      root, StringW("COMBINED VIEWERS  -\n\nWaiting for your stream messages..."), 2.45f,
-      UnityEngine::Vector2(0.0f, -5.0f), UnityEngine::Vector2(104.0f, 50.0f));
-  worldChatHandleLabel = BSML::Lite::CreateText(
-      root, StringW("<b>PULSING RIFT</b>"), 2.6f,
-      UnityEngine::Vector2(0.0f, -33.5f), UnityEngine::Vector2(29.0f, 5.0f));
-  if (!worldChatTitle || !worldChatText || !worldChatHandleLabel) {
+  // Create the labels as TextMeshProUGUI children on the world-space canvas.
+  // The older BSML::Lite::CreateText path produced menu-curved labels that
+  // were not reliably rendered by the floating screen's world-space canvas.
+  // The chat feed gets the full panel body now; no oversized title competes
+  // with incoming messages. Keep a separate compact controller grab hint.
+  worldChatText = CreateWorldChatText(
+      "RiftPulse Quest Chat Feed", 5.0f, 0.0f, 90.0f, 58.0f, 2.45f,
+      TMPro::TextAlignmentOptions::TopLeft);
+  worldChatHandleLabel = CreateWorldChatText(
+      "RiftPulse Quest Drag Hint", 0.0f, -33.0f, 28.0f, 3.5f, 1.65f,
+      TMPro::TextAlignmentOptions::Center);
+  if (!worldChatText || !worldChatHandleLabel) {
     DestroyWorldChatPanel(true);
     return false;
   }
-  worldChatHandleLabel->set_alignment(TMPro::TextAlignmentOptions::Center);
+  worldChatText->set_text(StringW("QUEST  /  LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages..."));
+  worldChatHandleLabel->set_text(StringW("DRAG TO MOVE"));
+  worldChatHandleLabel->set_enableWordWrapping(false);
   worldChatHandleLabel->set_color(UnityEngine::Color(0.34f, 0.88f, 1.0f, 1.0f));
   CreateQuestPlatformMark(root);
   ApplyWorldChatLockState();
@@ -1232,9 +1233,7 @@ static void RenderWorldChatFeed(const std::string& response) {
     totalViewers = viewerMatch[1].str();
   }
 
-  // Easter-egg styling: large "PULSING RIFT" heading, while the feed remains legible.
-  std::string output = "<size=150%><b>PULSING RIFT</b></size>\n";
-  output += "QUEST  /  LIVE CHAT\n";
+  std::string output = "QUEST  /  LIVE CHAT\n";
   output += "COMBINED VIEWERS  " + totalViewers + "\n";
   output += "----------------------------\n";
 
@@ -1279,7 +1278,7 @@ static void PollWorldChatPanel() {
           RenderWorldChatFeed(body);
         } else if (status == 401) {
           if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(true);
-          SetWorldChatText("RIFTPULSE  /  LIVE CHAT\n\nConnect this Quest installation to your RiftPulse account to load chat.");
+          SetWorldChatText("DEVICE LINK REQUIRED\n\nThis Quest installation needs to be paired again before it can load chat. Open RiftPulse, choose GENERATE PAIRING CODE, and enter the code on app.riftpulse.me.");
         } else if (worldChatText) {
           SetWorldChatText("RIFTPULSE  /  CHAT\n\nConnection paused. Retrying...");
         }
@@ -1297,16 +1296,11 @@ void RiftPulse::ChatPanelDriver::Update() {
     worldChatNeedsReposition = false;
   }
   if (!worldChatPanel && !CreateWorldChatPanel()) return;
-  if (worldChatHandleLabel) {
-    const float pulse = (UnityEngine::Mathf::Sin(UnityEngine::Time::get_realtimeSinceStartup() * 2.2f) + 1.0f) * 0.5f;
-    worldChatHandleLabel->set_color(UnityEngine::Color::Lerp(
-        UnityEngine::Color(0.20f, 0.62f, 0.82f, 1.0f),
-        UnityEngine::Color(0.55f, 0.96f, 1.0f, 1.0f), pulse));
-  }
+
   if (!isPaired) {
     if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(true);
     if (!worldChatPairingPromptVisible) {
-      SetWorldChatText("RIFTPULSE  /  LIVE CHAT\n\nConnect this Quest installation to your RiftPulse account to load chat. Grab the top handle to move this panel.");
+      SetWorldChatText("DEVICE LINK REQUIRED\n\nThis Quest installation needs to be paired again before it can load chat. Open RiftPulse, choose GENERATE PAIRING CODE, and enter the code on app.riftpulse.me. Grab the white bar to move this panel.");
       worldChatPairingPromptVisible = true;
     }
     return;
