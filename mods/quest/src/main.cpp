@@ -81,7 +81,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.39";
+static constexpr const char* MOD_VERSION = "0.1.40";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -1547,7 +1547,8 @@ static void PollWorldChatPanel() {
           if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(true);
           SetWorldChatText("DEVICE LINK REQUIRED\n\nThis Quest installation needs to be paired again before it can load chat. Open RiftPulse, choose GENERATE PAIRING CODE, and enter the code on app.riftpulse.me.");
         } else if (worldChatText) {
-          SetWorldChatText("RIFTPULSE  /  CHAT\n\nConnection paused. Retrying...");
+          SetWorldChatText(std::string("CHAT FEED PAUSED (HTTP ") + std::to_string(status)
+              + ")\n\nRetrying automatically. Check RiftPulse service status if this continues.");
         }
       })) {
     worldChatRequestInFlight = false;

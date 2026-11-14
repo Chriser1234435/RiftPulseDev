@@ -485,18 +485,23 @@ export default {
       const authContext = await getDeviceAuthContext(request, env);
       if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
       if (!env.DB) return jsonError(503, "database_unavailable", "Chat storage is not configured.", requestId);
+      // Show ordinary chat first, then supported stream events. Rank the two
+      // sources independently so bursts of follows/gifts/likes cannot push all
+      // actual chat messages out of the small floating panel.
       const feed = await env.DB.prepare(
-        "WITH feed AS (SELECT id, provider, channel_name AS channelName, sender_name AS senderName, text, received_at AS receivedAt FROM chat_messages WHERE account_id = ? UNION ALL SELECT id, provider, channel_name AS channelName, COALESCE(actor_name, 'Stream event') AS senderName, CASE kind WHEN 'follow' THEN 'followed the channel' WHEN 'subscription' THEN 'subscribed' WHEN 'gift' THEN 'sent ' || COALESCE(CASE WHEN quantity IS NOT NULL THEN CAST(quantity AS TEXT) || ' x ' ELSE '' END, '') || COALESCE(item_name, 'a gift') WHEN 'bits' THEN 'cheered ' || COALESCE(CAST(amount AS TEXT), '') || ' Bits' WHEN 'super_chat' THEN 'sent a Super Chat' WHEN 'donation' THEN 'donated ' || COALESCE(currency, '') || COALESCE(CAST(amount AS TEXT), '') WHEN 'like' THEN 'liked the stream' WHEN 'share' THEN 'shared the stream' WHEN 'raid' THEN 'raided the channel' WHEN 'member_join' THEN 'joined the stream' ELSE kind END || CASE WHEN message IS NOT NULL THEN ': ' || message ELSE '' END AS text, received_at AS receivedAt FROM provider_events WHERE account_id = ? AND kind != 'viewer_count'), ranked AS (SELECT id, provider, channelName, senderName, text, receivedAt, ROW_NUMBER() OVER (PARTITION BY provider ORDER BY receivedAt DESC, id DESC) AS providerRank FROM feed) SELECT id, provider, channelName, senderName, text, receivedAt FROM ranked WHERE providerRank <= 8 ORDER BY providerRank ASC, receivedAt DESC LIMIT 8",
+        "WITH feed AS (SELECT id, provider, channel_name AS channelName, sender_name AS senderName, text, received_at AS receivedAt, 0 AS sourcePriority FROM chat_messages WHERE account_id = ? UNION ALL SELECT id, provider, channel_name AS channelName, COALESCE(actor_name, 'Stream event') AS senderName, CASE kind WHEN 'follow' THEN 'followed the channel' WHEN 'subscription' THEN 'subscribed' WHEN 'gift' THEN 'sent ' || COALESCE(CASE WHEN quantity IS NOT NULL THEN CAST(quantity AS TEXT) || ' x ' ELSE '' END, '') || COALESCE(item_name, 'a gift') WHEN 'bits' THEN 'cheered ' || COALESCE(CAST(amount AS TEXT), '') || ' Bits' WHEN 'super_chat' THEN 'sent a Super Chat' WHEN 'donation' THEN 'donated ' || COALESCE(currency, '') || COALESCE(CAST(amount AS TEXT), '') WHEN 'like' THEN 'liked the stream' WHEN 'share' THEN 'shared the stream' WHEN 'raid' THEN 'raided the channel' WHEN 'member_join' THEN 'joined the stream' ELSE kind END || CASE WHEN message IS NOT NULL THEN ': ' || message ELSE '' END AS text, received_at AS receivedAt, 1 AS sourcePriority FROM provider_events WHERE account_id = ? AND kind != 'viewer_count'), ranked AS (SELECT id, provider, channelName, senderName, text, receivedAt, sourcePriority, ROW_NUMBER() OVER (PARTITION BY provider, sourcePriority ORDER BY receivedAt DESC, id DESC) AS providerRank FROM feed) SELECT id, provider, channelName, senderName, text, receivedAt FROM ranked WHERE providerRank <= 8 ORDER BY sourcePriority ASC, receivedAt DESC, id DESC LIMIT 8",
       ).bind(authContext.userId, authContext.userId).all<{
         id: string; provider: string; channelName: string; senderName: string; text: string; receivedAt: string;
       }>();
       if (!feed.success) return jsonError(503, "chat_store_unavailable", "Could not load the in-game chat feed.", requestId);
 
+      // Keep provider health independent from chat-recency lookups. A correlated
+      // MAX() subquery against chat_messages triggered intermittent D1 HTTP 500s.
       const healthRows = await env.DB.prepare(
-        "SELECT provider, status, viewer_count AS viewerCount, observed_at AS observedAt, viewer_count_observed_at AS viewerCountObservedAt, detail_code AS detailCode, (SELECT MAX(received_at) FROM chat_messages cm WHERE cm.account_id = integration_health.account_id AND cm.provider = integration_health.provider) AS lastMessageAt FROM integration_health WHERE account_id = ?",
+        "SELECT provider, status, viewer_count AS viewerCount, observed_at AS observedAt, viewer_count_observed_at AS viewerCountObservedAt, detail_code AS detailCode FROM integration_health WHERE account_id = ?",
       ).bind(authContext.userId).all<{
         provider: string; status: string; viewerCount: number | null; observedAt: string;
-        viewerCountObservedAt: string | null; detailCode: string | null; lastMessageAt: string | null;
+        viewerCountObservedAt: string | null; detailCode: string | null;
       }>();
       if (!healthRows.success) return jsonError(503, "integration_health_unavailable", "Could not load provider viewer counts.", requestId);
       const chatSetting = await env.DB.prepare(
@@ -512,12 +517,14 @@ export default {
           : row.status === "degraded" ? "degraded"
           : row.status === "disconnected" ? "disconnected" : "error";
         return {
-          provider, state, observedAt: row.observedAt, lastMessageAt: row.lastMessageAt,
+          provider, state, observedAt: row.observedAt, lastMessageAt: null,
           viewerCount: row.viewerCount, viewerCountObservedAt: row.viewerCountObservedAt,
           detailCode: row.detailCode, unofficial: provider === "tiktok",
         };
       });
-      const messages = chatEnabled ? (feed.results ?? []).reverse() : [];
+      // Query order is newest chat first, followed by supported event rows;
+      // preserve that order so actual chat remains visible at the top of the panel.
+      const messages = chatEnabled ? (feed.results ?? []) : [];
       if (url.pathname === "/api/v1/device/chat/messages") {
         return Response.json({ messages }, { headers: JSON_HEADERS });
       }
@@ -1475,13 +1482,20 @@ export default {
       if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
       if (!env.DB) return jsonError(503, "database_unavailable", "Database binding is not configured.", requestId);
       const result = await env.DB.prepare(
-        "SELECT provider, status, viewer_count AS viewerCount, observed_at AS observedAt, viewer_count_observed_at AS viewerCountObservedAt, detail_code AS detailCode, (SELECT MAX(received_at) FROM chat_messages cm WHERE cm.account_id = integration_health.account_id AND cm.provider = integration_health.provider) AS lastMessageAt FROM integration_health WHERE account_id = ?",
+        "SELECT provider, status, viewer_count AS viewerCount, observed_at AS observedAt, viewer_count_observed_at AS viewerCountObservedAt, detail_code AS detailCode FROM integration_health WHERE account_id = ?",
       ).bind(authContext.userId).all<{
         provider: string; status: string; viewerCount: number | null; observedAt: string;
-        viewerCountObservedAt: string | null; detailCode: string | null; lastMessageAt: string | null;
+        viewerCountObservedAt: string | null; detailCode: string | null;
       }>();
       if (!result.success) return jsonError(503, "integration_health_unavailable", "Could not load provider health.", requestId);
+      // Fetch message recency with a simple grouped query. Avoid D1's unstable
+      // correlated scalar-subquery plan against integration_health.
+      const lastMessageRows = await env.DB.prepare(
+        "SELECT provider, MAX(received_at) AS lastMessageAt FROM chat_messages WHERE account_id = ? GROUP BY provider",
+      ).bind(authContext.userId).all<{ provider: string; lastMessageAt: string | null }>();
+      if (!lastMessageRows.success) return jsonError(503, "integration_health_unavailable", "Could not load provider chat recency.", requestId);
       const byProvider = new Map((result.results ?? []).map(row => [row.provider, row]));
+      const lastMessageByProvider = new Map((lastMessageRows.results ?? []).map(row => [row.provider, row.lastMessageAt]));
       const now = new Date();
       const providerHealth: ProviderHealthSnapshot[] = PROVIDERS.map(provider => {
         const row = byProvider.get(provider);
@@ -1490,7 +1504,7 @@ export default {
           : row.status === "degraded" ? "degraded"
           : row.status === "disconnected" ? "disconnected" : "error";
         return {
-          provider, state, observedAt: row.observedAt, lastMessageAt: row.lastMessageAt,
+          provider, state, observedAt: row.observedAt, lastMessageAt: lastMessageByProvider.get(provider) ?? null,
           viewerCount: row.viewerCount, viewerCountObservedAt: row.viewerCountObservedAt,
           detailCode: row.detailCode, unofficial: provider === "tiktok",
         };

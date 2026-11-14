@@ -10,14 +10,15 @@
       <text text="Enter the 5-digit code on the RiftPulse website to link this installation." font-size="2.8" align="Center"/>
       <text id="modulePreviewStatus" text="Module settings are saved to your RiftPulse account after pairing." font-size="2.8" align="Center"/>
     </vertical>
+    <button id="customizeChatPanelButton" text="CUSTOMIZE CHAT PANEL" on-click="open-chat-settings"/>
     <text text="MODULES" font-size="4.5" align="Center"/>
     <horizontal bg="round-rect-panel" pad-left="6" pad-right="6" pad-top="5" pad-bottom="5">
       <vertical child-expand-height="false" spacing="4">
         <text text="CHAT" font-size="3.8" align="Center"/>
         <text text="Messages and supported events from your connected platforms." font-size="2.8" align="Center"/>
         <button id="chatToggleButton" text="CHAT MODULE: OFF" on-click="toggle-chat"/>
-      <button text="MOVE CHAT PANEL TO VIEW" on-click="move-chat-panel"/>
-      <button text="CUSTOMIZE CHAT PANEL" on-click="open-chat-settings"/>
+        <button text="MOVE CHAT PANEL TO VIEW" on-click="move-chat-panel"/>
+
       </vertical>
     </horizontal>
     <horizontal bg="round-rect-panel" pad-left="6" pad-right="6" pad-top="5" pad-bottom="5">

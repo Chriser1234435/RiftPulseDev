@@ -91,11 +91,30 @@ class FakeStatement implements D1PreparedStatement {
     }
     return { success: true, meta: { changes: 0 } };
   }
-  async all<T>(): Promise<D1Result<T>> { return { success: true, results: [] }; }
+  async all<T>(): Promise<D1Result<T>> {
+    const q = this.query.toLowerCase().replace(/\s+/g, " ");
+    // Guard the D1 regression: correlated message-recency subqueries against
+    // integration_health previously returned intermittent HTTP 500 in production.
+    if (q.includes("from integration_health") && q.includes("(select max(received_at)")) {
+      return { success: false, results: [] };
+    }
+    if (q.includes("from chat_messages") && q.includes("from provider_events")) {
+      assert.match(q, /partition by provider, sourcepriority/);
+      assert.match(q, /order by sourcepriority asc/);
+      return { success: true, results: this.db.panelFeed as T[] };
+    }
+    if (q.includes("from integration_health") || q.includes("group by provider")) {
+      return { success: true, results: [] };
+    }
+    return { success: true, results: [] };
+  }
 }
 
 class FakeD1 implements D1Database {
   readonly challenges = new Map<string, ChallengeRow>();
+  readonly panelFeed: Array<{
+    id: string; provider: string; channelName: string; senderName: string; text: string; receivedAt: string;
+  }> = [];
   rootOAuthProvider = "twitch";
   deviceCredentialDigest: string | null = null;
   deviceAccountId = "test-account";
@@ -318,6 +337,39 @@ test("native chat panel feed requires device auth and reports chat toggle plus v
   const payload = await response.json();
   assert.equal(payload.chatEnabled, true);
   assert.deepEqual(payload.messages, []);
+  assert.deepEqual(payload.viewers, {
+    total: null,
+    includedProviders: [],
+    missingProviders: ["twitch", "youtube", "tiktok"],
+    partial: false,
+  });
+});
+
+test("native chat panel feed prioritizes chat messages ahead of supported events", async () => {
+  const bindings = env();
+  const credential = "9".repeat(64);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential));
+  bindings.DB.deviceCredentialDigest = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  bindings.DB.panelFeed.push(
+    {
+      id: "twitch:chat-1", provider: "twitch", channelName: "Streamer",
+      senderName: "ViewerOne", text: "Hello from Twitch chat", receivedAt: "2026-11-14T20:00:00.000Z",
+    },
+    {
+      id: "youtube:event-1", provider: "youtube", channelName: "Streamer",
+      senderName: "ViewerTwo", text: "sent a Super Chat", receivedAt: "2026-11-14T20:00:01.000Z",
+    },
+  );
+  const response = await call("/api/v1/device/chat/panel", {
+    headers: { authorization: "Bearer " + credential },
+  }, bindings);
+  assert.equal(response.status, 200, await response.clone().text());
+  const payload = await response.json();
+  assert.equal(payload.chatEnabled, true);
+  assert.equal(payload.messages.length, 2);
+  assert.equal(payload.messages[0].text, "Hello from Twitch chat");
+  assert.ok(payload.messages.some((message: { text: string }) => message.text === "Hello from Twitch chat"));
+  assert.ok(payload.messages.some((message: { text: string }) => message.text === "sent a Super Chat"));
   assert.deepEqual(payload.viewers, {
     total: null,
     includedProviders: [],
