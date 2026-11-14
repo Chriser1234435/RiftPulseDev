@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { createAuth } from "../../src/auth.ts";
 import worker from "../../src/index.ts";
 import { WebSocketServer } from "ws";
+import { startTikTokEulerConnector } from "./tiktok-euler.mjs";
 
 const PORT = Number(process.env.PORT || 3000);
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
@@ -113,6 +114,8 @@ const env = {
   KICK_REDIRECT_URI: process.env.KICK_REDIRECT_URI,
 };
 
+const stopTikTokEulerConnector = startTikTokEulerConnector({ worker, env });
+
 const server = createServer(async (req, res) => {
   try {
     const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
@@ -197,3 +200,18 @@ server.on("upgrade", async (req, socket, head) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => console.log(`RiftPulse Railway API listening on ${PORT}`));
+
+let shuttingDown = false;
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  await stopTikTokEulerConnector();
+  for (const client of wss.clients) {
+    try { client.close(1001, "RiftPulse API shutting down"); } catch {}
+  }
+  server.close(() => process.exit(0));
+  const forceExit = setTimeout(() => process.exit(1), 5_000);
+  forceExit.unref();
+}
+process.once("SIGTERM", () => void shutdown());
+process.once("SIGINT", () => void shutdown());
