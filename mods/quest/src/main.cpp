@@ -1026,6 +1026,21 @@ static void SaveWorldChatPlacement() {
   if (!worldChatPanel) return;
   const auto position = worldChatPanel->get_ScreenPosition();
   const auto rotation = worldChatPanel->get_ScreenRotation();
+  auto camera = UnityEngine::Camera::get_main();
+  if (camera && camera->get_transform()) {
+    auto cameraTransform = camera->get_transform();
+    const auto cameraPosition = cameraTransform->get_position();
+    const auto right = cameraTransform->get_right();
+    const auto up = cameraTransform->get_up();
+    const auto forward = cameraTransform->get_forward();
+    const float dx = position.x - cameraPosition.x;
+    const float dy = position.y - cameraPosition.y;
+    const float dz = position.z - cameraPosition.z;
+    worldChatSettings.x = std::clamp(dx * right.x + dy * right.y + dz * right.z, -2.5f, 2.5f);
+    worldChatSettings.y = std::clamp(dx * up.x + dy * up.y + dz * up.z, -2.0f, 2.0f);
+    worldChatSettings.z = std::clamp(dx * forward.x + dy * forward.y + dz * forward.z, 0.8f, 4.5f);
+    SaveWorldChatSettings();
+  }
   std::ofstream output(WorldChatPlacementPath(), std::ios::out | std::ios::trunc);
   if (!output) return;
   output << position.x << " " << position.y << " " << position.z << " "

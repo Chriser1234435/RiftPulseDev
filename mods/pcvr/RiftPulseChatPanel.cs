@@ -67,7 +67,17 @@ namespace RiftPulse.Pcvr
         internal static void SetWidth(float value) { Load(); _width = Mathf.Clamp(value, 60f, 180f); SaveAndApply(); }
         internal static void SetHeight(float value) { Load(); _height = Mathf.Clamp(value, 40f, 120f); SaveAndApply(); }
 
-        private static void SaveAndApply()
+        internal static void SyncPositionFromWorld(Vector3 position, Transform cameraTransform)
+        {
+            Load();
+            var delta = position - cameraTransform.position;
+            _x = Mathf.Clamp(Vector3.Dot(delta, cameraTransform.right), -2.5f, 2.5f);
+            _y = Mathf.Clamp(Vector3.Dot(delta, cameraTransform.up), -2f, 2f);
+            _z = Mathf.Clamp(Vector3.Dot(delta, cameraTransform.forward), 0.8f, 4.5f);
+            SaveFile();
+        }
+
+        private static void SaveFile()
         {
             try
             {
@@ -80,6 +90,11 @@ namespace RiftPulse.Pcvr
                 });
             }
             catch (Exception) { }
+        }
+
+        private static void SaveAndApply()
+        {
+            SaveFile();
             RiftPulseChatPanel.ApplyPreferences();
         }
     }
@@ -273,6 +288,7 @@ namespace RiftPulse.Pcvr
             var towardPlayer = cameraTransform.position - position;
             var rotation = Quaternion.LookRotation(towardPlayer, cameraTransform.up);
             LoadPlacement(ref position, ref rotation);
+            RiftPulseChatPanelPreferences.SyncPositionFromWorld(position, cameraTransform);
 
             // FloatingScreen creates a world-space panel with a controller-grabbable handle.
             _panel = FloatingScreen.CreateFloatingScreen(
@@ -432,6 +448,9 @@ namespace RiftPulse.Pcvr
             {
                 var position = _panel.ScreenPosition;
                 var rotation = _panel.ScreenRotation;
+                var camera = Camera.main;
+                if (camera != null)
+                    RiftPulseChatPanelPreferences.SyncPositionFromWorld(position, camera.transform);
                 File.WriteAllText(
                     PlacementPath,
                     string.Join(" ", new[]

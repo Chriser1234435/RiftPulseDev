@@ -32,7 +32,7 @@ foreach ($componentId in @('pairingCodeText', 'statusText', 'connectButton', 'ch
         throw "Controller has no UIComponent binding for: $componentId"
     }
 }
-foreach ($actionId in @('connect-click', 'toggle-chat', 'toggle-bsr', 'move-chat-panel')) {
+foreach ($actionId in @('connect-click', 'toggle-chat', 'toggle-bsr', 'move-chat-panel', 'open-chat-settings')) {
     if ($bsmlText -notmatch ('on-click="' + [regex]::Escape($actionId) + '"')) {
         throw "BSML click action missing: $actionId"
     }

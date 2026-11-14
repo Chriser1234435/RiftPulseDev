@@ -435,20 +435,6 @@ namespace RiftPulse.Pcvr
             set => RiftPulseChatPanelPreferences.SetHeight(value);
         }
 
-        [UIAction("set-panel-x")]
-        public void SetPanelX(float value) => RiftPulseChatPanelPreferences.SetX(value);
-
-        [UIAction("set-panel-y")]
-        public void SetPanelY(float value) => RiftPulseChatPanelPreferences.SetY(value);
-
-        [UIAction("set-panel-z")]
-        public void SetPanelZ(float value) => RiftPulseChatPanelPreferences.SetZ(value);
-
-        [UIAction("set-panel-width")]
-        public void SetPanelWidth(float value) => RiftPulseChatPanelPreferences.SetWidth(value);
-
-        [UIAction("set-panel-height")]
-        public void SetPanelHeight(float value) => RiftPulseChatPanelPreferences.SetHeight(value);
     }
 
     public sealed class RiftPulseChatSettingsFlowCoordinator : FlowCoordinator
@@ -458,8 +444,7 @@ namespace RiftPulse.Pcvr
 
         public static void Present()
         {
-            var coordinator = BeatSaberUI.CreateFlowCoordinator<RiftPulseChatSettingsFlowCoordinator>();
-            BeatSaberUI.MainFlowCoordinator.PresentFlowCoordinator(coordinator);
+            RiftPulseFlowCoordinator.ShowChatPanelSettings();
         }
 
         protected override void DidActivate(bool firstActivation, bool addedToHierarchy, bool screenSystemEnabling)
@@ -477,14 +462,29 @@ namespace RiftPulse.Pcvr
 
         protected override void BackButtonWasPressed(ViewController topViewController)
         {
-            BeatSaberUI.MainFlowCoordinator.DismissFlowCoordinator(this);
+            RiftPulseFlowCoordinator.CloseChatPanelSettings(this);
         }
     }
 
     public sealed class RiftPulseFlowCoordinator : FlowCoordinator
     {
+        private static RiftPulseFlowCoordinator? _activeInstance;
         private readonly RiftPulsePairingViewController _pairingView =
             BeatSaberUI.CreateViewController<RiftPulsePairingViewController>();
+        private readonly RiftPulseChatSettingsFlowCoordinator _chatSettingsCoordinator =
+            BeatSaberUI.CreateFlowCoordinator<RiftPulseChatSettingsFlowCoordinator>();
+
+        internal static void ShowChatPanelSettings()
+        {
+            if (_activeInstance == null) return;
+            _activeInstance.PresentFlowCoordinator(_activeInstance._chatSettingsCoordinator);
+        }
+
+        internal static void CloseChatPanelSettings(RiftPulseChatSettingsFlowCoordinator settings)
+        {
+            if (_activeInstance == null) return;
+            _activeInstance.DismissFlowCoordinator(settings);
+        }
 
         public static void Present()
         {
@@ -494,6 +494,7 @@ namespace RiftPulse.Pcvr
 
         protected override void DidActivate(bool firstActivation, bool addedToHierarchy, bool screenSystemEnabling)
         {
+            if (addedToHierarchy) _activeInstance = this;
             if (firstActivation)
             {
                 SetTitle("RiftPulse");
