@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$version = '0.1.32'
+$version = '0.1.33'
 $project = Join-Path $root 'mods\pcvr\RiftPulse.Pcvr.csproj'
 $manifestPath = Join-Path $root 'mods\pcvr\manifest.json'
 $built = Join-Path $root 'mods\pcvr\bin\Release\net472\RiftPulse.Pcvr.dll'
@@ -43,24 +43,15 @@ foreach ($actionId in @('connect-click', 'toggle-chat', 'toggle-bsr', 'move-chat
 
 $chatSettingsBsmlPath = Join-Path $root 'mods\pcvr\chatsettings.bsml'
 $chatSettingsText = Get-Content $chatSettingsBsmlPath -Raw
-foreach ($setting in @(
-    @{ Value = 'panel-x'; Action = 'set-panel-x' },
-    @{ Value = 'panel-y'; Action = 'set-panel-y' },
-    @{ Value = 'panel-z'; Action = 'set-panel-z' },
-    @{ Value = 'panel-width'; Action = 'set-panel-width' },
-    @{ Value = 'panel-height'; Action = 'set-panel-height' }
-)) {
-    if ($chatSettingsText -notmatch ('value="' + [regex]::Escape($setting.Value) + '"')) {
-        throw "Chat settings slider missing value binding: $($setting.Value)"
+foreach ($settingValue in @('panel-x', 'panel-y', 'panel-z', 'panel-width', 'panel-height')) {
+    if ($chatSettingsText -notmatch ('value="' + [regex]::Escape($settingValue) + '"')) {
+        throw "Chat settings slider missing value binding: $settingValue"
     }
-    if ($chatSettingsText -notmatch ('on-change="' + [regex]::Escape($setting.Action) + '"')) {
-        throw "Chat settings slider missing change action: $($setting.Action)"
+    if ($chatSettingsText -notmatch 'bind-value="true"') {
+        throw "Chat settings slider must bind its value: $settingValue"
     }
-    if ($controllerText -notmatch ('UIValue\("' + [regex]::Escape($setting.Value) + '"\)')) {
-        throw "Chat settings controller missing UIValue: $($setting.Value)"
-    }
-    if ($controllerText -notmatch ('UIAction\("' + [regex]::Escape($setting.Action) + '"\)')) {
-        throw "Chat settings controller missing UIAction: $($setting.Action)"
+    if ($controllerText -notmatch ('UIValue\("' + [regex]::Escape($settingValue) + '"\)')) {
+        throw "Chat settings controller missing UIValue: $settingValue"
     }
 }
 if ($chatSettingsText -notmatch 'show-buttons="true"' -or $chatSettingsText -notmatch 'bind-value="true"') {

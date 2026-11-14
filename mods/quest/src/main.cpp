@@ -81,7 +81,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.38";
+static constexpr const char* MOD_VERSION = "0.1.39";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -1055,10 +1055,24 @@ static bool LoadWorldChatPlacement(UnityEngine::Vector3& position,
   float px = 0.0f, py = 0.0f, pz = 0.0f;
   float qx = 0.0f, qy = 0.0f, qz = 0.0f, qw = 1.0f;
   if (!(input >> px >> py >> pz >> qx >> qy >> qz >> qw)) return false;
-  int savedLockState = 1;
   worldChatLocked = false;
   position = UnityEngine::Vector3(px, py, pz);
   rotation = UnityEngine::Quaternion(qx, qy, qz, qw);
+  auto camera = UnityEngine::Camera::get_main();
+  if (camera && camera->get_transform()) {
+    auto cameraTransform = camera->get_transform();
+    const auto cameraPosition = cameraTransform->get_position();
+    const auto deltaX = position.x - cameraPosition.x;
+    const auto deltaY = position.y - cameraPosition.y;
+    const auto deltaZ = position.z - cameraPosition.z;
+    const auto right = cameraTransform->get_right();
+    const auto up = cameraTransform->get_up();
+    const auto forward = cameraTransform->get_forward();
+    worldChatSettings.x = std::clamp(deltaX * right.x + deltaY * right.y + deltaZ * right.z, -2.5f, 2.5f);
+    worldChatSettings.y = std::clamp(deltaX * up.x + deltaY * up.y + deltaZ * up.z, -2.0f, 2.0f);
+    worldChatSettings.z = std::clamp(deltaX * forward.x + deltaY * forward.y + deltaZ * forward.z, 0.8f, 4.5f);
+    SaveWorldChatSettings();
+  }
   return true;
 }
 
@@ -1528,6 +1542,8 @@ static void PollWorldChatPanel() {
         if (status >= 200 && status < 300) {
           RenderWorldChatFeed(body);
         } else if (status == 401) {
+          isPaired = false;
+          worldChatPairingPromptVisible = false;
           if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(true);
           SetWorldChatText("DEVICE LINK REQUIRED\n\nThis Quest installation needs to be paired again before it can load chat. Open RiftPulse, choose GENERATE PAIRING CODE, and enter the code on app.riftpulse.me.");
         } else if (worldChatText) {

@@ -194,6 +194,8 @@ namespace RiftPulse.Pcvr
             {
                 var handleRect = _handleLabel.GetComponent<RectTransform>();
                 handleRect.anchoredPosition = new Vector2(0f, -RiftPulseChatPanelPreferences.Height * 0.5f + 2.2f);
+                handleRect.sizeDelta = new Vector2(
+                    Mathf.Min(42f, RiftPulseChatPanelPreferences.Width * 0.45f), 3.5f);
             }
             UpdatePlatformMarkPosition();
             ApplyGrabHandleStyle();
@@ -436,7 +438,10 @@ namespace RiftPulse.Pcvr
 
                 position = new Vector3(parsed[0], parsed[1], parsed[2]);
                 rotation = new Quaternion(parsed[3], parsed[4], parsed[5], parsed[6]);
-                // Ignore legacy lock-state data; the panel is now always grab-movable.
+                var camera = Camera.main;
+                if (camera != null)
+                    RiftPulseChatPanelPreferences.SyncPositionFromWorld(position, camera.transform);
+                // Migrate the saved world position into the editable headset-relative X/Y/Z values.
             }
             catch { }
         }

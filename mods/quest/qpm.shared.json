@@ -7,7 +7,7 @@
                    "info":  {
                                 "name":  "RiftPulse",
                                 "id":  "riftpulse",
-                                "version":  "0.1.38",
+                                "version":  "0.1.39",
                                 "url":  "https://app.riftpulse.me",
                                 "additionalData":  {
                                                        "overrideSoName":  "libriftpulse.so",
