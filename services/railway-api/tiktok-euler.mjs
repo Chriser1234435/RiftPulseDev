@@ -428,6 +428,32 @@ export function startTikTokEulerConnector({ worker, env }) {
     }
   }
 
+  async function reportRateLimits() {
+    try {
+      const response = await fetch("https://tiktok.eulerstream.com/webcast/rate_limits", {
+        headers: { "x-api-key": apiKey },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) {
+        console.warn("Euler sign-server rate-limit probe returned HTTP " + response.status + ".");
+        return;
+      }
+      const raw = await response.json();
+      const envelope = asRecord(raw);
+      const limits = asRecord(envelope?.response) ?? asRecord(envelope?.data) ?? envelope;
+      const format = (name) => {
+        const bucket = asRecord(limits?.[name]);
+        return bucket && typeof bucket.remaining === "number" && typeof bucket.max === "number"
+          ? bucket.remaining + "/" + bucket.max : "unknown";
+      };
+      console.info("Euler sign-server API quota (remaining/max): minute " + format("minute")
+        + ", hour " + format("hour") + ", day " + format("day") + ".");
+    } catch {
+      console.warn("Euler sign-server rate-limit probe failed; no credential data was logged.");
+    }
+  }
+
+  void reportRateLimits();
   void syncAccounts();
   const timer = setInterval(() => void syncAccounts(), pollMs);
   timer.unref?.();
