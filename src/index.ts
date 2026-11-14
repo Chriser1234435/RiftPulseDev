@@ -235,6 +235,25 @@ export default {
       return Response.redirect(url.toString(), 308);
     }
 
+    // Serve Quest packages as downloads with their real .qmod filename.
+    // A QMOD uses a ZIP container internally, but must be saved and imported as
+    // a .qmod file. The static asset response has no MIME/disposition metadata,
+    // so some mobile browsers relabel it as .zip based on its archive signature.
+    const questQmodMatch = /^\/downloads\/(RiftPulse-Quest-\d+\.\d+\.\d+-Alpha\.qmod|RiftPulse\.Quest\.qmod)$/i.exec(url.pathname);
+    if (questQmodMatch && (request.method === "GET" || request.method === "HEAD") && env.ASSETS) {
+      const assetResponse = await env.ASSETS.fetch(request);
+      if (!assetResponse.ok) return assetResponse;
+      const headers = new Headers(assetResponse.headers);
+      headers.set("content-type", "application/octet-stream");
+      headers.set("content-disposition", `attachment; filename="${questQmodMatch[1]}"`);
+      headers.set("x-content-type-options", "nosniff");
+      return new Response(assetResponse.body, {
+        status: assetResponse.status,
+        statusText: assetResponse.statusText,
+        headers,
+      });
+    }
+
     // Keep Cloudflare as the browser-facing origin, but run all API logic on Railway.
     // This also keeps Better Auth cookies same-origin for the Cloudflare-hosted UI.
     // Twitch, YouTube, and Kick redirect to the app homepage. Identify the provider
