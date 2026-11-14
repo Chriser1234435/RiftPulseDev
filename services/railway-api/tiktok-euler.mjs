@@ -316,7 +316,8 @@ export function startTikTokEulerConnector({ worker, env }) {
           if (done) return;
           done = true;
           if (this.socket === socket) this.socket = null;
-          void this.reportStatus("disconnected");
+          // Surface Euler's connection-cap rejection as an actionable provider error.
+          void this.reportStatus(code === 4429 ? "error" : "disconnected");
           if (code === 4404 || code === 4005) this.attempt = Math.max(this.attempt, 3);
           if (code === 4429) this.attempt = Math.max(this.attempt, 5);
           resolve();
