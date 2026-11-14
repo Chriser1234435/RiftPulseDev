@@ -1,0 +1,14 @@
+<bg>
+  <vertical child-expand-height="false" spacing="4" pad-left="6" pad-right="6" pad-top="5" pad-bottom="5">
+    <text text="CHAT PANEL SETTINGS" font-size="5" align="Center"/>
+    <text text="Use the arrows or drag each slider. Changes save automatically." font-size="2.8" align="Center"/>
+    <settings-container child-control-width="true" child-expand-width="true">
+      <slider-setting text="X POSITION (METRES)" value="panel-x" on-change="set-panel-x" bind-value="true" min="-2.5" max="2.5" increment="0.05" show-buttons="true" apply-on-change="true"/>
+      <slider-setting text="Y POSITION (METRES)" value="panel-y" on-change="set-panel-y" bind-value="true" min="-2" max="2" increment="0.05" show-buttons="true" apply-on-change="true"/>
+      <slider-setting text="Z DISTANCE (METRES)" value="panel-z" on-change="set-panel-z" bind-value="true" min="0.8" max="4.5" increment="0.05" show-buttons="true" apply-on-change="true"/>
+      <slider-setting text="PANEL WIDTH" value="panel-width" on-change="set-panel-width" bind-value="true" min="60" max="180" increment="2" show-buttons="true" apply-on-change="true"/>
+      <slider-setting text="PANEL HEIGHT" value="panel-height" on-change="set-panel-height" bind-value="true" min="40" max="120" increment="2" show-buttons="true" apply-on-change="true"/>
+    </settings-container>
+    <text text="X and Y move the panel left/right and up/down relative to your headset. Z controls viewing distance." font-size="2.7" align="Center"/>
+  </vertical>
+</bg>

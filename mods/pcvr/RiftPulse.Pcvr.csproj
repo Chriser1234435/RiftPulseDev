@@ -6,7 +6,7 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AssemblyName>RiftPulse.Pcvr</AssemblyName>
     <RootNamespace>RiftPulse.Pcvr</RootNamespace>
-    <Version>0.1.31</Version>
+    <Version>0.1.32</Version>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Plugin.cs" />
@@ -17,6 +17,9 @@
     </EmbeddedResource>
     <EmbeddedResource Include="pairing.bsml">
       <LogicalName>RiftPulse.Pcvr.pairing.bsml</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="chatsettings.bsml">
+      <LogicalName>RiftPulse.Pcvr.chatsettings.bsml</LogicalName>
     </EmbeddedResource>
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net472" Version="1.0.3" PrivateAssets="All" />
     <Reference Include="IPA.Loader">

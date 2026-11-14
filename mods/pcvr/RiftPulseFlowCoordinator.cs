@@ -19,7 +19,7 @@ namespace RiftPulse.Pcvr
     {
         private const string ApiBase = "https://app.riftpulse.me/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.1.31";
+        private const string ModVersion = "0.1.32";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 
@@ -346,6 +346,11 @@ namespace RiftPulse.Pcvr
             ModulePreviewStatus = "The 3D chat panel will reposition in front of your view when gameplay starts or resumes.";
             RefreshUi();
         }
+        [UIAction("open-chat-settings")]
+        public void OpenChatPanelSettings()
+        {
+            RiftPulseChatSettingsFlowCoordinator.Present();
+        }
         private static string LoadOrCreateDeviceId()
         {
             var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RiftPulse");
@@ -388,6 +393,91 @@ namespace RiftPulse.Pcvr
                 var value = BitConverter.ToUInt32(bytes, 0) % 90000 + 10000;
                 return value.ToString();
             }
+        }
+    }
+
+
+    [ViewDefinition("RiftPulse.Pcvr.chatsettings.bsml")]
+    public sealed class RiftPulseChatSettingsViewController : BSMLAutomaticViewController
+    {
+        [UIValue("panel-x")]
+        public float PanelX
+        {
+            get => RiftPulseChatPanelPreferences.X;
+            set => RiftPulseChatPanelPreferences.SetX(value);
+        }
+
+        [UIValue("panel-y")]
+        public float PanelY
+        {
+            get => RiftPulseChatPanelPreferences.Y;
+            set => RiftPulseChatPanelPreferences.SetY(value);
+        }
+
+        [UIValue("panel-z")]
+        public float PanelZ
+        {
+            get => RiftPulseChatPanelPreferences.Z;
+            set => RiftPulseChatPanelPreferences.SetZ(value);
+        }
+
+        [UIValue("panel-width")]
+        public float PanelWidth
+        {
+            get => RiftPulseChatPanelPreferences.Width;
+            set => RiftPulseChatPanelPreferences.SetWidth(value);
+        }
+
+        [UIValue("panel-height")]
+        public float PanelHeight
+        {
+            get => RiftPulseChatPanelPreferences.Height;
+            set => RiftPulseChatPanelPreferences.SetHeight(value);
+        }
+
+        [UIAction("set-panel-x")]
+        public void SetPanelX(float value) => RiftPulseChatPanelPreferences.SetX(value);
+
+        [UIAction("set-panel-y")]
+        public void SetPanelY(float value) => RiftPulseChatPanelPreferences.SetY(value);
+
+        [UIAction("set-panel-z")]
+        public void SetPanelZ(float value) => RiftPulseChatPanelPreferences.SetZ(value);
+
+        [UIAction("set-panel-width")]
+        public void SetPanelWidth(float value) => RiftPulseChatPanelPreferences.SetWidth(value);
+
+        [UIAction("set-panel-height")]
+        public void SetPanelHeight(float value) => RiftPulseChatPanelPreferences.SetHeight(value);
+    }
+
+    public sealed class RiftPulseChatSettingsFlowCoordinator : FlowCoordinator
+    {
+        private readonly RiftPulseChatSettingsViewController _settingsView =
+            BeatSaberUI.CreateViewController<RiftPulseChatSettingsViewController>();
+
+        public static void Present()
+        {
+            var coordinator = BeatSaberUI.CreateFlowCoordinator<RiftPulseChatSettingsFlowCoordinator>();
+            BeatSaberUI.MainFlowCoordinator.PresentFlowCoordinator(coordinator);
+        }
+
+        protected override void DidActivate(bool firstActivation, bool addedToHierarchy, bool screenSystemEnabling)
+        {
+            if (firstActivation)
+            {
+                SetTitle("Chat Panel Settings");
+                showBackButton = true;
+            }
+            if (addedToHierarchy)
+            {
+                ProvideInitialViewControllers(_settingsView);
+            }
+        }
+
+        protected override void BackButtonWasPressed(ViewController topViewController)
+        {
+            BeatSaberUI.MainFlowCoordinator.DismissFlowCoordinator(this);
         }
     }
 

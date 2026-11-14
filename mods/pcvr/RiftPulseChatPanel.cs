@@ -15,6 +15,75 @@ using UnityEngine.UI;
 
 namespace RiftPulse.Pcvr
 {
+    internal static class RiftPulseChatPanelPreferences
+    {
+        private static bool _loaded;
+        private static float _x = 0.72f;
+        private static float _y = -0.12f;
+        private static float _z = 2.15f;
+        private static float _width = 110f;
+        private static float _height = 70f;
+
+        private static string SettingsPath
+        {
+            get
+            {
+                var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RiftPulse");
+                Directory.CreateDirectory(folder);
+                return Path.Combine(folder, "pcvr-chat-panel-settings.txt");
+            }
+        }
+
+        internal static float X { get { Load(); return _x; } }
+        internal static float Y { get { Load(); return _y; } }
+        internal static float Z { get { Load(); return _z; } }
+        internal static float Width { get { Load(); return _width; } }
+        internal static float Height { get { Load(); return _height; } }
+
+        internal static void Load()
+        {
+            if (_loaded) return;
+            _loaded = true;
+            try
+            {
+                if (!File.Exists(SettingsPath)) return;
+                var values = File.ReadAllLines(SettingsPath);
+                if (values.Length >= 5)
+                {
+                    float parsed;
+                    if (float.TryParse(values[0], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed)) _x = Mathf.Clamp(parsed, -2.5f, 2.5f);
+                    if (float.TryParse(values[1], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed)) _y = Mathf.Clamp(parsed, -2.0f, 2.0f);
+                    if (float.TryParse(values[2], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed)) _z = Mathf.Clamp(parsed, 0.8f, 4.5f);
+                    if (float.TryParse(values[3], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed)) _width = Mathf.Clamp(parsed, 60f, 180f);
+                    if (float.TryParse(values[4], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed)) _height = Mathf.Clamp(parsed, 40f, 120f);
+                }
+            }
+            catch (Exception) { /* Keep safe defaults when settings cannot be read. */ }
+        }
+
+        internal static void SetX(float value) { Load(); _x = Mathf.Clamp(value, -2.5f, 2.5f); SaveAndApply(); }
+        internal static void SetY(float value) { Load(); _y = Mathf.Clamp(value, -2.0f, 2.0f); SaveAndApply(); }
+        internal static void SetZ(float value) { Load(); _z = Mathf.Clamp(value, 0.8f, 4.5f); SaveAndApply(); }
+        internal static void SetWidth(float value) { Load(); _width = Mathf.Clamp(value, 60f, 180f); SaveAndApply(); }
+        internal static void SetHeight(float value) { Load(); _height = Mathf.Clamp(value, 40f, 120f); SaveAndApply(); }
+
+        private static void SaveAndApply()
+        {
+            try
+            {
+                File.WriteAllLines(SettingsPath, new[] {
+                    _x.ToString("R", CultureInfo.InvariantCulture),
+                    _y.ToString("R", CultureInfo.InvariantCulture),
+                    _z.ToString("R", CultureInfo.InvariantCulture),
+                    _width.ToString("R", CultureInfo.InvariantCulture),
+                    _height.ToString("R", CultureInfo.InvariantCulture)
+                });
+            }
+            catch (Exception) { }
+            RiftPulseChatPanel.ApplyPreferences();
+        }
+    }
+
     /// <summary>
     /// A genuine world-space BSML screen. The built-in grab handle lets VR
     /// controllers move it around the play space; it is never parented to Camera.
@@ -28,6 +97,7 @@ namespace RiftPulse.Pcvr
         private FloatingScreen? _panel;
         private TextMeshProUGUI? _text;
         private TextMeshProUGUI? _handleLabel;
+        private Image[]? _platformMarkParts;
         private static Sprite? _whiteSprite;
         private bool _requestInFlight;
         private bool _moveRequested;
@@ -50,6 +120,7 @@ namespace RiftPulse.Pcvr
 
         public static void Initialize()
         {
+            RiftPulseChatPanelPreferences.Load();
             if (_instance != null) return;
             var host = new GameObject("RiftPulse World Chat Driver");
             DontDestroyOnLoad(host);
@@ -67,6 +138,51 @@ namespace RiftPulse.Pcvr
         public static void RequestReposition()
         {
             if (_instance != null) _instance._moveRequested = true;
+        }
+
+        internal static void ApplyPreferences()
+        {
+            var instance = _instance;
+            if (instance == null || instance._panel == null)
+            {
+                // A stale manually dragged position must not override new X/Y/Z values.
+                try { File.Delete(PlacementPath); } catch { }
+                return;
+            }
+            instance._pendingUiActions.Enqueue(instance.ApplyPreferencesOnMainThread);
+        }
+
+        private void ApplyPreferencesOnMainThread()
+        {
+            if (_panel == null) return;
+            var camera = Camera.main;
+            if (camera != null)
+            {
+                var cameraTransform = camera.transform;
+                var position = cameraTransform.position
+                    + cameraTransform.right * RiftPulseChatPanelPreferences.X
+                    + cameraTransform.up * RiftPulseChatPanelPreferences.Y
+                    + cameraTransform.forward * RiftPulseChatPanelPreferences.Z;
+                _panel.ScreenPosition = position;
+                _panel.ScreenRotation = Quaternion.LookRotation(cameraTransform.position - position, cameraTransform.up);
+            }
+            _panel.ScreenSize = new Vector2(RiftPulseChatPanelPreferences.Width, RiftPulseChatPanelPreferences.Height);
+            if (_text != null)
+            {
+                var textRect = _text.GetComponent<RectTransform>();
+                textRect.anchoredPosition = new Vector2(5f, 0f);
+                textRect.sizeDelta = new Vector2(
+                    Mathf.Max(32f, RiftPulseChatPanelPreferences.Width - 20f),
+                    Mathf.Max(24f, RiftPulseChatPanelPreferences.Height - 12f));
+            }
+            if (_handleLabel != null)
+            {
+                var handleRect = _handleLabel.GetComponent<RectTransform>();
+                handleRect.anchoredPosition = new Vector2(0f, -RiftPulseChatPanelPreferences.Height * 0.5f + 2.2f);
+            }
+            UpdatePlatformMarkPosition();
+            ApplyGrabHandleStyle();
+            SavePlacement();
         }
 
         private void Update()
@@ -148,18 +264,20 @@ namespace RiftPulse.Pcvr
             var camera = Camera.main;
             if (camera == null) return false;
 
+            RiftPulseChatPanelPreferences.Load();
             var cameraTransform = camera.transform;
             var position = cameraTransform.position
-                + cameraTransform.forward * 2.15f
-                + cameraTransform.right * 0.72f
-                - cameraTransform.up * 0.12f;
+                + cameraTransform.right * RiftPulseChatPanelPreferences.X
+                + cameraTransform.up * RiftPulseChatPanelPreferences.Y
+                + cameraTransform.forward * RiftPulseChatPanelPreferences.Z;
             var towardPlayer = cameraTransform.position - position;
             var rotation = Quaternion.LookRotation(towardPlayer, cameraTransform.up);
             LoadPlacement(ref position, ref rotation);
 
             // FloatingScreen creates a world-space panel with a controller-grabbable handle.
             _panel = FloatingScreen.CreateFloatingScreen(
-                new Vector2(110f, 70f), true, position, rotation, 0f, true);
+                new Vector2(RiftPulseChatPanelPreferences.Width, RiftPulseChatPanelPreferences.Height),
+                true, position, rotation, 0f, true);
             if (_panel == null) return false;
 
             _panel.ShowHandle = true;
@@ -170,11 +288,16 @@ namespace RiftPulse.Pcvr
             // Give the actual feed the full panel body; keep the platform mark and
             // controller grab hint separate so chat never competes with a large title.
             _text = CreatePanelText(root, "RiftPulse PCVR Live Chat Feed",
-                new Vector2(5f, 0f), new Vector2(90f, 58f), 2.45f, TextAlignmentOptions.TopLeft);
+                new Vector2(5f, 0f),
+                new Vector2(Mathf.Max(32f, RiftPulseChatPanelPreferences.Width - 20f),
+                    Mathf.Max(24f, RiftPulseChatPanelPreferences.Height - 12f)),
+                2.45f, TextAlignmentOptions.TopLeft);
             _text.text = "PCVR  /  LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages...";
 
             _handleLabel = CreatePanelText(root, "RiftPulse PCVR Drag Hint",
-                new Vector2(0f, -33f), new Vector2(28f, 3.5f), 1.65f, TextAlignmentOptions.Center);
+                new Vector2(0f, -RiftPulseChatPanelPreferences.Height * 0.5f + 2.2f),
+                new Vector2(Mathf.Min(42f, RiftPulseChatPanelPreferences.Width * 0.45f), 3.5f),
+                1.65f, TextAlignmentOptions.Center);
             _handleLabel.text = "DRAG TO MOVE";
             _handleLabel.enableWordWrapping = false;
             _handleLabel.color = new Color(0.34f, 0.88f, 1f, 1f);
@@ -185,13 +308,36 @@ namespace RiftPulse.Pcvr
 
         private void CreatePlatformMark(RectTransform parent)
         {
-            // A small, font-independent monitor mark distinguishes the PCVR panel.
-            CreateLockPart(parent, "RiftPulse PCVR Monitor Top", new Vector2(6.5f, 0.8f), new Vector2(-47f, 30f));
-            CreateLockPart(parent, "RiftPulse PCVR Monitor Bottom", new Vector2(6.5f, 0.8f), new Vector2(-47f, 26.5f));
-            CreateLockPart(parent, "RiftPulse PCVR Monitor Left", new Vector2(0.8f, 4.3f), new Vector2(-50.2f, 28.25f));
-            CreateLockPart(parent, "RiftPulse PCVR Monitor Right", new Vector2(0.8f, 4.3f), new Vector2(-43.8f, 28.25f));
-            CreateLockPart(parent, "RiftPulse PCVR Monitor Stand", new Vector2(0.8f, 1.2f), new Vector2(-47f, 25.3f));
-            CreateLockPart(parent, "RiftPulse PCVR Monitor Foot", new Vector2(3.8f, 0.8f), new Vector2(-47f, 24.5f));
+            _platformMarkParts = new[]
+            {
+                CreateLockPart(parent, "RiftPulse PCVR Monitor Top", new Vector2(6.5f, 0.8f), Vector2.zero),
+                CreateLockPart(parent, "RiftPulse PCVR Monitor Bottom", new Vector2(6.5f, 0.8f), Vector2.zero),
+                CreateLockPart(parent, "RiftPulse PCVR Monitor Left", new Vector2(0.8f, 4.3f), Vector2.zero),
+                CreateLockPart(parent, "RiftPulse PCVR Monitor Right", new Vector2(0.8f, 4.3f), Vector2.zero),
+                CreateLockPart(parent, "RiftPulse PCVR Monitor Stand", new Vector2(0.8f, 1.2f), Vector2.zero),
+                CreateLockPart(parent, "RiftPulse PCVR Monitor Foot", new Vector2(3.8f, 0.8f), Vector2.zero)
+            };
+            UpdatePlatformMarkPosition();
+        }
+
+        private void UpdatePlatformMarkPosition()
+        {
+            if (_platformMarkParts == null || _platformMarkParts.Length != 6) return;
+            var markX = -RiftPulseChatPanelPreferences.Width * 0.5f + 8f;
+            var markY = RiftPulseChatPanelPreferences.Height * 0.5f - 6f;
+            var positions = new[]
+            {
+                new Vector2(markX, markY + 2.0f), new Vector2(markX, markY - 2.0f),
+                new Vector2(markX - 3.2f, markY), new Vector2(markX + 3.2f, markY),
+                new Vector2(markX, markY - 3.0f), new Vector2(markX, markY - 3.8f)
+            };
+            for (var i = 0; i < _platformMarkParts.Length; i++)
+            {
+                var image = _platformMarkParts[i];
+                if (image == null) continue;
+                var rect = image.GetComponent<RectTransform>();
+                if (rect != null) rect.anchoredPosition = positions[i];
+            }
         }
 
         private static Sprite GetWhiteSprite()
@@ -238,7 +384,7 @@ namespace RiftPulse.Pcvr
             // Keep BSML's native controller drag component and its visible white bar.
             // Hide no native renderers: the collider alone is not a visible grab handle.
             handle.SetActive(true);
-            handle.transform.localPosition = new Vector3(0f, -33.5f, 0f);
+            handle.transform.localPosition = new Vector3(0f, -RiftPulseChatPanelPreferences.Height * 0.5f + 2.2f, 0f);
             handle.transform.localRotation = Quaternion.identity;
             handle.transform.localScale = Vector3.one;
 
@@ -252,7 +398,7 @@ namespace RiftPulse.Pcvr
             var hitBox = handle.GetComponent<BoxCollider>();
             if (hitBox == null) hitBox = handle.AddComponent<BoxCollider>();
             hitBox.center = Vector3.zero;
-            hitBox.size = new Vector3(30f, 4.5f, 4.5f);
+            hitBox.size = new Vector3(Mathf.Clamp(RiftPulseChatPanelPreferences.Width * 0.34f, 24f, 42f), 4.5f, 4.5f);
         }
 
         private void LoadPlacement(ref Vector3 position, ref Quaternion rotation)

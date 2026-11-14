@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$version = '0.1.31'
+$version = '0.1.32'
 $project = Join-Path $root 'mods\pcvr\RiftPulse.Pcvr.csproj'
 $manifestPath = Join-Path $root 'mods\pcvr\manifest.json'
 $built = Join-Path $root 'mods\pcvr\bin\Release\net472\RiftPulse.Pcvr.dll'
@@ -40,6 +40,32 @@ foreach ($actionId in @('connect-click', 'toggle-chat', 'toggle-bsr', 'move-chat
         throw "Controller has no UIAction for: $actionId"
     }
 }
+
+$chatSettingsBsmlPath = Join-Path $root 'mods\pcvr\chatsettings.bsml'
+$chatSettingsText = Get-Content $chatSettingsBsmlPath -Raw
+foreach ($setting in @(
+    @{ Value = 'panel-x'; Action = 'set-panel-x' },
+    @{ Value = 'panel-y'; Action = 'set-panel-y' },
+    @{ Value = 'panel-z'; Action = 'set-panel-z' },
+    @{ Value = 'panel-width'; Action = 'set-panel-width' },
+    @{ Value = 'panel-height'; Action = 'set-panel-height' }
+)) {
+    if ($chatSettingsText -notmatch ('value="' + [regex]::Escape($setting.Value) + '"')) {
+        throw "Chat settings slider missing value binding: $($setting.Value)"
+    }
+    if ($chatSettingsText -notmatch ('on-change="' + [regex]::Escape($setting.Action) + '"')) {
+        throw "Chat settings slider missing change action: $($setting.Action)"
+    }
+    if ($controllerText -notmatch ('UIValue\("' + [regex]::Escape($setting.Value) + '"\)')) {
+        throw "Chat settings controller missing UIValue: $($setting.Value)"
+    }
+    if ($controllerText -notmatch ('UIAction\("' + [regex]::Escape($setting.Action) + '"\)')) {
+        throw "Chat settings controller missing UIAction: $($setting.Action)"
+    }
+}
+if ($chatSettingsText -notmatch 'show-buttons="true"' -or $chatSettingsText -notmatch 'bind-value="true"') {
+    throw 'Chat settings sliders must expose arrow buttons and bind values.'
+}
 if ($bsmlText -match '\{(pairing-code|status-text|chat-toggle-label|bsr-toggle-label|module-preview-status)\}') {
     throw 'BSML contains unsupported property interpolation placeholders.'
 }
@@ -54,6 +80,9 @@ if (-not ($resources -contains 'RiftPulse.Pcvr.manifest.json')) {
 }
 if (-not ($resources -contains 'RiftPulse.Pcvr.pairing.bsml')) {
     throw "Embedded pairing BSML missing. Found: $($resources -join ', ')"
+}
+if (-not ($resources -contains 'RiftPulse.Pcvr.chatsettings.bsml')) {
+    throw "Embedded chat settings BSML missing. Found: $($resources -join ', ')"
 }
 
 # The ZIP mirrors the Beat Saber game root. It contains only the plugin DLL

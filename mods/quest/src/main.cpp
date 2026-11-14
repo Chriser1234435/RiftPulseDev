@@ -54,6 +54,7 @@
 #include "beatsaber-hook/shared/utils/il2cpp-utils.hpp"
 #include "beatsaber-hook/shared/utils/il2cpp-type-check.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <chrono>
@@ -80,7 +81,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.37";
+static constexpr const char* MOD_VERSION = "0.1.38";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -89,6 +90,11 @@ static UnityEngine::UI::Button* codeButton = nullptr;
 static UnityEngine::UI::Button* checkButton = nullptr;
 static UnityEngine::UI::Button* chatButton = nullptr;
 static UnityEngine::UI::Button* bsrButton = nullptr;
+static UnityEngine::UI::Button* panelSettingsButton = nullptr;
+static UnityEngine::Transform* mainMenuRoot = nullptr;
+static std::vector<UnityEngine::GameObject*> mainMenuObjects;
+static std::vector<UnityEngine::GameObject*> settingsMenuObjects;
+static bool chatPanelSettingsOpen = false;
 
 static std::string deviceId;
 static std::string deviceCredential;
@@ -99,6 +105,21 @@ static std::string requestDiagnostic;
 static bool isPaired = false;
 static bool chatEnabled = true;
 static bool bsrEnabled = true;
+
+struct WorldChatPanelSettings {
+  float x = 0.72f;
+  float y = -0.12f;
+  float z = 2.15f;
+  float width = 110.0f;
+  float height = 70.0f;
+};
+static WorldChatPanelSettings worldChatSettings;
+static bool worldChatSettingsLoaded = false;
+static void LoadWorldChatSettings();
+static void SaveWorldChatSettings();
+static void SetWorldChatPanelSetting(int field, float value);
+static void ShowChatPanelSettings();
+static void CloseChatPanelSettings();
 
 static void SetStatus(const std::string& text) {
   if (overview) overview->set_text(StringW(text));
@@ -826,54 +847,74 @@ static void GeneratePairingCode() {
 }
 
 static void ShowWorldChatPanel();
+static void TrackMainMenuObject(UnityEngine::GameObject* object) {
+  if (object) mainMenuObjects.push_back(object);
+}
 
 static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
                                bool firstActivation,
                                bool addedToHierarchy,
                                bool screenSystemEnabling) {
   if (!firstActivation) return;
-  auto root = viewController->get_transform();
+  mainMenuRoot = viewController->get_transform();
+  auto root = mainMenuRoot;
+  mainMenuObjects.clear();
+  settingsMenuObjects.clear();
+  chatPanelSettingsOpen = false;
+  LoadWorldChatSettings();
 
   heading = BSML::Lite::CreateText(
       root, "RIFTPULSE", 4.0f,
       {0.0f, 15.5f}, {58.0f, 7.0f});
+  if (heading) TrackMainMenuObject(heading->get_gameObject());
 
   instructions = BSML::Lite::CreateText(
-      root, "QUEST CONNECTION  â€¢  BEAT SABER 1.40.8",
+      root, "QUEST CONNECTION  •  BEAT SABER 1.40.8",
       2.4f, {0.0f, 9.0f}, {58.0f, 5.0f});
+  if (instructions) TrackMainMenuObject(instructions->get_gameObject());
 
   overview = BSML::Lite::CreateText(
       root,
       "Generate a secure code to link this headset.\nEnter it on app.riftpulse.me, then check pairing status.",
       2.4f, {0.0f, 0.5f}, {58.0f, 12.0f});
+  if (overview) TrackMainMenuObject(overview->get_gameObject());
 
-  // Keep every action in the same visible column as the pairing information.
-  // The old x=0 button anchors were rendered far left by the PracticeButton template.
   codeButton = BSML::Lite::CreateUIButton(
       root, "GENERATE PAIRING CODE", "PracticeButton",
-      UnityEngine::Vector2({22.0f, -9.0f}), UnityEngine::Vector2({42.0f, 5.5f}),
+      UnityEngine::Vector2({22.0f, -9.0f}), UnityEngine::Vector2({42.0f, 5.2f}),
       []() { GeneratePairingCode(); });
+  if (codeButton) TrackMainMenuObject(codeButton->get_gameObject());
 
   checkButton = BSML::Lite::CreateUIButton(
       root, "CHECK PAIRING STATUS", "PracticeButton",
-      UnityEngine::Vector2({22.0f, -15.5f}), UnityEngine::Vector2({42.0f, 5.5f}),
+      UnityEngine::Vector2({22.0f, -15.0f}), UnityEngine::Vector2({42.0f, 5.2f}),
       []() { CheckPairingStatus(); });
+  if (checkButton) TrackMainMenuObject(checkButton->get_gameObject());
 
   chatButton = BSML::Lite::CreateUIButton(
       root, "CHAT MODULE: LOCKED", "PracticeButton",
-      UnityEngine::Vector2({22.0f, -22.0f}), UnityEngine::Vector2({42.0f, 5.5f}),
+      UnityEngine::Vector2({22.0f, -21.0f}), UnityEngine::Vector2({42.0f, 5.2f}),
       []() { ToggleChat(); });
+  if (chatButton) TrackMainMenuObject(chatButton->get_gameObject());
 
   bsrButton = BSML::Lite::CreateUIButton(
       root, "BSR MODULE: LOCKED", "PracticeButton",
-      UnityEngine::Vector2({22.0f, -28.5f}), UnityEngine::Vector2({42.0f, 5.5f}),
+      UnityEngine::Vector2({22.0f, -27.0f}), UnityEngine::Vector2({42.0f, 5.2f}),
       []() { ToggleBsr(); });
+  if (bsrButton) TrackMainMenuObject(bsrButton->get_gameObject());
 
-  BSML::Lite::CreateUIButton(
+  panelSettingsButton = BSML::Lite::CreateUIButton(
+      root, "CHAT PANEL SETTINGS", "PracticeButton",
+      UnityEngine::Vector2({22.0f, -33.0f}), UnityEngine::Vector2({42.0f, 5.2f}),
+      []() { ShowChatPanelSettings(); });
+  if (panelSettingsButton) TrackMainMenuObject(panelSettingsButton->get_gameObject());
+
+  auto* openPanelButton = BSML::Lite::CreateUIButton(
       root, "OPEN 3D CHAT PANEL", "PracticeButton",
-      UnityEngine::Vector2({22.0f, -35.0f}), UnityEngine::Vector2({42.0f, 5.0f}),
+      UnityEngine::Vector2({22.0f, -39.0f}), UnityEngine::Vector2({42.0f, 5.2f}),
       []() { ShowWorldChatPanel(); });
-  // Recover pending or already-linked sessions as soon as the menu opens.
+  if (openPanelButton) TrackMainMenuObject(openPanelButton->get_gameObject());
+
   ResumePairing();
 }
 
@@ -891,6 +932,7 @@ static UnityEngine::UI::Image* worldChatLockBody = nullptr;
 static UnityEngine::RectTransform* worldChatLockShackleRightRect = nullptr;
 static UnityEngine::RectTransform* worldChatLockShackleTopRect = nullptr;
 static UnityEngine::Sprite* worldChatWhiteSprite = nullptr;
+static UnityEngine::RectTransform* worldChatPlatformMarkRects[6] = {};
 static bool worldChatLocked = false;
 static bool worldChatRequestInFlight = false;
 static bool worldChatNeedsReposition = false;
@@ -904,6 +946,35 @@ static bool EnsureWorldChatDriver();
 static std::string WorldChatPlacementPath() {
   const auto base = static_cast<std::string>(UnityEngine::Application::get_persistentDataPath());
   return base + "/riftpulse-world-chat-position.dat";
+}
+
+static std::string WorldChatSettingsPath() {
+  const auto base = static_cast<std::string>(UnityEngine::Application::get_persistentDataPath());
+  return base + "/riftpulse-world-chat-settings.dat";
+}
+
+static void LoadWorldChatSettings() {
+  if (worldChatSettingsLoaded) return;
+  worldChatSettingsLoaded = true;
+  std::ifstream input(WorldChatSettingsPath());
+  if (!input) return;
+  float x = worldChatSettings.x, y = worldChatSettings.y, z = worldChatSettings.z;
+  float width = worldChatSettings.width, height = worldChatSettings.height;
+  if (input >> x >> y >> z >> width >> height) {
+    worldChatSettings.x = std::clamp(x, -2.5f, 2.5f);
+    worldChatSettings.y = std::clamp(y, -2.0f, 2.0f);
+    worldChatSettings.z = std::clamp(z, 0.8f, 4.5f);
+    worldChatSettings.width = std::clamp(width, 60.0f, 180.0f);
+    worldChatSettings.height = std::clamp(height, 40.0f, 120.0f);
+  }
+}
+
+static void SaveWorldChatSettings() {
+  std::ofstream output(WorldChatSettingsPath(), std::ios::out | std::ios::trunc);
+  if (!output) return;
+  output << worldChatSettings.x << " " << worldChatSettings.y << " "
+         << worldChatSettings.z << " " << worldChatSettings.width << " "
+         << worldChatSettings.height;
 }
 
 static std::string ReadJsonStringField(const std::string& json, const std::string& key) {
@@ -1035,7 +1106,7 @@ static void ApplyWorldChatLockState() {
   handle->SetActive(true);
   auto handleTransform = handle->get_transform();
   if (handleTransform) {
-    handleTransform->set_localPosition(UnityEngine::Vector3(0.0f, -33.5f, 0.0f));
+    handleTransform->set_localPosition(UnityEngine::Vector3(0.0f, -worldChatSettings.height * 0.5f + 2.2f, 0.0f));
     handleTransform->set_localRotation(UnityEngine::Quaternion::get_identity());
     handleTransform->set_localScale(UnityEngine::Vector3(1.0f, 1.0f, 1.0f));
   }
@@ -1055,8 +1126,158 @@ static void ApplyWorldChatLockState() {
   if (!hitBox) hitBox = handle->AddComponent<UnityEngine::BoxCollider*>();
   if (hitBox) {
     hitBox->set_center(UnityEngine::Vector3(0.0f, 0.0f, 0.0f));
-    hitBox->set_size(UnityEngine::Vector3(30.0f, 4.5f, 4.5f));
+    hitBox->set_size(UnityEngine::Vector3(std::clamp(worldChatSettings.width * 0.34f, 24.0f, 42.0f), 4.5f, 4.5f));
   }
+}
+
+static void ApplyWorldChatSettingsToPanel() {
+  if (!worldChatPanel) return;
+  worldChatPanel->set_ScreenSize(UnityEngine::Vector2(
+      worldChatSettings.width, worldChatSettings.height));
+
+  auto camera = UnityEngine::Camera::get_main();
+  if (camera && camera->get_transform()) {
+    auto cameraTransform = camera->get_transform();
+    const auto cameraPosition = cameraTransform->get_position();
+    const auto up = cameraTransform->get_up();
+    const auto right = cameraTransform->get_right();
+    const auto forward = cameraTransform->get_forward();
+    UnityEngine::Vector3 position(
+        cameraPosition.x + right.x * worldChatSettings.x + up.x * worldChatSettings.y + forward.x * worldChatSettings.z,
+        cameraPosition.y + right.y * worldChatSettings.x + up.y * worldChatSettings.y + forward.y * worldChatSettings.z,
+        cameraPosition.z + right.z * worldChatSettings.x + up.z * worldChatSettings.y + forward.z * worldChatSettings.z);
+    worldChatPanel->set_ScreenPosition(position);
+    worldChatPanel->set_ScreenRotation(UnityEngine::Quaternion::LookRotation(
+        UnityEngine::Vector3(cameraPosition.x - position.x, cameraPosition.y - position.y,
+                             cameraPosition.z - position.z), up));
+  }
+
+  if (worldChatText) {
+    auto* rect = worldChatText->GetComponent<UnityEngine::RectTransform*>();
+    if (rect) {
+      rect->set_anchoredPosition(UnityEngine::Vector2(5.0f, 0.0f));
+      rect->set_sizeDelta(UnityEngine::Vector2(
+          std::max(32.0f, worldChatSettings.width - 20.0f),
+          std::max(24.0f, worldChatSettings.height - 12.0f)));
+    }
+  }
+  if (worldChatHandleLabel) {
+    auto* rect = worldChatHandleLabel->GetComponent<UnityEngine::RectTransform*>();
+    if (rect) {
+      rect->set_anchoredPosition(UnityEngine::Vector2(
+          0.0f, -worldChatSettings.height * 0.5f + 2.2f));
+      rect->set_sizeDelta(UnityEngine::Vector2(
+          std::min(42.0f, worldChatSettings.width * 0.45f), 3.5f));
+    }
+  }
+  const float markX = -worldChatSettings.width * 0.5f + 8.0f;
+  const float markY = worldChatSettings.height * 0.5f - 6.0f;
+  const UnityEngine::Vector2 markPositions[6] = {
+      UnityEngine::Vector2(markX, markY + 2.2f),
+      UnityEngine::Vector2(markX, markY - 2.2f),
+      UnityEngine::Vector2(markX - 3.0f, markY),
+      UnityEngine::Vector2(markX + 3.0f, markY),
+      UnityEngine::Vector2(markX - 4.2f, markY),
+      UnityEngine::Vector2(markX + 4.2f, markY)
+  };
+  for (int i = 0; i < 6; ++i) {
+    if (worldChatPlatformMarkRects[i])
+      worldChatPlatformMarkRects[i]->set_anchoredPosition(markPositions[i]);
+  }
+
+  ApplyWorldChatLockState();
+  SaveWorldChatPlacement();
+}
+
+static void SetWorldChatPanelSetting(int field, float value) {
+  LoadWorldChatSettings();
+  switch (field) {
+    case 0: worldChatSettings.x = std::clamp(value, -2.5f, 2.5f); break;
+    case 1: worldChatSettings.y = std::clamp(value, -2.0f, 2.0f); break;
+    case 2: worldChatSettings.z = std::clamp(value, 0.8f, 4.5f); break;
+    case 3: worldChatSettings.width = std::clamp(value, 60.0f, 180.0f); break;
+    case 4: worldChatSettings.height = std::clamp(value, 40.0f, 120.0f); break;
+    default: return;
+  }
+  SaveWorldChatSettings();
+  if (worldChatPanel) {
+    ApplyWorldChatSettingsToPanel();
+  } else {
+    // Allow the saved X/Y/Z offsets to position the panel on its next creation.
+    std::remove(WorldChatPlacementPath().c_str());
+  }
+}
+
+static void TrackSettingsMenuObject(UnityEngine::GameObject* object) {
+  if (object) settingsMenuObjects.push_back(object);
+}
+
+static void CloseChatPanelSettings() {
+  if (!chatPanelSettingsOpen) return;
+  for (auto* object : settingsMenuObjects) {
+    if (object) UnityEngine::Object::Destroy(object);
+  }
+  settingsMenuObjects.clear();
+  for (auto* object : mainMenuObjects) {
+    if (object) object->SetActive(true);
+  }
+  chatPanelSettingsOpen = false;
+}
+
+static void ShowChatPanelSettings() {
+  if (!mainMenuRoot || chatPanelSettingsOpen) return;
+  LoadWorldChatSettings();
+  for (auto* object : mainMenuObjects) {
+    if (object) object->SetActive(false);
+  }
+  settingsMenuObjects.clear();
+  chatPanelSettingsOpen = true;
+
+  auto* title = BSML::Lite::CreateText(
+      mainMenuRoot, "CHAT PANEL SETTINGS", 4.0f,
+      {0.0f, 15.0f}, {58.0f, 6.0f});
+  if (title) TrackSettingsMenuObject(title->get_gameObject());
+
+  auto* hint = BSML::Lite::CreateText(
+      mainMenuRoot, "Use arrows or slide. Changes save automatically.",
+      2.2f, {0.0f, 10.0f}, {58.0f, 4.0f});
+  if (hint) TrackSettingsMenuObject(hint->get_gameObject());
+
+  auto* xSetting = BSML::Lite::CreateSliderSetting(
+      mainMenuRoot, "X POSITION (M)", 0.05f, worldChatSettings.x, -2.5f, 2.5f,
+      0.35f, true, UnityEngine::Vector2(0.0f, 5.0f),
+      [](float value) { SetWorldChatPanelSetting(0, value); });
+  if (xSetting) TrackSettingsMenuObject(xSetting->get_gameObject());
+
+  auto* ySetting = BSML::Lite::CreateSliderSetting(
+      mainMenuRoot, "Y POSITION (M)", 0.05f, worldChatSettings.y, -2.0f, 2.0f,
+      0.35f, true, UnityEngine::Vector2(0.0f, -2.0f),
+      [](float value) { SetWorldChatPanelSetting(1, value); });
+  if (ySetting) TrackSettingsMenuObject(ySetting->get_gameObject());
+
+  auto* zSetting = BSML::Lite::CreateSliderSetting(
+      mainMenuRoot, "Z DISTANCE (M)", 0.05f, worldChatSettings.z, 0.8f, 4.5f,
+      0.35f, true, UnityEngine::Vector2(0.0f, -9.0f),
+      [](float value) { SetWorldChatPanelSetting(2, value); });
+  if (zSetting) TrackSettingsMenuObject(zSetting->get_gameObject());
+
+  auto* widthSetting = BSML::Lite::CreateSliderSetting(
+      mainMenuRoot, "PANEL WIDTH", 2.0f, worldChatSettings.width, 60.0f, 180.0f,
+      0.35f, true, UnityEngine::Vector2(0.0f, -16.0f),
+      [](float value) { SetWorldChatPanelSetting(3, value); });
+  if (widthSetting) TrackSettingsMenuObject(widthSetting->get_gameObject());
+
+  auto* heightSetting = BSML::Lite::CreateSliderSetting(
+      mainMenuRoot, "PANEL HEIGHT", 2.0f, worldChatSettings.height, 40.0f, 120.0f,
+      0.35f, true, UnityEngine::Vector2(0.0f, -23.0f),
+      [](float value) { SetWorldChatPanelSetting(4, value); });
+  if (heightSetting) TrackSettingsMenuObject(heightSetting->get_gameObject());
+
+  auto* backButton = BSML::Lite::CreateUIButton(
+      mainMenuRoot, "BACK TO RIFTPULSE", "PracticeButton",
+      UnityEngine::Vector2(22.0f, -32.0f), UnityEngine::Vector2(42.0f, 5.2f),
+      []() { CloseChatPanelSettings(); });
+  if (backButton) TrackSettingsMenuObject(backButton->get_gameObject());
 }
 
 static TMPro::TextMeshProUGUI* CreateWorldChatText(
@@ -1104,6 +1325,7 @@ static void DestroyWorldChatPanel(bool savePlacement) {
   worldChatPanel = nullptr;
   worldChatText = nullptr;
   worldChatHandleLabel = nullptr;
+  for (auto& rect : worldChatPlatformMarkRects) rect = nullptr;
   worldChatLockButton = nullptr;
   worldChatLockBody = nullptr;
   worldChatLockShackleRightRect = nullptr;
@@ -1112,22 +1334,30 @@ static void DestroyWorldChatPanel(bool savePlacement) {
 }
 
 static void CreateQuestPlatformMark(UnityEngine::RectTransform* parent) {
-  // Font-independent headset silhouette for the Quest Standalone panel.
-  CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Top",
-      UnityEngine::Vector2(7.2f, 1.0f), UnityEngine::Vector2(-47.0f, 30.5f));
-  CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Bottom",
-      UnityEngine::Vector2(5.8f, 1.0f), UnityEngine::Vector2(-47.0f, 26.0f));
-  CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Left",
-      UnityEngine::Vector2(1.2f, 4.2f), UnityEngine::Vector2(-50.0f, 28.2f));
-  CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Right",
-      UnityEngine::Vector2(1.2f, 4.2f), UnityEngine::Vector2(-44.0f, 28.2f));
-  CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Strap Left",
-      UnityEngine::Vector2(1.0f, 2.0f), UnityEngine::Vector2(-51.2f, 28.2f));
-  CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Strap Right",
-      UnityEngine::Vector2(1.0f, 2.0f), UnityEngine::Vector2(-42.8f, 28.2f));
+  // Font-independent headset silhouette anchored to the panel's left edge.
+  const float markX = -worldChatSettings.width * 0.5f + 8.0f;
+  const float markY = worldChatSettings.height * 0.5f - 6.0f;
+  UnityEngine::UI::Image* parts[6] = {
+      CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Top",
+          UnityEngine::Vector2(7.2f, 1.0f), UnityEngine::Vector2(markX, markY + 2.2f)),
+      CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Bottom",
+          UnityEngine::Vector2(5.8f, 1.0f), UnityEngine::Vector2(markX, markY - 2.2f)),
+      CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Left",
+          UnityEngine::Vector2(1.2f, 4.2f), UnityEngine::Vector2(markX - 3.0f, markY)),
+      CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Right",
+          UnityEngine::Vector2(1.2f, 4.2f), UnityEngine::Vector2(markX + 3.0f, markY)),
+      CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Strap Left",
+          UnityEngine::Vector2(1.0f, 2.0f), UnityEngine::Vector2(markX - 4.2f, markY)),
+      CreateWorldChatLockPart(parent, "RiftPulse Quest Headset Strap Right",
+          UnityEngine::Vector2(1.0f, 2.0f), UnityEngine::Vector2(markX + 4.2f, markY))
+  };
+  for (int i = 0; i < 6; ++i)
+    worldChatPlatformMarkRects[i] = parts[i]
+        ? parts[i]->GetComponent<UnityEngine::RectTransform*>() : nullptr;
 }
 
 static bool CreateWorldChatPanel() {
+  LoadWorldChatSettings();
   auto camera = UnityEngine::Camera::get_main();
   if (!camera || !camera->get_transform()) return false;
   auto cameraTransform = camera->get_transform();
@@ -1136,17 +1366,20 @@ static bool CreateWorldChatPanel() {
   const auto right = cameraTransform->get_right();
   const auto up = cameraTransform->get_up();
   UnityEngine::Vector3 panelPosition(
-      cameraPosition.x + forward.x * 2.15f + right.x * 0.72f - up.x * 0.12f,
-      cameraPosition.y + forward.y * 2.15f + right.y * 0.72f - up.y * 0.12f,
-      cameraPosition.z + forward.z * 2.15f + right.z * 0.72f - up.z * 0.12f);
-  const UnityEngine::Vector3 towardPlayer(-forward.x, -forward.y, -forward.z);
+      cameraPosition.x + right.x * worldChatSettings.x + up.x * worldChatSettings.y + forward.x * worldChatSettings.z,
+      cameraPosition.y + right.y * worldChatSettings.x + up.y * worldChatSettings.y + forward.y * worldChatSettings.z,
+      cameraPosition.z + right.z * worldChatSettings.x + up.z * worldChatSettings.y + forward.z * worldChatSettings.z);
+  const UnityEngine::Vector3 towardPlayer(
+      cameraPosition.x - panelPosition.x, cameraPosition.y - panelPosition.y,
+      cameraPosition.z - panelPosition.z);
   auto panelRotation = UnityEngine::Quaternion::LookRotation(towardPlayer, up);
   LoadWorldChatPlacement(panelPosition, panelRotation);
 
   // BSML FloatingScreen supplies a real VR grab handle. This is a world-space
   // object in the play scene, not a camera-parented HUD or screen overlay.
   worldChatPanel = BSML::FloatingScreen::CreateFloatingScreen(
-      UnityEngine::Vector2(110.0f, 70.0f), true, panelPosition, panelRotation, 0.0f, true);
+      UnityEngine::Vector2(worldChatSettings.width, worldChatSettings.height),
+      true, panelPosition, panelRotation, 0.0f, true);
   if (!worldChatPanel) return false;
   worldChatPanel->set_ShowHandle(true);
   worldChatPanel->set_HighlightHandle(true);
@@ -1159,10 +1392,13 @@ static bool CreateWorldChatPanel() {
   // The chat feed gets the full panel body now; no oversized title competes
   // with incoming messages. Keep a separate compact controller grab hint.
   worldChatText = CreateWorldChatText(
-      "RiftPulse Quest Chat Feed", 5.0f, 0.0f, 90.0f, 58.0f, 2.45f,
+      "RiftPulse Quest Chat Feed", 5.0f, 0.0f,
+      std::max(32.0f, worldChatSettings.width - 20.0f),
+      std::max(24.0f, worldChatSettings.height - 12.0f), 2.45f,
       TMPro::TextAlignmentOptions::TopLeft);
   worldChatHandleLabel = CreateWorldChatText(
-      "RiftPulse Quest Drag Hint", 0.0f, -33.0f, 28.0f, 3.5f, 1.65f,
+      "RiftPulse Quest Drag Hint", 0.0f, -worldChatSettings.height * 0.5f + 2.2f,
+      std::min(42.0f, worldChatSettings.width * 0.45f), 3.5f, 1.65f,
       TMPro::TextAlignmentOptions::Center);
   if (!worldChatText || !worldChatHandleLabel) {
     DestroyWorldChatPanel(true);
