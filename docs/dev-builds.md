@@ -514,3 +514,13 @@ Date: 2026-11-04
 - Public development verification: homepage HTTP 200; /api/v1/health returned status=ok; PCVR ZIP, Quest QMOD, and both platform READMEs returned HTTP 200, and downloaded SHA-256 hashes matched their local build artifacts. Quest QMOD response has Content-Type: application/octet-stream and Content-Disposition: attachment; filename="RiftPulse-Quest-0.1.48-Alpha.qmod".
 - Published release update D1 record release-0829f0e2-c398-4af5-9e30-c27f7d6b47fc to riftpulse-dev-db.
 - Runtime gate remains open: build and distribution were verified, but actual in-game proportional text scaling has not been physically confirmed in a PCVR headset or Quest headset session. Quest ADB was not connected for this build. Alpha tester in-headset validation is still required.
+
+## Proportional chat text scaling - PCVR 0.1.41 / Quest 0.1.48 Alpha (November 14, 2026)
+
+- Corrected the panel resizing behavior: removed the inverse-area TMP font-size compensation from both PCVR and Quest Standalone chat panels. The floating-screen canvas now scales chat glyphs with the panel when width/height are resized, instead of counteracting the panel's scale.
+- PCVR Release build passed with 0 warnings and 0 errors. Local BSManager installation hash matched the build DLL. ZIP structure verified (Plugins/RiftPulse.Pcvr.dll, README.txt). DLL SHA-256: 6D464797EDB82FADED7AC7E5C57211C102E5EFD237BEF589902B074005CC57FA. ZIP SHA-256: 4F609943D9E4B98DB69282D4C6250D192A7BB5AF3F30C89FBB3538B16C140FD8.
+- Quest clean native ARM64 build and link succeeded (CMake emitted only toolchain/deprecation warnings). QMOD archive validated as QMOD-only (mod.json, libriftpulse.so), target Beat Saber 1.40.8_7379, version 0.1.48. QMOD SHA-256: 25C53587D1A30AF6782C70D9183A40A545D47F86129E5E28D1A049B6B51B4743.
+- npm test passed: TypeScript typecheck, all 74 unit/contract tests, 2 isolated migration tests, and Vite Worker/client production build.
+- Cloudflare development Worker riftpulse-dev deployed, Version ID d7acdebe-e1fb-4dd5-aa8c-a7fbbac7a78a. Development homepage and /api/v1/health returned HTTP 200. PCVR ZIP and Quest QMOD were downloaded from the development host and their SHA-256 hashes matched local artifacts exactly.
+- Published persistent development D1 release note release-d6f486ea-fc00-4337-b646-81dd25076fe2.
+- Production app.riftpulse.me was not deployed; release workflow requires separate explicit production authorization. Actual text scaling behavior on the physical headset/runtime remains awaiting alpha tester confirmation (no Quest ADB device connected).
