@@ -1,4 +1,4 @@
-RiftPulse Quest Standalone 0.1.39
+RiftPulse Quest Standalone 0.1.44 Alpha
 Beat Saber 1.40.8 (Quest standalone)
 
 INSTALL:
