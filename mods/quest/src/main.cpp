@@ -61,6 +61,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <exception>
 #include <fstream>
 #include <functional>
@@ -912,8 +913,23 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
   ResumePairing();
 }
 
+static std::string worldChatSessionStartedAt;
+static std::string CurrentUtcIsoTimestamp() {
+  const auto now = std::chrono::system_clock::now();
+  const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
+  const auto time = std::chrono::system_clock::to_time_t(now);
+  std::tm utc{};
+  gmtime_r(&time, &utc);
+  char base[32]{};
+  std::strftime(base, sizeof(base), "%Y-%m-%dT%H:%M:%S", &utc);
+  char suffix[8]{};
+  std::snprintf(suffix, sizeof(suffix), ".%03lldZ", static_cast<long long>(millis));
+  return std::string(base) + suffix;
+}
+
 MOD_EXTERN_FUNC void setup(CModInfo *info) noexcept {
   *info = modInfo.to_c();
+  worldChatSessionStartedAt = CurrentUtcIsoTimestamp();
 }
 
 DEFINE_TYPE(RiftPulse, ChatPanelDriver);
@@ -1185,8 +1201,8 @@ static void ApplyWorldChatSettingsToPanel() {
         cameraPosition.z + right.z * worldChatSettings.x + up.z * worldChatSettings.y + forward.z * worldChatSettings.z);
     worldChatPanel->set_ScreenPosition(position);
     worldChatPanel->set_ScreenRotation(UnityEngine::Quaternion::LookRotation(
-        UnityEngine::Vector3(position.x - cameraPosition.x, position.y - cameraPosition.y,
-                             position.z - cameraPosition.z), up));
+        UnityEngine::Vector3(cameraPosition.x - position.x, cameraPosition.y - position.y,
+                             cameraPosition.z - position.z), up));
   }
 
   if (worldChatText) {
@@ -1334,13 +1350,10 @@ static bool CreateWorldChatPanel() {
       cameraPosition.x + right.x * worldChatSettings.x + up.x * worldChatSettings.y + forward.x * worldChatSettings.z,
       cameraPosition.y + right.y * worldChatSettings.x + up.y * worldChatSettings.y + forward.y * worldChatSettings.z,
       cameraPosition.z + right.z * worldChatSettings.x + up.z * worldChatSettings.y + forward.z * worldChatSettings.z);
-  // FloatingScreen's canvas faces along its local forward axis. Orient that
-  // axis outward from the headset toward the panel, so the text faces the user
-  // instead of appearing mirrored/back-facing after a restart.
-  const UnityEngine::Vector3 panelForward(
-      panelPosition.x - cameraPosition.x, panelPosition.y - cameraPosition.y,
-      panelPosition.z - cameraPosition.z);
-  auto panelRotation = UnityEngine::Quaternion::LookRotation(panelForward, up);
+  // Reverse the panel's local facing axis relative to the previous build.
+  auto panelRotation = UnityEngine::Quaternion::LookRotation(
+      UnityEngine::Vector3(cameraPosition.x - panelPosition.x, cameraPosition.y - panelPosition.y,
+                           cameraPosition.z - panelPosition.z), up);
   // Ignore stale absolute world coordinates; headset-relative settings persist across sessions.
 
   // BSML FloatingScreen supplies a real VR grab handle. This is a world-space
@@ -1458,7 +1471,10 @@ static void RenderWorldChatFeed(const std::string& response) {
       const auto provider = ReadJsonStringField(object, "provider");
       const auto sender = ReadJsonStringField(object, "senderName");
       const auto message = ReadJsonStringField(object, "text");
-      if (sender.empty() || message.empty()) continue;
+      auto receivedAt = ReadJsonStringField(object, "receivedAt");
+      if (receivedAt.empty()) receivedAt = ReadJsonStringField(object, "sentAt");
+      if (sender.empty() || message.empty() || receivedAt.empty() ||
+          worldChatSessionStartedAt.empty() || receivedAt < worldChatSessionStartedAt) continue;
       const auto icon = provider == "twitch" ? "[TW]"
           : provider == "youtube" ? "[YT]"
           : provider == "tiktok" ? "[TT]"

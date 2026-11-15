@@ -148,6 +148,7 @@ namespace RiftPulse.Pcvr
         private readonly ConcurrentQueue<Action> _pendingUiActions = new ConcurrentQueue<Action>();
         private float _nextPollAt;
         private float _nextSaveAt;
+        private readonly DateTime _sessionStartedAtUtc = DateTime.UtcNow;
 
         private static string PlacementPath
         {
@@ -214,7 +215,7 @@ namespace RiftPulse.Pcvr
                 var position = cameraPosition + right * RiftPulseChatPanelPreferences.X
                     + up * RiftPulseChatPanelPreferences.Y + forward * RiftPulseChatPanelPreferences.Z;
                 _panel.ScreenPosition = position;
-                _panel.ScreenRotation = Quaternion.LookRotation(cameraPosition - position, up);
+                _panel.ScreenRotation = Quaternion.LookRotation(position - cameraPosition, up);
             }
             _panel.ScreenSize = new Vector2(RiftPulseChatPanelPreferences.Width, RiftPulseChatPanelPreferences.Height);
             if (_text != null)
@@ -322,8 +323,7 @@ namespace RiftPulse.Pcvr
                 + cameraTransform.right * RiftPulseChatPanelPreferences.X
                 + cameraTransform.up * RiftPulseChatPanelPreferences.Y
                 + cameraTransform.forward * RiftPulseChatPanelPreferences.Z;
-            var towardPlayer = cameraTransform.position - position;
-            var rotation = Quaternion.LookRotation(towardPlayer, cameraTransform.up);
+            var rotation = Quaternion.LookRotation(position - cameraTransform.position, cameraTransform.up);
             // Ignore stale absolute world coordinates; headset-relative saved offsets are canonical.
             RiftPulseChatPanelPreferences.SyncPositionFromWorld(position, cameraTransform);
 
@@ -666,7 +666,12 @@ namespace RiftPulse.Pcvr
                     cursor = objectEnd + 1;
                     var sender = ReadString(item, "senderName");
                     var message = ReadString(item, "text");
-                    if (sender.Length == 0 || message.Length == 0) continue;
+                    var timestamp = ReadString(item, "receivedAt");
+                    if (timestamp.Length == 0) timestamp = ReadString(item, "sentAt");
+                    DateTime messageTime;
+                    if (sender.Length == 0 || message.Length == 0 ||
+                        !DateTime.TryParse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out messageTime) ||
+                        messageTime < _sessionStartedAtUtc) continue;
                     var provider = ReadString(item, "provider");
                     var icon = provider == "twitch" ? "<color=#9146FF>●</color>"
                         : provider == "youtube" ? "<color=#FF0033>▶</color>"
