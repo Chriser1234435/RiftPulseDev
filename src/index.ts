@@ -531,7 +531,7 @@ export default {
       });
       // Query order is newest chat first, followed by supported event rows;
       // preserve that order so actual chat remains visible at the top of the panel.
-      const messages = chatEnabled ? (feed.results ?? []) : [];
+      const messages = chatEnabled ? (feed.results ?? []).map(row => ({ ...row, displayName: row.senderName })) : [];
       if (url.pathname === "/api/v1/device/chat/messages") {
         return Response.json({ messages }, { headers: JSON_HEADERS });
       }

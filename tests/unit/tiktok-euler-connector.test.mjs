@@ -20,9 +20,19 @@ test("compacts a TikTok chat frame to fields used by RiftPulse", () => {
   assert.equal(compact.msgId, "chat-1");
   assert.equal(compact.comment, "hello from chat");
   assert.equal(compact.user.uniqueId, "viewer_one");
+  assert.equal(compact.user.displayName, "Viewer One");
   assert.equal(compact.common.displayText.key, "chat");
   assert.equal(compact.unusedLargeField, undefined);
   assert.ok(Buffer.byteLength(JSON.stringify(compact)) < 2_000);
+});
+
+test("Euler compaction prefers TikTok display name over account handle", () => {
+  const compact = compactTikTokPayload({
+    user: { userId: "123", uniqueId: "viewer_handle", nickname: "Nickname", displayName: "Display Name" },
+    comment: "hi",
+  });
+  assert.equal(compact.user.uniqueId, "viewer_handle");
+  assert.equal(compact.user.displayName, "Display Name");
 });
 
 test("keeps compact gift metadata and repeat markers", () => {

@@ -369,6 +369,8 @@ test("native chat panel feed matches the newest Events/Chat records", async () =
   assert.equal(payload.chatEnabled, true);
   assert.equal(payload.messages.length, 2);
   assert.equal(payload.messages[0].text, "Hello from Twitch chat");
+  assert.equal(payload.messages[0].displayName, "ViewerOne");
+  assert.equal(payload.messages[1].displayName, "ViewerTwo");
   assert.ok(payload.messages.some((message: { text: string }) => message.text === "Hello from Twitch chat"));
   assert.ok(payload.messages.some((message: { text: string }) => message.text === "sent a Super Chat"));
   assert.deepEqual(payload.viewers, {

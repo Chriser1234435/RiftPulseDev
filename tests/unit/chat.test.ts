@@ -76,6 +76,7 @@ test("normalizes TikTok chat and platform events without inventing cash values",
   }, "room-1", "Streamer", now);
   assert.equal(message?.provider, "tiktok");
   assert.equal(message?.text, "Hello chat");
+  assert.equal(message?.senderName, "Viewer"); // TikTok nickname is the display name; uniqueId is the handle.
   assert.equal(message?.badges.verified, true);
 
   // Actual tiktok-live-connector WebcastChatMessage shape: ID lives in common.msgId and text in content.
@@ -85,6 +86,7 @@ test("normalizes TikTok chat and platform events without inventing cash values",
   }, "room-1", "Streamer", now);
   assert.equal(actualConnectorMessage?.externalMessageId, "actual-connector-msg-1");
   assert.equal(actualConnectorMessage?.text, "Hello from a real connector-shaped payload");
+  assert.equal(actualConnectorMessage?.senderName, "Actual Viewer");
 
   const gift = normalizeTikTokProviderEvent("gift", {
     eventId: "gift-event-1", giftName: "Rose", repeatCount: 3,
@@ -102,6 +104,10 @@ test("normalizes TikTok chat and platform events without inventing cash values",
   assert.equal(connectorGift?.externalEventId, "gift-msg-9");
   assert.equal(connectorGift?.itemName, "Rose");
   assert.equal(connectorGift?.quantity, 4);
+  const gifterOnlyEvent = normalizeTikTokProviderEvent("gift", {
+    eventId: "gift-gifter-only", giftName: "Rose", gifter: { userId: "viewer-4", uniqueId: "gift_handle", nickname: "Gift Display Name" },
+  }, "room-1", "Streamer", now);
+  assert.equal(gifterOnlyEvent?.actorName, "Gift Display Name");
 
   // Actual TikTok LIVE protobuf event shape: event metadata is nested inside
   // event.msgId/event.createTime for follow, like, share, and member callbacks.
@@ -111,7 +117,7 @@ test("normalizes TikTok chat and platform events without inventing cash values",
   }, "room-1", "Streamer", now);
   assert.equal(follow?.kind, "follow");
   assert.equal(follow?.externalEventId, "follow-msg-1");
-  assert.equal(follow?.actorName, "follower");
+  assert.equal(follow?.actorName, "Follower");
   assert.equal(follow?.occurredAt, new Date(1793275140 * 1000).toISOString());
 
   const like = normalizeTikTokProviderEvent("like", {
@@ -146,6 +152,12 @@ test("normalizes TikTok chat and platform events without inventing cash values",
   assert.equal(subscription?.externalEventId, "sub-msg-1");
   assert.equal(subscription?.quantity, 3);
   assert.equal(subscription?.itemName, "TikTok LIVE subscription");
+
+  const displayNamePreferred = normalizeTikTokChatMessage({
+    msgId: "tt-display-1", user: { userId: "viewer-dn", displayName: "Display Name", nickname: "Nickname", uniqueId: "handle" },
+    comment: "display name test",
+  }, "room-1", "Streamer", now);
+  assert.equal(displayNamePreferred?.senderName, "Display Name");
 
   const protobufViewerStats = normalizeTikTokProviderEvent("room_user", {
     common: { msgId: "viewer-count-2" }, total: "41", totalUser: "39",

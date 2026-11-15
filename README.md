@@ -21,9 +21,9 @@ A clean-room RiftPulse project for Beat Saber PCVR and standalone Quest.
 
 ## Current status
 
-- The isolated development preview is deployed at https://riftpulse-dev.chrismeten0.workers.dev. Its Downloads page exposes PCVR and Quest 0.1.0 bootstrap packages; see [development build notes](docs/dev-builds.md) for install and runtime-test limits.
+- The isolated development preview is deployed at https://riftpulse-dev.chrismeten0.workers.dev. Its Downloads page currently exposes PCVR 0.1.44 and Quest Standalone 0.1.51 Alpha packages; see [development build notes](docs/dev-builds.md) for install and runtime-test limits.
 - The separate Cloudflare D1 database `riftpulse-dev-db` has migrations `0001` through `0007` applied.
-- The Worker health endpoint is responding successfully. No production DNS or production database has been changed.
+- The development Worker health endpoint is responding successfully. Production DNS and production D1 schema were not changed; however, the Cloudflare production Worker has been deployed for the app site and is currently configured to bind the development Railway API and D1 resources. Production isolation is incomplete and must be corrected before treating it as a fully separate environment.
 - Remote preview authentication is gated by `ALLOW_REMOTE_DEV_AUTH=true`, HTTPS on a `workers.dev` hostname, a single exact trusted origin, and a valid `BETTER_AUTH_SECRET`. Development accounts are temporary and do not use email verification.
 - The remote Worker currently has no Wrangler secrets configured. Authentication, device pairing, encrypted provider-token storage, and TikTok bridge ingestion therefore remain disabled until their secrets are securely added.
 - The TikTok bridge is separate from Cloudflare Worker runtime and has not been started. A real LIVE test still requires a valid public LIVE username and a shared ingest secret configured on both sides.

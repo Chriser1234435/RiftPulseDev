@@ -4,7 +4,7 @@ import WebSocket from "ws";
 const MAX_CONCURRENT = 25;
 const MAX_INGEST_BYTES = 14_000;
 const USER_FIELDS = [
-  "userId", "user_id", "id", "uniqueId", "nickname", "displayId", "username",
+  "userId", "user_id", "id", "uniqueId", "nickname", "displayName", "display_name", "displayId", "username",
   "isModerator", "isSubscriber", "isVerified",
 ];
 const GIFT_FIELDS = ["giftId", "id", "giftName", "name", "giftType"];
@@ -47,12 +47,22 @@ export function compactTikTokPayload(source) {
     roomName: 80, currency: 8,
   }) ?? {};
 
-  const user = pickFields(root.user ?? root.userInfo, USER_FIELDS, {
-    uniqueId: 80, nickname: 80, displayId: 80, username: 80,
+  const userSource = asRecord(root.user ?? root.userInfo);
+  const user = pickFields(userSource, USER_FIELDS, {
+    uniqueId: 80, nickname: 80, displayName: 80, display_name: 80, displayId: 80, username: 80,
   });
-  const gifter = pickFields(root.gifter, USER_FIELDS, {
-    uniqueId: 80, nickname: 80, displayId: 80, username: 80,
+  if (user) {
+    const displayName = scalar(userSource.displayName ?? userSource.display_name ?? userSource.nickname, 80);
+    if (displayName !== undefined) user.displayName = displayName;
+  }
+  const gifterSource = asRecord(root.gifter);
+  const gifter = pickFields(gifterSource, USER_FIELDS, {
+    uniqueId: 80, nickname: 80, displayName: 80, display_name: 80, displayId: 80, username: 80,
   });
+  if (gifter) {
+    const displayName = scalar(gifterSource.displayName ?? gifterSource.display_name ?? gifterSource.nickname, 80);
+    if (displayName !== undefined) gifter.displayName = displayName;
+  }
   const commonSource = asRecord(root.common);
   const common = commonSource ? (pickFields(commonSource, [
     "msgId", "messageId", "logId", "createTime", "create_time", "timestamp",

@@ -524,3 +524,17 @@ Date: 2026-11-04
 - Cloudflare development Worker riftpulse-dev deployed, Version ID d7acdebe-e1fb-4dd5-aa8c-a7fbbac7a78a. Development homepage and /api/v1/health returned HTTP 200. PCVR ZIP and Quest QMOD were downloaded from the development host and their SHA-256 hashes matched local artifacts exactly.
 - Published persistent development D1 release note release-d6f486ea-fc00-4337-b646-81dd25076fe2.
 - Production app.riftpulse.me was not deployed; release workflow requires separate explicit production authorization. Actual text scaling behavior on the physical headset/runtime remains awaiting alpha tester confirmation (no Quest ADB device connected).
+
+## Panel-facing persistence, display-name colors, and Quest menu parity — PCVR 0.1.44 / Quest 0.1.51 Alpha
+
+Date: 2026-11-14
+
+- Both panel settings paths now preserve the existing world-facing rotation during slider updates rather than recomputing a LookRotation on each callback. They save a headset-relative quaternion so the panel's facing can be restored when the panel/game is recreated. PCVR settings capture refreshes on each view open.
+- The in-game chat header now renders a small blue marker before the sender display name. Sender name colors are Twitch purple (#9146FF), YouTube red (#FF0000), and TikTok white (#FFFFFF); the chat message body remains neutral.
+- The device chat feed response includes displayName as an alias for the normalized sender name. The Euler TikTok compactor explicitly sets user.displayName from Euler displayName, display_name, or nickname fields before the account handle fallback. Shared TikTok chat/event normalization prefers display names; gifter-only events also resolve their display name.
+- Quest Standalone menu was reorganized into a PCVR-like pairing card, Chat module card, and BSR module card. Quest pairing code is displayed separately from the Generate Pairing Code action. The Chat settings labels include the same metre units as PCVR.
+- PCVR 0.1.44 Release build passed with 0 warnings and 0 errors; package ZIP entries verified (DLL + README, embedded BSIPA manifest and BSML views).
+- Quest 0.1.51 native ARM64 build and QMOD packaging passed; QMOD entries verified (libriftpulse.so, mod.json). QMOD SHA-256: D5F6FE535DF9E93669F9737AE8A7ED332E030B49AFE696DDD62443EF382DE5D7.
+- npm test passed: typecheck, 75 unit/contract tests, 2 isolated SQLite migration tests, and Vite Worker/client production build.
+- Deployed to the isolated dev Worker `riftpulse-dev`; deployment version ID `910d4d3e-7d48-47b5-8c4d-88287ca37584`. Homepage, API health, PCVR README, and Quest README returned HTTP 200. Versioned PCVR ZIP (23,557 bytes), Quest QMOD (365,285 bytes), PCVR DLL (54,272 bytes), and stable Quest QMOD all returned HTTP 200 and remote SHA-256 matched local. PCVR ZIP SHA-256: `176741BA2E7398589F7E4A11629217ADF592C73223E1E375EC66CA2725995D23`; PCVR DLL SHA-256: `12C33735E41A66351BBB534A3CD3296CEAA4711034B470A35AE7571DE1C185EF`; Quest QMOD SHA-256: `D5F6FE535DF9E93669F9737AE8A7ED332E030B49AFE696DDD62443EF382DE5D7`. Real headset runtime testing remains required for panel-facing persistence and Quest menu visual fit.
+- Production app.riftpulse.me was not updated in this release step; its Worker is currently configured to bind development Railway API and D1 resources, so production isolation should be fixed before another production Worker deployment.

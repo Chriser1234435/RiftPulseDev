@@ -29,6 +29,9 @@ namespace RiftPulse.Pcvr
         private static Vector3 _settingsCameraRight;
         private static Vector3 _settingsCameraUp;
         private static Vector3 _settingsCameraForward;
+        private static Quaternion _settingsCameraRotation = Quaternion.identity;
+        private static Quaternion _savedRotationOffset = Quaternion.identity;
+        private static bool _hasSavedRotationOffset;
 
         private static string SettingsPath
         {
@@ -62,6 +65,18 @@ namespace RiftPulse.Pcvr
                     if (float.TryParse(values[2], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed)) _z = Mathf.Clamp(parsed, 0.8f, 4.5f);
                     if (float.TryParse(values[3], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed)) _width = Mathf.Clamp(parsed, 60f, 180f);
                     if (float.TryParse(values[4], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed)) _height = Mathf.Clamp(parsed, 40f, 120f);
+                    if (values.Length >= 10)
+                    {
+                        var rotationValues = new float[4];
+                        var validRotation = true;
+                        for (var i = 0; i < 4; i++)
+                            validRotation &= float.TryParse(values[i + 5], NumberStyles.Float, CultureInfo.InvariantCulture, out rotationValues[i]);
+                        if (validRotation)
+                        {
+                            _savedRotationOffset = new Quaternion(rotationValues[0], rotationValues[1], rotationValues[2], rotationValues[3]);
+                            _hasSavedRotationOffset = values[9] == "1";
+                        }
+                    }
                 }
             }
             catch (Exception) { /* Keep safe defaults when settings cannot be read. */ }
@@ -73,6 +88,28 @@ namespace RiftPulse.Pcvr
         internal static void SetWidth(float value) { Load(); _width = Mathf.Clamp(value, 60f, 180f); SaveAndApply(); }
         internal static void SetHeight(float value) { Load(); _height = Mathf.Clamp(value, 40f, 120f); SaveAndApply(); }
 
+        internal static Quaternion GetInitialPanelRotation(Transform cameraTransform, Vector3 panelPosition)
+        {
+            Load();
+            if (_hasSavedRotationOffset) return cameraTransform.rotation * _savedRotationOffset;
+            return Quaternion.LookRotation(cameraTransform.position - panelPosition, cameraTransform.up);
+        }
+
+        internal static void SaveRotationOffset(Quaternion worldRotation, Quaternion referenceCameraRotation)
+        {
+            Load();
+            _savedRotationOffset = Quaternion.Inverse(referenceCameraRotation) * worldRotation;
+            _hasSavedRotationOffset = true;
+            SaveFile();
+        }
+
+        internal static Quaternion SettingsCameraRotation(Transform cameraTransform)
+        {
+            return _settingsPoseCaptured ? _settingsCameraRotation : cameraTransform.rotation;
+        }
+
+        internal static Quaternion CapturedSettingsCameraRotation { get { return _settingsCameraRotation; } }
+
         internal static void BeginSettingsEdit()
         {
             var camera = Camera.main;
@@ -82,6 +119,7 @@ namespace RiftPulse.Pcvr
             _settingsCameraRight = transform.right;
             _settingsCameraUp = transform.up;
             _settingsCameraForward = transform.forward;
+            _settingsCameraRotation = transform.rotation;
             _settingsPoseCaptured = true;
         }
 
@@ -115,7 +153,12 @@ namespace RiftPulse.Pcvr
                     _y.ToString("R", CultureInfo.InvariantCulture),
                     _z.ToString("R", CultureInfo.InvariantCulture),
                     _width.ToString("R", CultureInfo.InvariantCulture),
-                    _height.ToString("R", CultureInfo.InvariantCulture)
+                    _height.ToString("R", CultureInfo.InvariantCulture),
+                    _savedRotationOffset.x.ToString("R", CultureInfo.InvariantCulture),
+                    _savedRotationOffset.y.ToString("R", CultureInfo.InvariantCulture),
+                    _savedRotationOffset.z.ToString("R", CultureInfo.InvariantCulture),
+                    _savedRotationOffset.w.ToString("R", CultureInfo.InvariantCulture),
+                    _hasSavedRotationOffset ? "1" : "0"
                 });
             }
             catch (Exception) { }
@@ -216,8 +259,14 @@ namespace RiftPulse.Pcvr
                 var position = cameraPosition + right * RiftPulseChatPanelPreferences.X
                     + up * RiftPulseChatPanelPreferences.Y + forward * RiftPulseChatPanelPreferences.Z;
                 _panel.ScreenPosition = position;
-                // The panel's front face must look back toward the headset, not away from it.
-                _panel.ScreenRotation = Quaternion.LookRotation(cameraPosition - position, up);
+                // Preserve the panel's current facing while its position sliders update.
+                // Recomputing LookRotation on every slider callback caused it to flip.
+                if (camera != null)
+                    RiftPulseChatPanelPreferences.SaveRotationOffset(
+                        _panel.ScreenRotation, RiftPulseChatPanelPreferences.SettingsCameraRotation(camera.transform));
+                else if (captured)
+                    RiftPulseChatPanelPreferences.SaveRotationOffset(
+                        _panel.ScreenRotation, RiftPulseChatPanelPreferences.CapturedSettingsCameraRotation);
             }
             _panel.ScreenSize = new Vector2(RiftPulseChatPanelPreferences.Width, RiftPulseChatPanelPreferences.Height);
             if (_text != null)
@@ -327,7 +376,7 @@ namespace RiftPulse.Pcvr
                 + cameraTransform.up * RiftPulseChatPanelPreferences.Y
                 + cameraTransform.forward * RiftPulseChatPanelPreferences.Z;
             // Face the headset: screen's front normal must point from panel toward camera.
-            var rotation = Quaternion.LookRotation(cameraTransform.position - position, cameraTransform.up);
+            var rotation = RiftPulseChatPanelPreferences.GetInitialPanelRotation(cameraTransform, position);
             // Ignore stale absolute world coordinates; headset-relative saved offsets are canonical.
             RiftPulseChatPanelPreferences.SyncPositionFromWorld(position, cameraTransform);
 
@@ -494,8 +543,12 @@ namespace RiftPulse.Pcvr
                 var position = _panel.ScreenPosition;
                 var rotation = _panel.ScreenRotation;
                 var camera = Camera.main;
-                if (camera != null && !RiftPulseChatPanelPreferences.TryGetSettingsPose(out _, out _, out _, out _))
-                    RiftPulseChatPanelPreferences.SyncPositionFromWorld(position, camera.transform);
+                if (camera != null)
+                {
+                    if (!RiftPulseChatPanelPreferences.TryGetSettingsPose(out _, out _, out _, out _))
+                        RiftPulseChatPanelPreferences.SyncPositionFromWorld(position, camera.transform);
+                    RiftPulseChatPanelPreferences.SaveRotationOffset(rotation, RiftPulseChatPanelPreferences.SettingsCameraRotation(camera.transform));
+                }
                 File.WriteAllText(
                     PlacementPath,
                     string.Join(" ", new[]
@@ -671,7 +724,8 @@ namespace RiftPulse.Pcvr
                     if (objectEnd < 0 || objectEnd > arrayEnd) break;
                     var item = json.Substring(objectStart, objectEnd - objectStart + 1);
                     cursor = objectEnd + 1;
-                    var sender = ReadString(item, "senderName");
+                    var sender = ReadString(item, "displayName");
+                    if (sender.Length == 0) sender = ReadString(item, "senderName");
                     var message = ReadString(item, "text");
                     var timestamp = ReadString(item, "receivedAt");
                     if (timestamp.Length == 0) timestamp = ReadString(item, "sentAt");
@@ -682,12 +736,12 @@ namespace RiftPulse.Pcvr
                     if (!DateTime.TryParse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out messageTime))
                         messageTime = DateTime.UtcNow; // display ordering only; never discard chat due to device clock drift
                     var provider = ReadString(item, "provider");
-                    var icon = provider == "twitch" ? "<color=#9146FF>●</color>"
-                        : provider == "youtube" ? "<color=#FF0033>▶</color>"
-                        : provider == "tiktok" ? "<color=#25F4EE>♪</color>"
-                        : "<color=#B8C4D8>●</color>";
+                    var senderColor = provider == "twitch" ? "#9146FF"
+                        : provider == "youtube" ? "#FF0000"
+                        : provider == "tiktok" ? "#FFFFFF"
+                        : "#B8C4D8";
                     var entry = new StringBuilder();
-                    entry.Append(icon).Append(' ').Append(Escape(sender, 28)).AppendLine();
+                    entry.Append("<color=#3B82F6>\u258C</color> <color=").Append(senderColor).Append(">").Append(Escape(sender, 28)).AppendLine("</color>");
                     entry.AppendLine(Escape(message, 115));
                     entry.AppendLine();
                     chatEntries.Add(new KeyValuePair<DateTime, string>(messageTime, entry.ToString()));

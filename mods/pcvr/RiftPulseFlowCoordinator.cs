@@ -507,12 +507,12 @@ namespace RiftPulse.Pcvr
         {
             if (firstActivation)
             {
-                RiftPulseChatPanelPreferences.BeginSettingsEdit();
                 SetTitle("Chat Panel Settings");
                 showBackButton = true;
             }
             if (addedToHierarchy)
             {
+                RiftPulseChatPanelPreferences.BeginSettingsEdit();
                 ProvideInitialViewControllers(_settingsView);
             }
         }
