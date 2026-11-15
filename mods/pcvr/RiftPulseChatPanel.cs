@@ -529,7 +529,9 @@ namespace RiftPulse.Pcvr
             {
                 string body;
                 int statusCode;
-                using (var request = new HttpRequestMessage(HttpMethod.Get, FeedUrl))
+                // Only show records from this mod/game session so old chat is not restored on restart.
+                var sessionFeedUrl = FeedUrl + "?sessionStartedAt=" + Uri.EscapeDataString(_sessionStartedAtUtc.ToString("o", CultureInfo.InvariantCulture));
+                using (var request = new HttpRequestMessage(HttpMethod.Get, sessionFeedUrl))
                 {
                     request.Headers.Authorization =
                         new System.Net.Http.Headers.AuthenticationHeaderValue(
@@ -696,7 +698,10 @@ namespace RiftPulse.Pcvr
                 var visibleMessageCapacity = Mathf.Clamp(Mathf.FloorToInt(availableLines / messageLines), 1, 12);
                 if (chatEntries.Count > visibleMessageCapacity)
                     chatEntries.RemoveRange(0, chatEntries.Count - visibleMessageCapacity);
-                foreach (var entry in chatEntries) output.Append(entry.Value);
+                // The text panel is top-anchored; render newest entries first so
+                // incoming chat remains visible after the message capacity is reached.
+                for (var index = chatEntries.Count - 1; index >= 0; index--)
+                    output.Append(chatEntries[index].Value);
                 if (chatEntries.Count == 0) output.AppendLine("Waiting for live messages...");
             }
             else

@@ -83,7 +83,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.48";
+static constexpr const char* MOD_VERSION = "0.1.49";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -989,11 +989,20 @@ static void LoadWorldChatSettings() {
 }
 
 static void SaveWorldChatSettings() {
-  std::ofstream output(WorldChatSettingsPath(), std::ios::out | std::ios::trunc);
-  if (!output) return;
-  output << worldChatSettings.x << " " << worldChatSettings.y << " "
-         << worldChatSettings.z << " " << worldChatSettings.width << " "
-         << worldChatSettings.height;
+  const auto path = WorldChatSettingsPath();
+  if (path.empty()) return;
+  const auto temporaryPath = path + ".tmp";
+  {
+    std::ofstream output(temporaryPath, std::ios::out | std::ios::trunc);
+    if (!output) return;
+    output.precision(9);
+    output << worldChatSettings.x << " " << worldChatSettings.y << " "
+           << worldChatSettings.z << " " << worldChatSettings.width << " "
+           << worldChatSettings.height << "\n";
+    output.flush();
+    if (!output.good()) { unlink(temporaryPath.c_str()); return; }
+  }
+  if (rename(temporaryPath.c_str(), path.c_str()) != 0) unlink(temporaryPath.c_str());
 }
 
 static std::string ReadJsonStringField(const std::string& json, const std::string& key) {
@@ -1045,29 +1054,9 @@ static void SaveWorldChatPlacement() {
   if (!worldChatPanel) return;
   const auto position = worldChatPanel->get_ScreenPosition();
   const auto rotation = worldChatPanel->get_ScreenRotation();
-  auto camera = UnityEngine::Camera::get_main();
-  if (camera && camera->get_transform()) {
-    auto cameraTransform = camera->get_transform();
-    // While the settings menu is open, retain the frozen headset frame captured
-    // when it opened. Polling/saving against the live pose caused X/Y/Z to drift
-    // as the player moved their head and made panel dimensions appear to move it.
-    const bool useCapturedPose = worldChatSettingsPoseCaptured;
-    const auto cameraPosition = useCapturedPose
-        ? worldChatSettingsCameraPosition : cameraTransform->get_position();
-    const auto right = useCapturedPose
-        ? worldChatSettingsCameraRight : cameraTransform->get_right();
-    const auto up = useCapturedPose
-        ? worldChatSettingsCameraUp : cameraTransform->get_up();
-    const auto forward = useCapturedPose
-        ? worldChatSettingsCameraForward : cameraTransform->get_forward();
-    const float dx = position.x - cameraPosition.x;
-    const float dy = position.y - cameraPosition.y;
-    const float dz = position.z - cameraPosition.z;
-    worldChatSettings.x = std::clamp(dx * right.x + dy * right.y + dz * right.z, -2.5f, 2.5f);
-    worldChatSettings.y = std::clamp(dx * up.x + dy * up.y + dz * up.z, -2.0f, 2.0f);
-    worldChatSettings.z = std::clamp(dx * forward.x + dy * forward.y + dz * forward.z, 0.8f, 4.5f);
-    SaveWorldChatSettings();
-  }
+  // Do not derive persisted X/Y/Z from the moving headset pose here. This runs
+  // periodically, and projecting a fixed world-space panel against a moving
+  // camera silently overwrote the user's saved slider values.
   std::ofstream output(WorldChatPlacementPath(), std::ios::out | std::ios::trunc);
   if (!output) return;
   output << position.x << " " << position.y << " " << position.z << " "
@@ -1566,7 +1555,9 @@ static void RenderWorldChatFeed(const std::string& response) {
     if (chatEntries.size() > visibleMessageCapacity) {
       chatEntries.erase(chatEntries.begin(), chatEntries.end() - visibleMessageCapacity);
     }
-    for (const auto& entry : chatEntries) output += entry.second;
+    // The panel body is top-anchored; newest-first makes fresh chat visible immediately
+    // rather than appending below the visible area once the panel fills.
+    for (auto entry = chatEntries.rbegin(); entry != chatEntries.rend(); ++entry) output += entry->second;
     if (chatEntries.empty()) output += "No messages yet. Your chat will appear here.\n";
   }
   SetWorldChatText(output);
@@ -1575,7 +1566,9 @@ static void RenderWorldChatFeed(const std::string& response) {
 static void PollWorldChatPanel() {
   if (!isPaired || worldChatRequestInFlight || !EnsureHttpClient()) return;
   worldChatRequestInFlight = true;
-  auto* request = CreateGetRequest(std::string(API_BASE) + "/device/chat/panel", deviceCredential);
+  // Restrict this game/mod session's feed to messages received after startup;
+  // the dashboard/API history must not repopulate the panel with stale chat.
+  auto* request = CreateGetRequest(std::string(API_BASE) + "/device/chat/panel?sessionStartedAt=" + worldChatSessionStartedAt, deviceCredential);
   if (!request || !SendAsync(request, [](int64_t status, const std::string& body) {
         worldChatRequestInFlight = false;
         if (status >= 200 && status < 300) {
