@@ -44,12 +44,12 @@ test("keeps compact gift metadata and repeat markers", () => {
 test("maps common Euler JSON event types to RiftPulse ingest types", () => {
   assert.equal(eventForMessage("WebcastChatMessage", {}).kind, "chat");
   assert.equal(eventForMessage("WebcastGiftMessage", {}).eventName, "gift");
-  assert.equal(eventForMessage("WebcastLikeMessage", {}).eventName, "like");
-  assert.equal(eventForMessage("WebcastMemberMessage", {}).eventName, "member");
-  assert.equal(eventForMessage("WebcastRoomUserSeqMessage", {}).kind, "viewers");
-  assert.equal(eventForMessage("WebcastSubNotifyMessage", {}).eventName, "subNotify");
+  assert.equal(eventForMessage("WebcastLikeMessage", {}), null);
+  assert.equal(eventForMessage("WebcastMemberMessage", {}), null);
+  assert.equal(eventForMessage("WebcastRoomUserSeqMessage", {}), null);
+  assert.equal(eventForMessage("WebcastSubNotifyMessage", {}), null);
   assert.equal(eventForMessage("WebcastSocialMessage", { common: { displayText: { key: "follow_toast" } } }).eventName, "follow");
-  assert.equal(eventForMessage("WebcastSocialMessage", { common: { displayText: { key: "share_toast" } } }).eventName, "share");
+  assert.equal(eventForMessage("WebcastSocialMessage", { common: { displayText: { key: "share_toast" } } }), null);
   assert.equal(eventForMessage("WebcastSocialMessage", { common: { displayText: { key: "other" } } }), null);
 });
 
@@ -106,10 +106,10 @@ test("parses a nested Euler data.messages bundle", () => {
 test("maps simplified Euler event aliases", () => {
   assert.equal(eventForMessage("chat", {}).kind, "chat");
   assert.equal(eventForMessage("gift", {}).eventName, "gift");
-  assert.equal(eventForMessage("like", {}).eventName, "like");
-  assert.equal(eventForMessage("member", {}).eventName, "member");
-  assert.equal(eventForMessage("roomUser", {}).kind, "viewers");
+  assert.equal(eventForMessage("like", {}), null);
+  assert.equal(eventForMessage("member", {}), null);
+  assert.equal(eventForMessage("roomUser", {}), null);
   assert.equal(eventForMessage("follow", {}).eventName, "follow");
-  assert.equal(eventForMessage("share", {}).eventName, "share");
-  assert.equal(eventForMessage("subscription", {}).eventName, "subNotify");
+  assert.equal(eventForMessage("share", {}), null);
+  assert.equal(eventForMessage("subscription", {}), null);
 });

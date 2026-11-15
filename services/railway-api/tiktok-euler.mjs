@@ -85,31 +85,11 @@ export function eventForMessage(method, data) {
     case "webcastgiftmessage":
     case "gift":
       return { kind: "event", eventName: "gift", payload: data };
-    case "webcastlikemessage":
-    case "like":
-      return { kind: "event", eventName: "like", payload: data };
-    case "webcastmembermessage":
-    case "member":
-    case "join":
-      return { kind: "event", eventName: "member", payload: data };
-    case "webcastroomuserseqmessage":
-    case "roomuser":
-    case "roomupdate":
-      return { kind: "viewers", payload: data };
-    case "webcastsubnotifymessage":
-    case "subnotify":
-    case "subscribe":
-    case "subscription":
-      return { kind: "event", eventName: "subNotify", payload: data };
     case "webcastsocialmessage": {
       const displayKey = String(asRecord(asRecord(data)?.common)?.displayText?.key ?? "").toLowerCase();
       if (displayKey.includes("follow")) return { kind: "event", eventName: "follow", payload: data };
-      if (displayKey.includes("share")) return { kind: "event", eventName: "share", payload: data };
       return null;
     }
-    case "webcastsharemessage":
-    case "share":
-      return { kind: "event", eventName: "share", payload: data };
     case "webcastfollowmessage":
     case "follow":
       return { kind: "event", eventName: "follow", payload: data };
