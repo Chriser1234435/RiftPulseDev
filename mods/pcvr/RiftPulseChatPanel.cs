@@ -324,7 +324,7 @@ namespace RiftPulse.Pcvr
                 + cameraTransform.forward * RiftPulseChatPanelPreferences.Z;
             var towardPlayer = cameraTransform.position - position;
             var rotation = Quaternion.LookRotation(towardPlayer, cameraTransform.up);
-            LoadPlacement(ref position, ref rotation);
+            // Ignore stale absolute world coordinates; headset-relative saved offsets are canonical.
             RiftPulseChatPanelPreferences.SyncPositionFromWorld(position, cameraTransform);
 
             // FloatingScreen creates a world-space panel with a controller-grabbable handle.

@@ -71,7 +71,7 @@ namespace RiftPulse.Pcvr
             {
                 _customizeChatPanelButton.gameObject.SetActive(true);
                 _customizeChatPanelButton.interactable = true;
-                var buttonImage = _customizeChatPanelButton.GetComponent<Image>();
+                var buttonImage = _customizeChatPanelButton.GetComponentInChildren<Image>(true);
                 if (buttonImage != null) buttonImage.color = new Color(0.42f, 0.24f, 0.78f, 1f);
             }
             if (_customizeChatPanelButtonText != null)

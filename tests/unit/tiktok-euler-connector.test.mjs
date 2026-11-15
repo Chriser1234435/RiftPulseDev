@@ -49,7 +49,8 @@ test("maps common Euler JSON event types to RiftPulse ingest types", () => {
   assert.equal(eventForMessage("WebcastRoomUserSeqMessage", {}), null);
   assert.equal(eventForMessage("WebcastSubNotifyMessage", {}), null);
   assert.equal(eventForMessage("WebcastSocialMessage", { common: { displayText: { key: "follow_toast" } } }).eventName, "follow");
-  assert.equal(eventForMessage("WebcastSocialMessage", { common: { displayText: { key: "share_toast" } } }), null);
+  assert.equal(eventForMessage("WebcastSocialMessage", { common: { displayText: { key: "share_toast" } } }).eventName, "share");
+  assert.equal(eventForMessage("WebcastShareMessage", {}).eventName, "share");
   assert.equal(eventForMessage("WebcastSocialMessage", { common: { displayText: { key: "other" } } }), null);
 });
 
@@ -110,6 +111,6 @@ test("maps simplified Euler event aliases", () => {
   assert.equal(eventForMessage("member", {}), null);
   assert.equal(eventForMessage("roomUser", {}), null);
   assert.equal(eventForMessage("follow", {}).eventName, "follow");
-  assert.equal(eventForMessage("share", {}), null);
+  assert.equal(eventForMessage("share", {}).eventName, "share");
   assert.equal(eventForMessage("subscription", {}), null);
 });

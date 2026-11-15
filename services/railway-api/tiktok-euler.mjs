@@ -88,11 +88,15 @@ export function eventForMessage(method, data) {
     case "webcastsocialmessage": {
       const displayKey = String(asRecord(asRecord(data)?.common)?.displayText?.key ?? "").toLowerCase();
       if (displayKey.includes("follow")) return { kind: "event", eventName: "follow", payload: data };
+      if (displayKey.includes("share")) return { kind: "event", eventName: "share", payload: data };
       return null;
     }
     case "webcastfollowmessage":
     case "follow":
       return { kind: "event", eventName: "follow", payload: data };
+    case "webcastsharemessage":
+    case "share":
+      return { kind: "event", eventName: "share", payload: data };
     default:
       return null;
   }
