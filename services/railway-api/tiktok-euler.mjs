@@ -319,11 +319,11 @@ export function startTikTokEulerConnector({ worker, env }) {
           this.lastCloseCode = code;
           // Surface Euler's connection-cap rejection as an actionable provider error.
           void this.reportStatus(code === 4429 ? "error" : "disconnected");
-          // Offline/ended streams and Euler connection-cap rejects should wait
-          // the full 30-minute ceiling. The run loop increments attempt once more;
-          // exponent 9 reaches maxDelay=1,800,000ms and prevents daily signing quota burn.
-          if (code === 4404 || code === 4005) this.attempt = Math.max(this.attempt, 8);
-          if (code === 4429) this.attempt = Math.max(this.attempt, 8);
+          // Euler 4404 means NOT_LIVE. Use a short standby probe interval so
+          // creators who go live while RiftPulse is running are detected promptly.
+          // 4005 (room/session issue) and 4429 (quota/cap) retain longer backoff.
+          if (code === 4005 || code === 4429) this.attempt = Math.max(this.attempt, 8);
+          if (code === 4404) this.attempt = Math.max(this.attempt, 2);
           resolve();
         };
         socket.on("open", () => {
@@ -366,17 +366,18 @@ export function startTikTokEulerConnector({ worker, env }) {
         await this.connectOnce();
         if (this.stopped) break;
         this.attempt += 1;
-        const offlineStream = this.lastCloseCode === 4404 || this.lastCloseCode === 4005;
+        const offlineStream = this.lastCloseCode === 4404;
+        const roomUnavailable = this.lastCloseCode === 4005;
         const quotaRejected = this.lastCloseCode === 4429;
-        const maxDelay = offlineStream || quotaRejected ? 1_800_000 : 300_000;
+        const maxDelay = offlineStream ? 30_000 : roomUnavailable || quotaRejected ? 1_800_000 : 300_000;
         const baseDelay = Math.min(maxDelay, 5_000 * (2 ** Math.min(this.attempt, 12)));
-        // Offline creators and quota/cap rejects must hold the full 30-minute
-        // cooldown; only transient network failures use shorter jittered retries.
-        const delay = offlineStream || quotaRejected
+        // Euler NOT_LIVE standby probes every 30 seconds to pick up a live transition.
+        // Room/session and quota/cap errors back off for 30 minutes; transient failures use jitter.
+        const delay = offlineStream || roomUnavailable || quotaRejected
           ? maxDelay
           : Math.min(maxDelay, Math.round(baseDelay * (0.75 + Math.random() * 0.5)));
         console.info("Euler TikTok retry scheduled for @" + this.username + " in "
-          + Math.round(delay / 60_000) + " minute(s) (close code " + this.lastCloseCode + ").");
+          + Math.round(delay / 1_000) + " second(s) (close code " + this.lastCloseCode + ").");
         await this.wait(delay);
       }
       await this.queue;
