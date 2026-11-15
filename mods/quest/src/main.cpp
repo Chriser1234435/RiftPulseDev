@@ -83,7 +83,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.52";
+static constexpr const char* MOD_VERSION = "0.1.53";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -934,7 +934,7 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
   if (heading) TrackMainMenuObject(heading->get_gameObject());
 
   instructions = BSML::Lite::CreateText(
-      root, "STREAM TOOLS FOR BEAT SABER  /  QUEST STANDALONE",
+      root, "STREAM CONTROL CENTER  /  BEAT SABER",
       2.4f, {0.0f, 9.0f}, {58.0f, 5.0f});
   if (instructions) TrackMainMenuObject(instructions->get_gameObject());
 
@@ -959,13 +959,13 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
 
   codeButton = BSML::Lite::CreateUIButton(
       root, "GENERATE PAIRING CODE", "PracticeButton",
-      UnityEngine::Vector2({22.0f, -8.3f}), UnityEngine::Vector2({42.0f, 4.8f}),
+      UnityEngine::Vector2({0.0f, -8.3f}), UnityEngine::Vector2({42.0f, 4.8f}),
       []() { GeneratePairingCode(); });
   if (codeButton) TrackMainMenuObject(codeButton->get_gameObject());
 
   checkButton = BSML::Lite::CreateUIButton(
       root, "CHECK PAIRING STATUS", "PracticeButton",
-      UnityEngine::Vector2({22.0f, -13.2f}), UnityEngine::Vector2({42.0f, 4.8f}),
+      UnityEngine::Vector2({0.0f, -13.2f}), UnityEngine::Vector2({42.0f, 4.8f}),
       []() { CheckPairingStatus(); });
   if (checkButton) TrackMainMenuObject(checkButton->get_gameObject());
 
@@ -974,25 +974,25 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
   if (chatTitle) TrackMainMenuObject(chatTitle->get_gameObject());
 
   auto* chatDescription = BSML::Lite::CreateText(
-      root, "Messages and supported events from your connected platforms.",
+      root, "Combined chat and supported live events from connected platforms.",
       2.5f, {0.0f, -19.5f}, {58.0f, 3.4f});
   if (chatDescription) TrackMainMenuObject(chatDescription->get_gameObject());
 
   auto* customizePanelButton = BSML::Lite::CreateUIButton(
       root, "CONFIGURE CHAT PANEL", "PracticeButton",
-      UnityEngine::Vector2({22.0f, -22.8f}), UnityEngine::Vector2({42.0f, 4.6f}),
+      UnityEngine::Vector2({0.0f, -22.8f}), UnityEngine::Vector2({42.0f, 4.6f}),
       []() { ShowChatPanelSettingsModal(); });
   if (customizePanelButton) TrackMainMenuObject(customizePanelButton->get_gameObject());
 
   chatButton = BSML::Lite::CreateUIButton(
       root, "CHAT MODULE: LOCKED", "PracticeButton",
-      UnityEngine::Vector2({22.0f, -27.8f}), UnityEngine::Vector2({42.0f, 4.6f}),
+      UnityEngine::Vector2({0.0f, -27.8f}), UnityEngine::Vector2({42.0f, 4.6f}),
       []() { ToggleChat(); });
   if (chatButton) TrackMainMenuObject(chatButton->get_gameObject());
 
   auto* movePanelButton = BSML::Lite::CreateUIButton(
-      root, "MOVE CHAT PANEL TO VIEW", "PracticeButton",
-      UnityEngine::Vector2({22.0f, -32.8f}), UnityEngine::Vector2({42.0f, 4.6f}),
+      root, "BRING CHAT PANEL INTO VIEW", "PracticeButton",
+      UnityEngine::Vector2({0.0f, -32.8f}), UnityEngine::Vector2({42.0f, 4.6f}),
       []() { ShowWorldChatPanel(); });
   if (movePanelButton) TrackMainMenuObject(movePanelButton->get_gameObject());
 
@@ -1007,7 +1007,7 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
 
   bsrButton = BSML::Lite::CreateUIButton(
       root, "BSR MODULE: LOCKED", "PracticeButton",
-      UnityEngine::Vector2({22.0f, -42.3f}), UnityEngine::Vector2({42.0f, 4.6f}),
+      UnityEngine::Vector2({0.0f, -42.3f}), UnityEngine::Vector2({42.0f, 4.6f}),
       []() { ToggleBsr(); });
   if (bsrButton) TrackMainMenuObject(bsrButton->get_gameObject());
 
@@ -1585,7 +1585,7 @@ static bool CreateWorldChatPanel() {
     DestroyWorldChatPanel(true);
     return false;
   }
-  worldChatText->set_text(StringW("QUEST  /  LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages..."));
+  worldChatText->set_text(StringW("RIFTPULSE  /  LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages..."));
   // Keep the base font size; the floating panel scales chat text along with its dimensions.
   worldChatHandleLabel->set_text(StringW("DRAG TO MOVE"));
   worldChatHandleLabel->set_enableWordWrapping(false);
@@ -1651,7 +1651,7 @@ static void RenderWorldChatFeed(const std::string& response) {
     totalViewers = viewerMatch[1].str();
   }
 
-  std::string output = "QUEST  /  LIVE CHAT\n";
+  std::string output = "RIFTPULSE  /  LIVE CHAT\n";
   output += "COMBINED VIEWERS  " + totalViewers + "\n";
   output += "----------------------------\n";
 

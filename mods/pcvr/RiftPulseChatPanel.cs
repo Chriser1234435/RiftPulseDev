@@ -398,7 +398,7 @@ namespace RiftPulse.Pcvr
                 new Vector2(Mathf.Max(32f, RiftPulseChatPanelPreferences.Width - 20f),
                     Mathf.Max(24f, RiftPulseChatPanelPreferences.Height - 12f)),
                 2.45f, TextAlignmentOptions.BottomLeft);
-            _text.text = "PCVR  /  LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages...";
+            _text.text = "RIFTPULSE  /  LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages...";
             // The base font size is intentionally left unchanged so panel scaling also scales chat text.
 
             _handleLabel = CreatePanelText(root, "RiftPulse PCVR Drag Hint",
@@ -636,7 +636,7 @@ namespace RiftPulse.Pcvr
             if (_text == null) return;
             _text.gameObject.SetActive(true);
             _text.enabled = true;
-            _text.text = "PCVR  /  LIVE CHAT\n\n" + detail;
+            _text.text = "RIFTPULSE  /  LIVE CHAT\n\n" + detail;
         }
 
         private static int FindMatchingArrayEnd(string json, int start)
@@ -703,7 +703,7 @@ namespace RiftPulse.Pcvr
                 total = viewerMatch.Groups[1].Value;
 
             var output = new StringBuilder();
-            output.AppendLine("PCVR  /  LIVE CHAT");
+            output.AppendLine("RIFTPULSE  /  LIVE CHAT");
             output.Append("COMBINED VIEWERS  ").AppendLine(total);
             output.AppendLine("----------------------------");
 

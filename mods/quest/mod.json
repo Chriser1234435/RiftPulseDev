@@ -5,7 +5,7 @@
     "id":  "riftpulse",
     "modloader":  "Scotland2",
     "author":  "RiftPulseDev",
-    "version":  "0.1.52",
+    "version":  "0.1.53",
     "packageId":  "com.beatgames.beatsaber",
     "packageVersion":  "1.40.8_7379",
     "description":  "RiftPulse Quest Standalone client with PCVR-style pairing, Chat, and BSR menu cards; headset-relative chat panel position and facing persistence; safe native quaternion initialization; Twitch, YouTube, and TikTok display-name colors; movable world-space chat panel for Beat Saber 1.40.8",
