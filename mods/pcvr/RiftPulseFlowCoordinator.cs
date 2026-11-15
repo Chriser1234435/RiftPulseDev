@@ -20,7 +20,7 @@ namespace RiftPulse.Pcvr
     {
         private const string ApiBase = "https://app.riftpulse.me/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.1.36";
+        private const string ModVersion = "0.1.37";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 
@@ -96,14 +96,46 @@ namespace RiftPulse.Pcvr
             }
 
             RefreshUi();
-            _ = LoadAccountModuleSettings();
+            _ = ResumeDevicePairing();
+        }
+
+        private async Task ResumeDevicePairing()
+        {
+            try
+            {
+                var credential = LoadOrCreateDeviceCredential();
+                var deviceId = LoadOrCreateDeviceId();
+                var body = "{\"deviceId\":\"" + deviceId + "\",\"deviceCredential\":\"" + credential + "\"}";
+                using (var request = new HttpRequestMessage(HttpMethod.Post, ApiBase + "/pairing/resume"))
+                {
+                    request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                    using (var response = await Http.SendAsync(request))
+                    {
+                        if (response.IsSuccessStatusCode)
+                        {
+                            var payload = await response.Content.ReadAsStringAsync();
+                            var state = Regex.Match(payload, "\"status\"\\s*:\\s*\"([a-z_]+)\"");
+                            if (state.Success && state.Groups[1].Value == "claimed")
+                            {
+                                _hasPairedThisSession = true;
+                                StatusText = "Saved RiftPulse device connection restored.";
+                                RefreshUi();
+                                await LoadAccountModuleSettings();
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception) { /* Keep startup resilient; the saved device credential is still available. */ }
+            await LoadAccountModuleSettings();
         }
 
         private void RefreshUi()
         {
             if (_pairingCodeText != null) _pairingCodeText.text = PairingCode;
             if (_connectButtonText != null) _connectButtonText.text = _connecting ? "GENERATING CODE..." : "GENERATE PAIRING CODE";
-            if (_customizeChatPanelButtonText != null) _customizeChatPanelButtonText.text = "CUSTOMIZE CHAT PANEL";
+            if (_customizeChatPanelButtonText != null) _customizeChatPanelButtonText.text = "CONFIGURE CHAT PANEL";
             if (_statusText != null) _statusText.text = StatusText;
             if (_chatToggleButtonText != null) _chatToggleButtonText.text = ChatToggleLabel;
             if (_bsrToggleButtonText != null) _bsrToggleButtonText.text = BsrToggleLabel;

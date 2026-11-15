@@ -1185,8 +1185,8 @@ static void ApplyWorldChatSettingsToPanel() {
         cameraPosition.z + right.z * worldChatSettings.x + up.z * worldChatSettings.y + forward.z * worldChatSettings.z);
     worldChatPanel->set_ScreenPosition(position);
     worldChatPanel->set_ScreenRotation(UnityEngine::Quaternion::LookRotation(
-        UnityEngine::Vector3(cameraPosition.x - position.x, cameraPosition.y - position.y,
-                             cameraPosition.z - position.z), up));
+        UnityEngine::Vector3(position.x - cameraPosition.x, position.y - cameraPosition.y,
+                             position.z - cameraPosition.z), up));
   }
 
   if (worldChatText) {
@@ -1334,10 +1334,13 @@ static bool CreateWorldChatPanel() {
       cameraPosition.x + right.x * worldChatSettings.x + up.x * worldChatSettings.y + forward.x * worldChatSettings.z,
       cameraPosition.y + right.y * worldChatSettings.x + up.y * worldChatSettings.y + forward.y * worldChatSettings.z,
       cameraPosition.z + right.z * worldChatSettings.x + up.z * worldChatSettings.y + forward.z * worldChatSettings.z);
-  const UnityEngine::Vector3 towardPlayer(
-      cameraPosition.x - panelPosition.x, cameraPosition.y - panelPosition.y,
-      cameraPosition.z - panelPosition.z);
-  auto panelRotation = UnityEngine::Quaternion::LookRotation(towardPlayer, up);
+  // FloatingScreen's canvas faces along its local forward axis. Orient that
+  // axis outward from the headset toward the panel, so the text faces the user
+  // instead of appearing mirrored/back-facing after a restart.
+  const UnityEngine::Vector3 panelForward(
+      panelPosition.x - cameraPosition.x, panelPosition.y - cameraPosition.y,
+      panelPosition.z - cameraPosition.z);
+  auto panelRotation = UnityEngine::Quaternion::LookRotation(panelForward, up);
   // Ignore stale absolute world coordinates; headset-relative settings persist across sessions.
 
   // BSML FloatingScreen supplies a real VR grab handle. This is a world-space
@@ -1500,6 +1503,14 @@ void RiftPulse::ChatPanelDriver::Update() {
   }
   if (!worldChatPanel && !CreateWorldChatPanel()) return;
 
+  const float now = UnityEngine::Time::get_realtimeSinceStartup();
+  // Persist the user's headset-relative position regularly, even while the
+  // device is not paired or the feed is temporarily unavailable.
+  if (now >= worldChatNextPlacementSave) {
+    worldChatNextPlacementSave = now + 1.0f;
+    SaveWorldChatPlacement();
+  }
+
   if (!isPaired) {
     if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(true);
     if (!worldChatPairingPromptVisible) {
@@ -1509,10 +1520,8 @@ void RiftPulse::ChatPanelDriver::Update() {
     return;
   }
   worldChatPairingPromptVisible = false;
-  const float now = UnityEngine::Time::get_realtimeSinceStartup();
   if (now >= worldChatNextPoll) {
     worldChatNextPoll = now + 3.0f;
-    SaveWorldChatPlacement();
     PollWorldChatPanel();
   }
 }
@@ -1553,11 +1562,47 @@ static void ShowWorldChatPanel() {
   }
 }
 
+static void ChatPanelSettings_DidActivate(
+    HMUI::ViewController* self, bool firstActivation, bool addedToHierarchy,
+    bool screenSystemEnabling) {
+  if (!firstActivation) return;
+  LoadWorldChatSettings();
+  auto camera = UnityEngine::Camera::get_main();
+  if (camera && camera->get_transform()) {
+    auto transform = camera->get_transform();
+    worldChatSettingsCameraPosition = transform->get_position();
+    worldChatSettingsCameraRight = transform->get_right();
+    worldChatSettingsCameraUp = transform->get_up();
+    worldChatSettingsCameraForward = transform->get_forward();
+    worldChatSettingsPoseCaptured = true;
+  }
+
+  // BSML's scrollable settings container is centered in the submenu. Keep the
+  // five panel controls together here rather than scattering them on the mod page.
+  auto* container = BSML::Lite::CreateScrollableSettingsContainer(self);
+  BSML::Lite::CreateSliderSetting(container, "X POSITION", 0.05f,
+      worldChatSettings.x, -2.5f, 2.5f,
+      [](float value) { SetWorldChatPanelSetting(0, value); });
+  BSML::Lite::CreateSliderSetting(container, "Y POSITION", 0.05f,
+      worldChatSettings.y, -2.0f, 2.0f,
+      [](float value) { SetWorldChatPanelSetting(1, value); });
+  BSML::Lite::CreateSliderSetting(container, "Z DISTANCE", 0.05f,
+      worldChatSettings.z, 0.8f, 4.5f,
+      [](float value) { SetWorldChatPanelSetting(2, value); });
+  BSML::Lite::CreateSliderSetting(container, "PANEL WIDTH", 2.0f,
+      worldChatSettings.width, 60.0f, 180.0f,
+      [](float value) { SetWorldChatPanelSetting(3, value); });
+  BSML::Lite::CreateSliderSetting(container, "PANEL HEIGHT", 2.0f,
+      worldChatSettings.height, 40.0f, 120.0f,
+      [](float value) { SetWorldChatPanelSetting(4, value); });
+}
+
 MOD_EXTERN_FUNC void late_load() noexcept {
   BSML::Init();
   BSML::LateInit();
-  // Keep late-load limited to registering the menu.
   BSML::Register::RegisterMainMenuViewControllerMethod(
       "RiftPulse", "RiftPulse", "Connect Quest to RiftPulse",
       BuildRiftPulseMenu);
+  BSML::Register::RegisterSettingsMenu(
+      "RiftPulse Chat Panel", ChatPanelSettings_DidActivate, false);
 }
