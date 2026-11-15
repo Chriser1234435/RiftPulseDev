@@ -227,10 +227,7 @@ namespace RiftPulse.Pcvr
                 textRect.sizeDelta = new Vector2(
                     Mathf.Max(32f, RiftPulseChatPanelPreferences.Width - 20f),
                     Mathf.Max(24f, RiftPulseChatPanelPreferences.Height - 12f));
-                // FloatingScreen's canvas scales TMP glyphs along with its dimensions.
-                // Keep physical text size stable when the user changes panel width/height.
-                var panelArea = Mathf.Max(1f, RiftPulseChatPanelPreferences.Width * RiftPulseChatPanelPreferences.Height);
-                _text.fontSize = 2.45f * Mathf.Sqrt(7700f / panelArea);
+                // Keep the base TMP font size. FloatingScreen scales the text with panel geometry.
             }
             if (_handleLabel != null)
             {
@@ -352,8 +349,7 @@ namespace RiftPulse.Pcvr
                     Mathf.Max(24f, RiftPulseChatPanelPreferences.Height - 12f)),
                 2.45f, TextAlignmentOptions.TopLeft);
             _text.text = "PCVR  /  LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages...";
-            var initialPanelArea = Mathf.Max(1f, RiftPulseChatPanelPreferences.Width * RiftPulseChatPanelPreferences.Height);
-            _text.fontSize = 2.45f * Mathf.Sqrt(7700f / initialPanelArea);
+            // The base font size is intentionally left unchanged so panel scaling also scales chat text.
 
             _handleLabel = CreatePanelText(root, "RiftPulse PCVR Drag Hint",
                 new Vector2(0f, -RiftPulseChatPanelPreferences.Height * 0.5f + 2.2f),

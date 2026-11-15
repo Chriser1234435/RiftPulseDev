@@ -83,7 +83,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.47";
+static constexpr const char* MOD_VERSION = "0.1.48";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -1231,12 +1231,7 @@ static void ApplyWorldChatSettingsToPanel() {
           std::max(24.0f, worldChatSettings.height - 12.0f)));
     }
   }
-  if (worldChatText) {
-    // FloatingScreen canvas size can scale TMP glyphs with panel dimensions.
-    // Compensate by area so width/height only change the panel geometry.
-    const float panelArea = std::max(1.0f, worldChatSettings.width * worldChatSettings.height);
-    worldChatText->set_fontSize(2.45f * std::sqrt(7700.0f / panelArea));
-  }
+  // Keep the base TMP font size so FloatingScreen scales chat text together with panel geometry.
   if (worldChatHandleLabel) {
     auto* rect = worldChatHandleLabel->GetComponent<UnityEngine::RectTransform*>();
     if (rect) {
@@ -1463,8 +1458,7 @@ static bool CreateWorldChatPanel() {
     return false;
   }
   worldChatText->set_text(StringW("QUEST  /  LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages..."));
-  const float initialPanelArea = std::max(1.0f, worldChatSettings.width * worldChatSettings.height);
-  worldChatText->set_fontSize(2.45f * std::sqrt(7700.0f / initialPanelArea));
+  // Keep the base font size; the floating panel scales chat text along with its dimensions.
   worldChatHandleLabel->set_text(StringW("DRAG TO MOVE"));
   worldChatHandleLabel->set_enableWordWrapping(false);
   worldChatHandleLabel->set_color(UnityEngine::Color(0.34f, 0.88f, 1.0f, 1.0f));
