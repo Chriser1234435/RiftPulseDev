@@ -326,7 +326,8 @@ namespace RiftPulse.Pcvr
                 + cameraTransform.right * RiftPulseChatPanelPreferences.X
                 + cameraTransform.up * RiftPulseChatPanelPreferences.Y
                 + cameraTransform.forward * RiftPulseChatPanelPreferences.Z;
-            var rotation = Quaternion.LookRotation(position - cameraTransform.position, cameraTransform.up);
+            // Face the headset: screen's front normal must point from panel toward camera.
+            var rotation = Quaternion.LookRotation(cameraTransform.position - position, cameraTransform.up);
             // Ignore stale absolute world coordinates; headset-relative saved offsets are canonical.
             RiftPulseChatPanelPreferences.SyncPositionFromWorld(position, cameraTransform);
 
@@ -347,7 +348,7 @@ namespace RiftPulse.Pcvr
                 new Vector2(5f, 0f),
                 new Vector2(Mathf.Max(32f, RiftPulseChatPanelPreferences.Width - 20f),
                     Mathf.Max(24f, RiftPulseChatPanelPreferences.Height - 12f)),
-                2.45f, TextAlignmentOptions.TopLeft);
+                2.45f, TextAlignmentOptions.BottomLeft);
             _text.text = "PCVR  /  LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages...";
             // The base font size is intentionally left unchanged so panel scaling also scales chat text.
 
@@ -698,10 +699,10 @@ namespace RiftPulse.Pcvr
                 var visibleMessageCapacity = Mathf.Clamp(Mathf.FloorToInt(availableLines / messageLines), 1, 12);
                 if (chatEntries.Count > visibleMessageCapacity)
                     chatEntries.RemoveRange(0, chatEntries.Count - visibleMessageCapacity);
-                // The text panel is top-anchored; render newest entries first so
-                // incoming chat remains visible after the message capacity is reached.
-                for (var index = chatEntries.Count - 1; index >= 0; index--)
-                    output.Append(chatEntries[index].Value);
+                // Bottom-anchored feed: keep chronological order so newest entries sit at the bottom.
+                // Capacity trimming above removes the oldest messages from the top.
+                foreach (var entry in chatEntries)
+                    output.Append(entry.Value);
                 if (chatEntries.Count == 0) output.AppendLine("Waiting for live messages...");
             }
             else

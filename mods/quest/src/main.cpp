@@ -83,7 +83,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.49";
+static constexpr const char* MOD_VERSION = "0.1.50";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -1437,7 +1437,7 @@ static bool CreateWorldChatPanel() {
       "RiftPulse Quest Chat Feed", 5.0f, 0.0f,
       std::max(32.0f, worldChatSettings.width - 20.0f),
       std::max(24.0f, worldChatSettings.height - 12.0f), 2.45f,
-      TMPro::TextAlignmentOptions::TopLeft);
+      TMPro::TextAlignmentOptions::BottomLeft);
   worldChatHandleLabel = CreateWorldChatText(
       "RiftPulse Quest Drag Hint", 0.0f, -worldChatSettings.height * 0.5f + 2.2f,
       std::min(42.0f, worldChatSettings.width * 0.45f), 3.5f, 1.65f,
@@ -1555,9 +1555,9 @@ static void RenderWorldChatFeed(const std::string& response) {
     if (chatEntries.size() > visibleMessageCapacity) {
       chatEntries.erase(chatEntries.begin(), chatEntries.end() - visibleMessageCapacity);
     }
-    // The panel body is top-anchored; newest-first makes fresh chat visible immediately
-    // rather than appending below the visible area once the panel fills.
-    for (auto entry = chatEntries.rbegin(); entry != chatEntries.rend(); ++entry) output += entry->second;
+    // Bottom-anchored feed: keep chronological order so newest entries sit at the bottom.
+    // Capacity trimming above removes the oldest messages from the top.
+    for (const auto& entry : chatEntries) output += entry.second;
     if (chatEntries.empty()) output += "No messages yet. Your chat will appear here.\n";
   }
   SetWorldChatText(output);
