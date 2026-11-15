@@ -20,7 +20,7 @@ namespace RiftPulse.Pcvr
     {
         private const string ApiBase = "https://app.riftpulse.me/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.1.37";
+        private const string ModVersion = "0.1.40";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 

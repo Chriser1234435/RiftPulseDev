@@ -58,6 +58,7 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -82,7 +83,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.44";
+static constexpr const char* MOD_VERSION = "0.1.47";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -92,6 +93,7 @@ static UnityEngine::UI::Button* checkButton = nullptr;
 static UnityEngine::UI::Button* chatButton = nullptr;
 static UnityEngine::UI::Button* bsrButton = nullptr;
 static UnityEngine::Transform* mainMenuRoot = nullptr;
+static BSML::ModalView* worldChatSettingsModal = nullptr;
 static std::vector<UnityEngine::GameObject*> mainMenuObjects;
 
 static std::string deviceId;
@@ -123,6 +125,7 @@ static UnityEngine::Vector3 worldChatSettingsCameraForward;
 static void LoadWorldChatSettings();
 static void SaveWorldChatSettings();
 static void SetWorldChatPanelSetting(int field, float value);
+static void ShowChatPanelSettingsModal();
 
 static void SetStatus(const std::string& text) {
   if (overview) overview->set_text(StringW(text));
@@ -904,6 +907,12 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
       []() { ToggleBsr(); });
   if (bsrButton) TrackMainMenuObject(bsrButton->get_gameObject());
 
+  auto* customizePanelButton = BSML::Lite::CreateUIButton(
+      root, "CUSTOMIZE CHAT PANEL", "PracticeButton",
+      UnityEngine::Vector2({22.0f, -33.0f}), UnityEngine::Vector2({42.0f, 5.2f}),
+      []() { ShowChatPanelSettingsModal(); });
+  if (customizePanelButton) TrackMainMenuObject(customizePanelButton->get_gameObject());
+
   auto* openPanelButton = BSML::Lite::CreateUIButton(
       root, "OPEN 3D CHAT PANEL", "PracticeButton",
       UnityEngine::Vector2({22.0f, -39.0f}), UnityEngine::Vector2({42.0f, 5.2f}),
@@ -1039,10 +1048,18 @@ static void SaveWorldChatPlacement() {
   auto camera = UnityEngine::Camera::get_main();
   if (camera && camera->get_transform()) {
     auto cameraTransform = camera->get_transform();
-    const auto cameraPosition = cameraTransform->get_position();
-    const auto right = cameraTransform->get_right();
-    const auto up = cameraTransform->get_up();
-    const auto forward = cameraTransform->get_forward();
+    // While the settings menu is open, retain the frozen headset frame captured
+    // when it opened. Polling/saving against the live pose caused X/Y/Z to drift
+    // as the player moved their head and made panel dimensions appear to move it.
+    const bool useCapturedPose = worldChatSettingsPoseCaptured;
+    const auto cameraPosition = useCapturedPose
+        ? worldChatSettingsCameraPosition : cameraTransform->get_position();
+    const auto right = useCapturedPose
+        ? worldChatSettingsCameraRight : cameraTransform->get_right();
+    const auto up = useCapturedPose
+        ? worldChatSettingsCameraUp : cameraTransform->get_up();
+    const auto forward = useCapturedPose
+        ? worldChatSettingsCameraForward : cameraTransform->get_forward();
     const float dx = position.x - cameraPosition.x;
     const float dy = position.y - cameraPosition.y;
     const float dz = position.z - cameraPosition.z;
@@ -1214,6 +1231,12 @@ static void ApplyWorldChatSettingsToPanel() {
           std::max(24.0f, worldChatSettings.height - 12.0f)));
     }
   }
+  if (worldChatText) {
+    // FloatingScreen canvas size can scale TMP glyphs with panel dimensions.
+    // Compensate by area so width/height only change the panel geometry.
+    const float panelArea = std::max(1.0f, worldChatSettings.width * worldChatSettings.height);
+    worldChatText->set_fontSize(2.45f * std::sqrt(7700.0f / panelArea));
+  }
   if (worldChatHandleLabel) {
     auto* rect = worldChatHandleLabel->GetComponent<UnityEngine::RectTransform*>();
     if (rect) {
@@ -1259,6 +1282,60 @@ static void SetWorldChatPanelSetting(int field, float value) {
     // Allow the saved X/Y/Z offsets to position the panel on its next creation.
     std::remove(WorldChatPlacementPath().c_str());
   }
+}
+
+static void ShowChatPanelSettingsModal() {
+  if (!mainMenuRoot) return;
+  if (worldChatSettingsModal) {
+    auto camera = UnityEngine::Camera::get_main();
+    if (camera && camera->get_transform()) {
+      auto transform = camera->get_transform();
+      worldChatSettingsCameraPosition = transform->get_position();
+      worldChatSettingsCameraRight = transform->get_right();
+      worldChatSettingsCameraUp = transform->get_up();
+      worldChatSettingsCameraForward = transform->get_forward();
+      worldChatSettingsPoseCaptured = true;
+    }
+    worldChatSettingsModal->Show();
+    return;
+  }
+  LoadWorldChatSettings();
+  auto camera = UnityEngine::Camera::get_main();
+  if (camera && camera->get_transform()) {
+    auto transform = camera->get_transform();
+    worldChatSettingsCameraPosition = transform->get_position();
+    worldChatSettingsCameraRight = transform->get_right();
+    worldChatSettingsCameraUp = transform->get_up();
+    worldChatSettingsCameraForward = transform->get_forward();
+    worldChatSettingsPoseCaptured = true;
+  }
+  worldChatSettingsModal = BSML::Lite::CreateModal(
+      mainMenuRoot, UnityEngine::Vector2(0.0f, 0.0f), UnityEngine::Vector2(52.0f, 42.0f),
+      []() { worldChatSettingsPoseCaptured = false; }, true);
+  if (!worldChatSettingsModal) return;
+  auto* container = BSML::Lite::CreateScrollableModalContainer(worldChatSettingsModal);
+  if (!container) {
+    worldChatSettingsModal->Hide();
+    worldChatSettingsModal = nullptr;
+    worldChatSettingsPoseCaptured = false;
+    return;
+  }
+  BSML::Lite::CreateSliderSetting(container, "X POSITION", 0.05f,
+      worldChatSettings.x, -2.5f, 2.5f,
+      [](float value) { SetWorldChatPanelSetting(0, value); });
+  BSML::Lite::CreateSliderSetting(container, "Y POSITION", 0.05f,
+      worldChatSettings.y, -2.0f, 2.0f,
+      [](float value) { SetWorldChatPanelSetting(1, value); });
+  BSML::Lite::CreateSliderSetting(container, "Z DISTANCE", 0.05f,
+      worldChatSettings.z, 0.8f, 4.5f,
+      [](float value) { SetWorldChatPanelSetting(2, value); });
+  BSML::Lite::CreateSliderSetting(container, "PANEL WIDTH", 2.0f,
+      worldChatSettings.width, 60.0f, 180.0f,
+      [](float value) { SetWorldChatPanelSetting(3, value); });
+  BSML::Lite::CreateSliderSetting(container, "PANEL HEIGHT", 2.0f,
+      worldChatSettings.height, 40.0f, 120.0f,
+      [](float value) { SetWorldChatPanelSetting(4, value); });
+  worldChatSettingsModal->Show();
 }
 
 static TMPro::TextMeshProUGUI* CreateWorldChatText(
@@ -1386,6 +1463,8 @@ static bool CreateWorldChatPanel() {
     return false;
   }
   worldChatText->set_text(StringW("QUEST  /  LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages..."));
+  const float initialPanelArea = std::max(1.0f, worldChatSettings.width * worldChatSettings.height);
+  worldChatText->set_fontSize(2.45f * std::sqrt(7700.0f / initialPanelArea));
   worldChatHandleLabel->set_text(StringW("DRAG TO MOVE"));
   worldChatHandleLabel->set_enableWordWrapping(false);
   worldChatHandleLabel->set_color(UnityEngine::Color(0.34f, 0.88f, 1.0f, 1.0f));
@@ -1459,8 +1538,8 @@ static void RenderWorldChatFeed(const std::string& response) {
   const auto arrayEnd = FindMatchingJsonArrayEnd(response, arrayStart);
   if (arrayStart != std::string::npos && arrayEnd != std::string::npos) {
     size_t cursor = arrayStart + 1;
-    size_t rendered = 0;
-    while (cursor < arrayEnd && rendered < 8) {
+    std::vector<std::pair<std::string, std::string>> chatEntries;
+    while (cursor < arrayEnd) {
       while (cursor < arrayEnd && (std::isspace(static_cast<unsigned char>(response[cursor])) || response[cursor] == ',')) ++cursor;
       const auto objectStart = response.find('{', cursor);
       if (objectStart == std::string::npos || objectStart >= arrayEnd) break;
@@ -1473,17 +1552,28 @@ static void RenderWorldChatFeed(const std::string& response) {
       const auto message = ReadJsonStringField(object, "text");
       auto receivedAt = ReadJsonStringField(object, "receivedAt");
       if (receivedAt.empty()) receivedAt = ReadJsonStringField(object, "sentAt");
-      if (sender.empty() || message.empty() || receivedAt.empty() ||
-          worldChatSessionStartedAt.empty() || receivedAt < worldChatSessionStartedAt) continue;
+      // Do not filter on Quest's local session clock: clock skew against API timestamps
+      // can make all incoming messages disappear even while the provider is live.
+      if (sender.empty() || message.empty()) continue;
       const auto icon = provider == "twitch" ? "[TW]"
           : provider == "youtube" ? "[YT]"
           : provider == "tiktok" ? "[TT]"
           : "[LIVE]";
-      output += icon + std::string(" ") + EscapeChatRichText(sender, 28) + "\n";
-      output += EscapeChatRichText(message, 115) + "\n\n";
-      ++rendered;
+      chatEntries.push_back({receivedAt, icon + std::string(" ") + EscapeChatRichText(sender, 28) + "\n" +
+                            EscapeChatRichText(message, 115) + "\n\n"});
     }
-    if (rendered == 0) output += "No messages yet. Your chat will appear here.\n";
+    std::stable_sort(chatEntries.begin(), chatEntries.end(),
+        [](const auto& left, const auto& right) { return left.first < right.first; });
+    const auto charsPerMessageLine = std::max(28.0f, worldChatSettings.width * 0.70f);
+    const auto messageLines = 2.0f + std::ceil(115.0f / charsPerMessageLine);
+    const auto availableLines = std::max(1.0f, (worldChatSettings.height - 12.0f) / 2.7f);
+    const auto visibleMessageCapacity = static_cast<size_t>(
+        std::clamp(std::floor(availableLines / messageLines), 1.0f, 12.0f));
+    if (chatEntries.size() > visibleMessageCapacity) {
+      chatEntries.erase(chatEntries.begin(), chatEntries.end() - visibleMessageCapacity);
+    }
+    for (const auto& entry : chatEntries) output += entry.second;
+    if (chatEntries.empty()) output += "No messages yet. Your chat will appear here.\n";
   }
   SetWorldChatText(output);
 }
@@ -1619,6 +1709,6 @@ MOD_EXTERN_FUNC void late_load() noexcept {
   BSML::Register::RegisterMainMenuViewControllerMethod(
       "RiftPulse", "RiftPulse", "Connect Quest to RiftPulse",
       BuildRiftPulseMenu);
-  BSML::Register::RegisterSettingsMenu(
-      "RiftPulse Chat Panel", ChatPanelSettings_DidActivate, false);
+  // Panel settings now open from a button inside RiftPulse itself; no separate
+  // extra mod-menu entry is registered for customization.
 }

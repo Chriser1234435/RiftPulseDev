@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
@@ -215,7 +216,8 @@ namespace RiftPulse.Pcvr
                 var position = cameraPosition + right * RiftPulseChatPanelPreferences.X
                     + up * RiftPulseChatPanelPreferences.Y + forward * RiftPulseChatPanelPreferences.Z;
                 _panel.ScreenPosition = position;
-                _panel.ScreenRotation = Quaternion.LookRotation(position - cameraPosition, up);
+                // The panel's front face must look back toward the headset, not away from it.
+                _panel.ScreenRotation = Quaternion.LookRotation(cameraPosition - position, up);
             }
             _panel.ScreenSize = new Vector2(RiftPulseChatPanelPreferences.Width, RiftPulseChatPanelPreferences.Height);
             if (_text != null)
@@ -225,6 +227,10 @@ namespace RiftPulse.Pcvr
                 textRect.sizeDelta = new Vector2(
                     Mathf.Max(32f, RiftPulseChatPanelPreferences.Width - 20f),
                     Mathf.Max(24f, RiftPulseChatPanelPreferences.Height - 12f));
+                // FloatingScreen's canvas scales TMP glyphs along with its dimensions.
+                // Keep physical text size stable when the user changes panel width/height.
+                var panelArea = Mathf.Max(1f, RiftPulseChatPanelPreferences.Width * RiftPulseChatPanelPreferences.Height);
+                _text.fontSize = 2.45f * Mathf.Sqrt(7700f / panelArea);
             }
             if (_handleLabel != null)
             {
@@ -346,6 +352,8 @@ namespace RiftPulse.Pcvr
                     Mathf.Max(24f, RiftPulseChatPanelPreferences.Height - 12f)),
                 2.45f, TextAlignmentOptions.TopLeft);
             _text.text = "PCVR  /  LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages...";
+            var initialPanelArea = Mathf.Max(1f, RiftPulseChatPanelPreferences.Width * RiftPulseChatPanelPreferences.Height);
+            _text.fontSize = 2.45f * Mathf.Sqrt(7700f / initialPanelArea);
 
             _handleLabel = CreatePanelText(root, "RiftPulse PCVR Drag Hint",
                 new Vector2(0f, -RiftPulseChatPanelPreferences.Height * 0.5f + 2.2f),
@@ -653,8 +661,8 @@ namespace RiftPulse.Pcvr
             if (arrayStart >= 0 && arrayEnd > arrayStart)
             {
                 var cursor = arrayStart + 1;
-                var rendered = 0;
-                while (cursor < arrayEnd && rendered < 8)
+                var chatEntries = new List<KeyValuePair<DateTime, string>>();
+                while (cursor < arrayEnd)
                 {
                     while (cursor < arrayEnd && (char.IsWhiteSpace(json[cursor]) || json[cursor] == ','))
                         cursor++;
@@ -668,21 +676,32 @@ namespace RiftPulse.Pcvr
                     var message = ReadString(item, "text");
                     var timestamp = ReadString(item, "receivedAt");
                     if (timestamp.Length == 0) timestamp = ReadString(item, "sentAt");
+                    // Do not gate live chat by the headset/PC clock. The API owns receivedAt;
+                    // local clock drift can otherwise discard every legitimate incoming message.
+                    if (sender.Length == 0 || message.Length == 0) continue;
                     DateTime messageTime;
-                    if (sender.Length == 0 || message.Length == 0 ||
-                        !DateTime.TryParse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out messageTime) ||
-                        messageTime < _sessionStartedAtUtc) continue;
+                    if (!DateTime.TryParse(timestamp, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out messageTime))
+                        messageTime = DateTime.UtcNow; // display ordering only; never discard chat due to device clock drift
                     var provider = ReadString(item, "provider");
                     var icon = provider == "twitch" ? "<color=#9146FF>●</color>"
                         : provider == "youtube" ? "<color=#FF0033>▶</color>"
                         : provider == "tiktok" ? "<color=#25F4EE>♪</color>"
                         : "<color=#B8C4D8>●</color>";
-                    output.Append(icon).Append(' ').Append(Escape(sender, 28)).AppendLine();
-                    output.AppendLine(Escape(message, 115));
-                    output.AppendLine();
-                    rendered++;
+                    var entry = new StringBuilder();
+                    entry.Append(icon).Append(' ').Append(Escape(sender, 28)).AppendLine();
+                    entry.AppendLine(Escape(message, 115));
+                    entry.AppendLine();
+                    chatEntries.Add(new KeyValuePair<DateTime, string>(messageTime, entry.ToString()));
                 }
-                if (rendered == 0) output.AppendLine("Waiting for live messages...");
+                chatEntries.Sort((left, right) => left.Key.CompareTo(right.Key));
+                var charsPerMessageLine = Mathf.Max(28f, RiftPulseChatPanelPreferences.Width * 0.70f);
+                var messageLines = 2f + Mathf.CeilToInt(115f / charsPerMessageLine);
+                var availableLines = Mathf.Max(1f, (RiftPulseChatPanelPreferences.Height - 12f) / 2.7f);
+                var visibleMessageCapacity = Mathf.Clamp(Mathf.FloorToInt(availableLines / messageLines), 1, 12);
+                if (chatEntries.Count > visibleMessageCapacity)
+                    chatEntries.RemoveRange(0, chatEntries.Count - visibleMessageCapacity);
+                foreach (var entry in chatEntries) output.Append(entry.Value);
+                if (chatEntries.Count == 0) output.AppendLine("Waiting for live messages...");
             }
             else
             {

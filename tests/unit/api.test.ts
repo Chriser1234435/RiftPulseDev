@@ -99,9 +99,9 @@ class FakeStatement implements D1PreparedStatement {
       return { success: false, results: [] };
     }
     if (q.includes("from chat_messages") && q.includes("from provider_events")) {
-      assert.match(q, /partition by provider, sourcepriority/);
-      assert.match(q, /order by sourcepriority asc/);
-      assert.match(q, /order by sourcepriority asc, receivedat asc, id asc limit 8/);
+      assert.match(q, /order by receivedat desc limit 100/);
+      assert.ok(q.includes("union all"));
+      assert.ok(q.includes("kind != 'viewer_count'"));
       return { success: true, results: this.db.panelFeed as T[] };
     }
     if (q.includes("from integration_health") || q.includes("group by provider")) {
@@ -346,7 +346,7 @@ test("native chat panel feed requires device auth and reports chat toggle plus v
   });
 });
 
-test("native chat panel feed prioritizes chat messages ahead of supported events", async () => {
+test("native chat panel feed matches the newest Events/Chat records", async () => {
   const bindings = env();
   const credential = "9".repeat(64);
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential));
