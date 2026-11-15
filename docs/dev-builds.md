@@ -489,3 +489,16 @@ Date: 2026-11-04
 - Source commit: e3c6fb7e7c4c05435dbcad11fd9f6a6e8ab97e88. Cloudflare development Worker riftpulse-dev deployed, Version ID ca7261a3-7fab-4221-a699-a3ea81bfd4c1. Railway development API deployment 4877eae8-b857-4056-a7bb-5019eda286cc reached SUCCESS.
 - Published release update to development D1 release history (record release-youtube-homepage-oauth-20261111).
 - Production app.riftpulse.me was not deployed. Actual Google-account OAuth round-trip remains pending user testing.
+
+
+## Native in-game chat feed alignment and panel sizing — PCVR 0.1.40 / Quest 0.1.47 Alpha (November 14, 2026)
+
+- PCVR Release build passed with 0 warnings and 0 errors. Package and local BSManager installation verification passed. ZIP entries: `Plugins/RiftPulse.Pcvr.dll`, `README.txt`. DLL SHA-256: `B945D201329843E623B2697C6F22C28AC776B879B936871128807E85CD14FE07`. ZIP SHA-256: `193F9F63B69DF320D4769848AA758BDB715FDF0A0E3B825F6538A177E9BB0375`.
+- Quest clean native ARM64 build succeeded (C++ compile/link exit code 0). QMOD packaging and embedded manifest/archive validation succeeded; archive contains only `mod.json` and `libriftpulse.so`, with manifest version `0.1.47` and Beat Saber target `1.40.8_7379`. QMOD SHA-256: `86BE6281B9E3EB2C2F00A772DAAB89DFCE32F178E06B596E67BB5911DADA1BE3`.
+- Native panel API feed query was replaced with the same newest-first 100-row union used by the website Events/Chat endpoint. This corrects the old rank/ascending LIMIT 8 behavior that could return stale chat. Added API regression assertions. PCVR facing direction corrected. Both platforms compensate TMP font sizing when the panel dimensions change. Quest customization is now invoked from a button inside the RiftPulse mod page and opens a popup, removing the extra standalone customization entry from the Mods menu.
+- Website download card and tester README files updated to PCVR 0.1.40 and Quest 0.1.47 Alpha. Quest download remains QMOD-only (no Quest ZIP).
+- Validation: `npm test` passed TypeScript typecheck, all 74 unit/contract tests, 2 isolated migration tests, and the Vite Worker/client production build. API-specific rerun passed 24/24 tests. `git diff --check` passed aside from an initially normalized release-script EOF whitespace warning; that script was normalized afterward.
+- Source commit `fa5ca7cc5a85a92cb8e64d5348f016f32e956431` (`Fix native chat panel feed and sizing`) pushed to `origin/main`. Railway development API deployment `d1320d01-9308-4fa2-8026-eef2a2fbe322` reached SUCCESS.
+- Cloudflare Worker `riftpulse` deployed with production config `wrangler.production.jsonc`, Version ID `c18f6037-2713-45ba-aaa4-eb82245f50cd`. Public app homepage HTTP GET and `/api/v1/health` HTTP GET returned 200. PCVR ZIP, Quest QMOD, PCVR README, Quest README, and PCVR DLL each returned HTTP 200 and downloaded SHA-256 exactly matched local artifacts.
+- Published persistent release update record `release-42df4eac-67aa-495e-bdb5-771a98ede87d` in D1.
+- Runtime gate remains open: neither actual PCVR Beat Saber in-game panel behavior nor Quest headset menu/popup/feed behavior was physically tested this deployment. Alpha tester confirmation is required for actual visibility, current chat content, position sliders, dimension sliders, and text-size consistency.

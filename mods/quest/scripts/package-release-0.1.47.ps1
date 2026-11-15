@@ -61,5 +61,3 @@ try {
   Write-Output "Versioned SHA256: $((Get-FileHash $out -Algorithm SHA256).Hash)"
   Write-Output "Stable SHA256: $((Get-FileHash $stable -Algorithm SHA256).Hash)"
 } finally { $check.Dispose() }
-
-
