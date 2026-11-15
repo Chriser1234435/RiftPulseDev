@@ -83,7 +83,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.1.51";
+static constexpr const char* MOD_VERSION = "0.1.52";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -113,7 +113,7 @@ struct WorldChatPanelSettings {
   float z = 2.15f;
   float width = 110.0f;
   float height = 70.0f;
-  UnityEngine::Quaternion rotationOffset = UnityEngine::Quaternion::get_identity();
+  UnityEngine::Quaternion rotationOffset = UnityEngine::Quaternion(0.0f, 0.0f, 0.0f, 1.0f);
   bool hasRotationOffset = false;
 };
 static WorldChatPanelSettings worldChatSettings;
@@ -125,7 +125,7 @@ static UnityEngine::Vector3 worldChatSettingsCameraPosition;
 static UnityEngine::Vector3 worldChatSettingsCameraRight;
 static UnityEngine::Vector3 worldChatSettingsCameraUp;
 static UnityEngine::Vector3 worldChatSettingsCameraForward;
-static UnityEngine::Quaternion worldChatSettingsCameraRotation = UnityEngine::Quaternion::get_identity();
+static UnityEngine::Quaternion worldChatSettingsCameraRotation = UnityEngine::Quaternion(0.0f, 0.0f, 0.0f, 1.0f);
 static void LoadWorldChatSettings();
 static void SaveWorldChatSettings();
 static void SetWorldChatPanelSetting(int field, float value);
