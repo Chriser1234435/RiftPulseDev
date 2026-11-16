@@ -7,8 +7,10 @@
 #include "UnityEngine/Quaternion.hpp"
 #include "UnityEngine/GameObject.hpp"
 #include "UnityEngine/RectTransform.hpp"
-#include "UnityEngine/CanvasRenderer.hpp"
 #include "UnityEngine/RectOffset.hpp"
+#include "HMUI/ImageView.hpp"
+#include "bsml/shared/BSML-Lite/Creation/Image.hpp"
+#include "bsml/shared/Helpers/utilities.hpp"
 #include "UnityEngine/UI/Button.hpp"
 #include "UnityEngine/UI/VerticalLayoutGroup.hpp"
 #include "UnityEngine/UI/HorizontalLayoutGroup.hpp"
@@ -88,7 +90,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.3.5";
+static constexpr const char* MOD_VERSION = "0.3.6";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -923,13 +925,10 @@ static UnityEngine::Sprite* GetWorldChatWhiteSprite();
 static void ApplyQuestImageTint(
     UnityEngine::GameObject* object, UnityEngine::UI::Image* image,
     UnityEngine::Color tint) {
+  (void)object;
   if (!image) return;
-  image->set_color(UnityEngine::Color(1.0f, 1.0f, 1.0f, 1.0f));
-  auto* renderer = object
-      ? object->GetComponent<UnityEngine::CanvasRenderer*>()
-      : nullptr;
-  if (renderer) renderer->SetColor(tint);
-  else image->set_color(tint);
+  image->set_color(tint);
+  image->set_enabled(true);
 }
 
 static void CreateQuestMenuCardPart(
@@ -991,6 +990,11 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
   mainMenuRoot = viewController->get_transform();
   auto root = mainMenuRoot;
   mainMenuObjects.clear();
+  // The BSML main-menu view can include a full-page default white Image. It is
+  // not part of RiftPulse's content, so remove that inherited surface.
+  if (auto* rootImage = viewController->get_gameObject()->GetComponent<UnityEngine::UI::Image*>()) {
+    rootImage->set_enabled(false);
+  }
   LoadWorldChatSettings();
 
   BuildRiftPulseMenuPcvrLayout(root);
@@ -1436,7 +1440,10 @@ static void ApplyQuestDarkBackground(UnityEngine::GameObject* object,
   // their child card/feed surface is custom-painted. Tint only the root image;
   // child controls, slider tracks, and accent images retain their own styling.
   auto* image = object->GetComponent<UnityEngine::UI::Image*>();
-  if (image) ApplyQuestImageTint(object, image, color);
+  if (image) {
+    image->set_color(color);
+    image->set_enabled(true);
+  }
 }
 
 static UnityEngine::UI::Image* CreateWorldChatLockPart(

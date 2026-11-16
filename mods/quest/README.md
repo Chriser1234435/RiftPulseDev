@@ -1,4 +1,4 @@
-# RiftPulse Quest alpha 0.3.5
+# RiftPulse Quest alpha 0.3.6
 
 Native ARM64 Scotland2 client for Beat Saber 1.40.8 (1.40.8_7379). This alpha ports the PCVR BSML menu hierarchy into Quest-native C++/BSML, including a constrained two-column card layout and Device Status footer.
 

@@ -1,3 +1,37 @@
+static HMUI::ImageView* CreateQuestLayoutSurface(
+    UnityEngine::Transform* parent, UnityEngine::Vector2 size,
+    UnityEngine::Color tint, bool visible) {
+  if (!parent || !visible) return nullptr;
+  auto* sprite = BSML::Utilities::ImageResources::GetWhitePixel();
+  if (!sprite) sprite = BSML::Utilities::ImageResources::GetBlankSprite();
+  if (!sprite) return nullptr;
+
+  // Use Beat Saber's own HMUI ImageView and material for standalone menu
+  // surfaces. Raw Unity Images in this view are rendering as un-tinted white.
+  auto* image = BSML::Lite::CreateImage(
+      parent, sprite, UnityEngine::Vector2(0.0f, 0.0f), size);
+  if (!image) return nullptr;
+
+  auto* rect = image->GetComponent<UnityEngine::RectTransform*>();
+  if (rect) {
+    rect->set_anchorMin(UnityEngine::Vector2(0.0f, 0.0f));
+    rect->set_anchorMax(UnityEngine::Vector2(1.0f, 1.0f));
+    rect->set_pivot(UnityEngine::Vector2(0.5f, 0.5f));
+    rect->set_offsetMin(UnityEngine::Vector2(0.0f, 0.0f));
+    rect->set_offsetMax(UnityEngine::Vector2(0.0f, 0.0f));
+  }
+  auto* layout = image->GetComponent<UnityEngine::UI::LayoutElement*>();
+  if (!layout) layout = image->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+  if (layout) layout->set_ignoreLayout(true);
+
+  image->set_useScriptableObjectColors(false);
+  image->set_gradient(false);
+  image->set_color(tint);
+  image->set_raycastTarget(false);
+  image->get_transform()->SetAsFirstSibling();
+  TrackMainMenuObject(image->get_gameObject());
+  return image;
+}
 static void ConfigureQuestLayoutElement(
     UnityEngine::GameObject* object, float preferredWidth, float preferredHeight) {
   if (!object) return;
@@ -16,16 +50,14 @@ static UnityEngine::UI::VerticalLayoutGroup* CreateQuestVerticalLayout(
     UnityEngine::Color surfaceColor, bool drawSurface, int padding) {
   ArrayW<System::Type*> componentTypes{
       static_cast<System::Type*>(csTypeOf(UnityEngine::RectTransform*)),
-      static_cast<System::Type*>(csTypeOf(UnityEngine::UI::Image*)),
       static_cast<System::Type*>(csTypeOf(UnityEngine::UI::VerticalLayoutGroup*)),
       static_cast<System::Type*>(csTypeOf(UnityEngine::UI::LayoutElement*))
   };
   auto* object = UnityEngine::GameObject::New_ctor(StringW(name), componentTypes);
   if (!object) return nullptr;
   auto* rect = object->GetComponent<UnityEngine::RectTransform*>();
-  auto* image = object->GetComponent<UnityEngine::UI::Image*>();
   auto* group = object->GetComponent<UnityEngine::UI::VerticalLayoutGroup*>();
-  if (!rect || !image || !group) {
+  if (!rect || !group) {
     UnityEngine::Object::Destroy(object);
     return nullptr;
   }
@@ -35,10 +67,7 @@ static UnityEngine::UI::VerticalLayoutGroup* CreateQuestVerticalLayout(
   rect->set_pivot(UnityEngine::Vector2(0.5f, 0.5f));
   rect->set_anchoredPosition(UnityEngine::Vector2(0.0f, 0.0f));
   rect->set_sizeDelta(UnityEngine::Vector2(width, height));
-  image->set_sprite(GetWorldChatWhiteSprite());
-  image->set_enabled(drawSurface);
-  ApplyQuestImageTint(object, image, surfaceColor);
-  image->set_raycastTarget(false);
+  CreateQuestLayoutSurface(object->get_transform(), UnityEngine::Vector2(width, height), surfaceColor, drawSurface);
   group->set_spacing(spacing);
   group->set_childControlWidth(true);
   group->set_childControlHeight(false);
@@ -56,16 +85,14 @@ static UnityEngine::UI::HorizontalLayoutGroup* CreateQuestHorizontalLayout(
     UnityEngine::Color surfaceColor, bool drawSurface, int padding) {
   ArrayW<System::Type*> componentTypes{
       static_cast<System::Type*>(csTypeOf(UnityEngine::RectTransform*)),
-      static_cast<System::Type*>(csTypeOf(UnityEngine::UI::Image*)),
       static_cast<System::Type*>(csTypeOf(UnityEngine::UI::HorizontalLayoutGroup*)),
       static_cast<System::Type*>(csTypeOf(UnityEngine::UI::LayoutElement*))
   };
   auto* object = UnityEngine::GameObject::New_ctor(StringW(name), componentTypes);
   if (!object) return nullptr;
   auto* rect = object->GetComponent<UnityEngine::RectTransform*>();
-  auto* image = object->GetComponent<UnityEngine::UI::Image*>();
   auto* group = object->GetComponent<UnityEngine::UI::HorizontalLayoutGroup*>();
-  if (!rect || !image || !group) {
+  if (!rect || !group) {
     UnityEngine::Object::Destroy(object);
     return nullptr;
   }
@@ -75,10 +102,7 @@ static UnityEngine::UI::HorizontalLayoutGroup* CreateQuestHorizontalLayout(
   rect->set_pivot(UnityEngine::Vector2(0.5f, 0.5f));
   rect->set_anchoredPosition(UnityEngine::Vector2(0.0f, 0.0f));
   rect->set_sizeDelta(UnityEngine::Vector2(width, height));
-  image->set_sprite(GetWorldChatWhiteSprite());
-  image->set_enabled(drawSurface);
-  ApplyQuestImageTint(object, image, surfaceColor);
-  image->set_raycastTarget(false);
+  CreateQuestLayoutSurface(object->get_transform(), UnityEngine::Vector2(width, height), surfaceColor, drawSurface);
   group->set_spacing(spacing);
   group->set_childControlWidth(false);
   group->set_childControlHeight(true);
@@ -142,7 +166,7 @@ static void BuildRiftPulseMenuPcvrLayout(UnityEngine::Transform* root) {
       instructions = CreateQuestLayoutText(brand, "NEXUS  /  STREAM COMMAND", 2.7f, 28.0f, 1.8f);
     }
     if (game) {
-      CreateQuestLayoutText(game, "BEAT SABER  •  LIVE CONTROL", 2.8f, 28.0f, 2.2f,
+      CreateQuestLayoutText(game, "BEAT SABER  ΓÇó  LIVE CONTROL", 2.8f, 28.0f, 2.2f,
           TMPro::TextAlignmentOptions::Right);
       CreateQuestLayoutText(game, "YOUR STREAM. ONE CONTROL SURFACE.", 2.25f, 28.0f, 1.8f,
           TMPro::TextAlignmentOptions::Right);
@@ -221,7 +245,7 @@ static void BuildRiftPulseMenuPcvrLayout(UnityEngine::Transform* root) {
       60.0f, 4.2f, 0.1f, headerSurface, true, 0);
   if (footer) {
     modulePreviewStatusLabel = CreateQuestLayoutText(
-        footer, "DEVICE STATUS  •  Pair this headset to sync its modules.",
+        footer, "DEVICE STATUS  ΓÇó  Pair this headset to sync its modules.",
         1.8f, 58.0f, 1.7f, TMPro::TextAlignmentOptions::Center);
   }
 }
