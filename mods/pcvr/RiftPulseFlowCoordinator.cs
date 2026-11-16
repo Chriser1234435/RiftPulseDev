@@ -20,7 +20,7 @@ namespace RiftPulse.Pcvr
     {
         private const string ApiBase = "https://app.riftpulse.me/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.3.0";
+        private const string ModVersion = "0.3.1";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 
@@ -118,7 +118,8 @@ namespace RiftPulse.Pcvr
                             if (state.Success && state.Groups[1].Value == "claimed")
                             {
                                 _hasPairedThisSession = true;
-                                StatusText = "Saved RiftPulse device connection restored.";
+                                PairingCode = "LINKED";
+                                StatusText = "Saved device link restored.";
                                 RefreshUi();
                                 await LoadAccountModuleSettings();
                                 return;
@@ -134,8 +135,10 @@ namespace RiftPulse.Pcvr
         private void RefreshUi()
         {
             if (_pairingCodeText != null) _pairingCodeText.text = PairingCode;
-            if (_connectButtonText != null) _connectButtonText.text = _connecting ? "GENERATING CODE..." : "GENERATE SECURE CODE";
-            if (_customizeChatPanelButtonText != null) _customizeChatPanelButtonText.text = "OPEN CHAT DISPLAY LAB";
+            if (_connectButtonText != null)
+                _connectButtonText.text = _connecting ? "GENERATING CODE..." :
+                    (_hasPairedThisSession ? "GENERATE NEW CODE" : "GENERATE SECURE CODE");
+            if (_customizeChatPanelButtonText != null) _customizeChatPanelButtonText.text = "OPEN DISPLAY LAB";
             if (_statusText != null) _statusText.text = StatusText;
             if (_chatToggleButtonText != null) _chatToggleButtonText.text = ChatToggleLabel;
             if (_bsrToggleButtonText != null) _bsrToggleButtonText.text = BsrToggleLabel;
@@ -278,6 +281,7 @@ namespace RiftPulse.Pcvr
                             return;
                         }
                         _hasPairedThisSession = true;
+                        PairingCode = "LINKED";
                         var payload = await response.Content.ReadAsStringAsync();
                         var chatMatch = Regex.Match(payload, "\\\"chat\\\"\\s*:\\s*\\{[^}]*\\\"enabled\\\"\\s*:\\s*(true|false)", RegexOptions.Singleline);
                         var bsrMatch = Regex.Match(payload, "\\\"bsr-song-request\\\"\\s*:\\s*\\{[^}]*\\\"enabled\\\"\\s*:\\s*(true|false)", RegexOptions.Singleline);
@@ -285,7 +289,7 @@ namespace RiftPulse.Pcvr
                         if (bsrMatch.Success) _bsrPreviewEnabled = bsrMatch.Groups[1].Value == "true";
                         ChatToggleLabel = _chatPreviewEnabled ? "CHAT MODULE: ON (ACCOUNT SYNCED)" : "CHAT MODULE: OFF (ACCOUNT SYNCED)";
                         BsrToggleLabel = _bsrPreviewEnabled ? "BSR MODULE: ON (ACCOUNT SYNCED)" : "BSR MODULE: OFF (ACCOUNT SYNCED)";
-                        ModulePreviewStatus = "Loaded module settings from your RiftPulse account. Services are not activated by these switches yet.";
+                        ModulePreviewStatus = "Module settings synced. Service controls are still in preview.";
                         RefreshUi();
                     }
                 }
@@ -298,7 +302,7 @@ namespace RiftPulse.Pcvr
         {
             if (_connecting) return;
             _connecting = true;
-            PairingCode = "â€¢ â€¢ â€¢ â€¢ â€¢";
+            PairingCode = "•••••";
             StatusText = "Generating a secure pairing code...";
             RefreshUi();
 
@@ -376,7 +380,8 @@ namespace RiftPulse.Pcvr
                     if (status == "claimed")
                     {
                         _hasPairedThisSession = true;
-                        StatusText = "RiftPulse account linked! Device pairing succeeded.";
+                        PairingCode = "LINKED";
+                        StatusText = "RiftPulse account linked. Device pairing succeeded.";
                         RefreshUi();
                         await LoadAccountModuleSettings();
                         return;
@@ -399,7 +404,7 @@ namespace RiftPulse.Pcvr
         public void MoveChatPanel()
         {
             RiftPulseChatPanel.RequestReposition();
-            ModulePreviewStatus = "The 3D chat panel will reposition in front of your view when gameplay starts or resumes.";
+            ModulePreviewStatus = "Chat panel re-centered in front of you. Fine-tune it in Display Settings.";
             RefreshUi();
         }
         [UIAction("open-chat-settings")]

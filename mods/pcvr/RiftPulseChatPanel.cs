@@ -103,6 +103,18 @@ namespace RiftPulse.Pcvr
             SaveFile();
         }
 
+        internal static void ResetForRecenter()
+        {
+            Load();
+            // Recenter is an explicit reset, not a reuse of the last manually dragged pose.
+            _x = 0f;
+            _y = 0f;
+            _z = 2.15f;
+            _savedRotationOffset = Quaternion.identity;
+            _hasSavedRotationOffset = false;
+            SaveFile();
+        }
+
         internal static Quaternion SettingsCameraRotation(Transform cameraTransform)
         {
             return _settingsPoseCaptured ? _settingsCameraRotation : cameraTransform.rotation;
@@ -182,6 +194,7 @@ namespace RiftPulse.Pcvr
         private static RiftPulseChatPanel? _instance;
 
         private FloatingScreen? _panel;
+        private TextMeshProUGUI? _headerText;
         private TextMeshProUGUI? _text;
         private TextMeshProUGUI? _handleLabel;
         private Image[]? _platformMarkParts;
@@ -225,7 +238,9 @@ namespace RiftPulse.Pcvr
 
         public static void RequestReposition()
         {
-            if (_instance != null) _instance._moveRequested = true;
+            if (_instance == null) return;
+            RiftPulseChatPanelPreferences.ResetForRecenter();
+            _instance._moveRequested = true;
         }
 
         internal static void ApplyPreferences()
@@ -269,14 +284,20 @@ namespace RiftPulse.Pcvr
                         _panel.ScreenRotation, RiftPulseChatPanelPreferences.CapturedSettingsCameraRotation);
             }
             _panel.ScreenSize = new Vector2(RiftPulseChatPanelPreferences.Width, RiftPulseChatPanelPreferences.Height);
+            if (_headerText != null)
+            {
+                var headerRect = _headerText.GetComponent<RectTransform>();
+                headerRect.anchoredPosition = new Vector2(5f, RiftPulseChatPanelPreferences.Height * 0.5f - 5.5f);
+                headerRect.sizeDelta = new Vector2(
+                    Mathf.Max(32f, RiftPulseChatPanelPreferences.Width - 20f), 11f);
+            }
             if (_text != null)
             {
                 var textRect = _text.GetComponent<RectTransform>();
-                textRect.anchoredPosition = new Vector2(5f, 0f);
+                textRect.anchoredPosition = new Vector2(5f, -5f);
                 textRect.sizeDelta = new Vector2(
                     Mathf.Max(32f, RiftPulseChatPanelPreferences.Width - 20f),
-                    Mathf.Max(24f, RiftPulseChatPanelPreferences.Height - 12f));
-                // Keep the base TMP font size. FloatingScreen scales the text with panel geometry.
+                    Mathf.Max(18f, RiftPulseChatPanelPreferences.Height - 22f));
             }
             if (_handleLabel != null)
             {
@@ -391,15 +412,20 @@ namespace RiftPulse.Pcvr
             DontDestroyOnLoad(_panel.gameObject);
 
             var root = _panel.GetComponent<RectTransform>();
-            // Give the actual feed the full panel body; keep the platform mark and
-            // controller grab hint separate so chat never competes with a large title.
+            // Keep the title/viewer count pinned at the top. The feed itself is bottom-aligned
+            // so new messages enter at the bottom and older messages are trimmed from the top.
+            _headerText = CreatePanelText(root, "RiftPulse PCVR Chat Header",
+                new Vector2(5f, RiftPulseChatPanelPreferences.Height * 0.5f - 5.5f),
+                new Vector2(Mathf.Max(32f, RiftPulseChatPanelPreferences.Width - 20f), 11f),
+                2.8f, TextAlignmentOptions.TopLeft);
+            _headerText.text = "RIFTPULSE  /  LIVE CHAT\nCOMBINED VIEWERS  -";
+
             _text = CreatePanelText(root, "RiftPulse PCVR Live Chat Feed",
-                new Vector2(5f, 0f),
+                new Vector2(5f, -5f),
                 new Vector2(Mathf.Max(32f, RiftPulseChatPanelPreferences.Width - 20f),
-                    Mathf.Max(24f, RiftPulseChatPanelPreferences.Height - 12f)),
-                2.45f, TextAlignmentOptions.BottomLeft);
-            _text.text = "RIFTPULSE  /  LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages...";
-            // The base font size is intentionally left unchanged so panel scaling also scales chat text.
+                    Mathf.Max(18f, RiftPulseChatPanelPreferences.Height - 22f)),
+                2.8f, TextAlignmentOptions.BottomLeft);
+            _text.text = "Waiting for live messages...";
 
             _handleLabel = CreatePanelText(root, "RiftPulse PCVR Drag Hint",
                 new Vector2(0f, -RiftPulseChatPanelPreferences.Height * 0.5f + 2.2f),
@@ -572,6 +598,7 @@ namespace RiftPulse.Pcvr
             if (savePlacement) SavePlacement();
             Destroy(_panel.gameObject);
             _panel = null;
+            _headerText = null;
             _text = null;
             _handleLabel = null;
         }
@@ -606,11 +633,13 @@ namespace RiftPulse.Pcvr
                     _pendingUiActions.Enqueue(() =>
                     {
                         if (_panel != null) _panel.gameObject.SetActive(true);
+                        if (_headerText != null)
+                            _headerText.text = "RIFTPULSE  /  LIVE CHAT\nDEVICE LINK REQUIRED";
                         if (_text != null)
                         {
                             _text.gameObject.SetActive(true);
                             _text.enabled = true;
-                            _text.text = "DEVICE LINK REQUIRED\n\nThis PCVR installation needs to be paired again before it can load chat. Open RiftPulse from the Mods panel, choose GENERATE PAIRING CODE, and enter the code on app.riftpulse.me.";
+                            _text.text = "Open RiftPulse from the Mods panel, generate a pairing code, and enter it on app.riftpulse.me.";
                         }
                     });
                 }
@@ -633,10 +662,11 @@ namespace RiftPulse.Pcvr
         private void SetFeedStatus(string detail)
         {
             if (_panel != null) _panel.gameObject.SetActive(true);
+            if (_headerText != null) _headerText.text = "RIFTPULSE  /  LIVE CHAT\nCONNECTION STATUS";
             if (_text == null) return;
             _text.gameObject.SetActive(true);
             _text.enabled = true;
-            _text.text = "RIFTPULSE  /  LIVE CHAT\n\n" + detail;
+            _text.text = detail;
         }
 
         private static int FindMatchingArrayEnd(string json, int start)
@@ -693,7 +723,8 @@ namespace RiftPulse.Pcvr
             _text.enabled = true;
             if (!_chatEnabled)
             {
-                _text.text = "RIFTPULSE  /  LIVE CHAT\n\nChat is currently disabled for this installation. Enable the Chat module on app.riftpulse.me.";
+                if (_headerText != null) _headerText.text = "RIFTPULSE  /  LIVE CHAT\nCHAT MODULE OFF";
+                _text.text = "Chat is currently disabled for this installation. Enable the Chat module on app.riftpulse.me.";
                 return;
             }
 
@@ -701,11 +732,10 @@ namespace RiftPulse.Pcvr
             var viewerMatch = Regex.Match(json, "\\\"total\\\"\\s*:\\s*(null|[0-9]+)");
             if (viewerMatch.Success && viewerMatch.Groups[1].Value != "null")
                 total = viewerMatch.Groups[1].Value;
+            if (_headerText != null)
+                _headerText.text = "RIFTPULSE  /  LIVE CHAT\nCOMBINED VIEWERS  " + total;
 
             var output = new StringBuilder();
-            output.AppendLine("RIFTPULSE  /  LIVE CHAT");
-            output.Append("COMBINED VIEWERS  ").AppendLine(total);
-            output.AppendLine("----------------------------");
 
             var messagesStart = json.IndexOf("\"messages\"", StringComparison.Ordinal);
             var arrayStart = messagesStart < 0 ? -1 : json.IndexOf('[', messagesStart);
@@ -747,9 +777,9 @@ namespace RiftPulse.Pcvr
                     chatEntries.Add(new KeyValuePair<DateTime, string>(messageTime, entry.ToString()));
                 }
                 chatEntries.Sort((left, right) => left.Key.CompareTo(right.Key));
-                var charsPerMessageLine = Mathf.Max(28f, RiftPulseChatPanelPreferences.Width * 0.70f);
+                var charsPerMessageLine = Mathf.Max(24f, RiftPulseChatPanelPreferences.Width * 0.62f);
                 var messageLines = 2f + Mathf.CeilToInt(115f / charsPerMessageLine);
-                var availableLines = Mathf.Max(1f, (RiftPulseChatPanelPreferences.Height - 12f) / 2.7f);
+                var availableLines = Mathf.Max(1f, (RiftPulseChatPanelPreferences.Height - 25f) / 3.2f);
                 var visibleMessageCapacity = Mathf.Clamp(Mathf.FloorToInt(availableLines / messageLines), 1, 12);
                 if (chatEntries.Count > visibleMessageCapacity)
                     chatEntries.RemoveRange(0, chatEntries.Count - visibleMessageCapacity);

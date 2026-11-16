@@ -1,6 +1,6 @@
 ﻿$ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$version = '0.3.0'
+$version = '0.3.1'
 $project = Join-Path $root 'mods\pcvr\RiftPulse.Pcvr.csproj'
 $manifestPath = Join-Path $root 'mods\pcvr\manifest.json'
 $built = Join-Path $root 'mods\pcvr\bin\Release\net472\RiftPulse.Pcvr.dll'
