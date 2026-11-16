@@ -709,3 +709,15 @@ Date: 2026-11-16
 - Removed the System Status / Activity card. Connected Devices remains visible.
 - Full verification: TypeScript typecheck passed; 75/75 unit/contract tests passed; 2/2 isolated database migration tests passed; production Worker and client build passed; git diff --check passed.
 - Deployment is being prepared. Physical Twitch/YouTube/TikTok stream-state checks and browser visual review remain to be performed after the API and dashboard deploy.
+
+## Dashboard refresh deployment - November 16, 2026
+
+- Commit: 714ffbd470ca8f25107e0dc376d479b93e69f966 (Refresh RiftPulse dashboard and provider reconnect controls).
+- Cloudflare production Worker riftpulse deployed successfully with Worker Version ID 71770c53-e694-4142-986d-9e244c97f55a. Existing app.riftpulse.me domain, D1, Durable Object, and Railway API bindings were preserved.
+- Railway service riftpulse-api deployed the same commit successfully: deployment ID 3cd7e16f-23c1-4d81-bc40-4b62209dbb60. Environment status: Online, 1/1 replica, no active notifications or recent failures.
+- Live HTTP checks: app.riftpulse.me homepage, JavaScript bundle, CSS bundle, PCVR 0.3.2 ZIP, Quest 0.3.4 Alpha QMOD, and stable download aliases returned HTTP 200. Railway /api/v1/health returned HTTP 200. The new authenticated Twitch LIVE-check and TikTok reconnect routes returned the expected 401 when tested without a signed-in session.
+- Production bundle checks passed for the mid-tone palette, simplified download cards, new reconnect controls, TikTok username wording (no visible Unofficial label), platform marks, event-card styles, and removal of System Status.
+- Test suite: TypeScript typecheck passed; 75/75 unit/contract tests passed; 2/2 database migration tests passed; production Worker/client build passed; git diff --check passed.
+- Updates history record: release-32dcd130-b8d1-4f8b-9c21-6579c1466f62.
+- Icons: the supplied uploads were dashboard screenshots rather than standalone icon files; the chat feed uses original inline vector marks for Twitch, YouTube, and TikTok. The provider-specific styles and event highlights are CSS-driven.
+- Live provider state itself was not forced or simulated. A real authenticated account/session and actual platform LIVE broadcasts are still required to verify provider detection and event delivery end to end.
