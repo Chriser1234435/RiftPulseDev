@@ -756,3 +756,195 @@ body{background:radial-gradient(ellipse at 78% -10%,#8295b52a,transparent 42%),#
 .provider-icon .provider-brand-mark{width:24px;height:24px;display:flex;align-items:center;justify-content:center}
 .modal-icon.provider-icon .provider-brand-mark{width:28px;height:28px}
 .provider-icon .provider-brand-mark img{width:100%;height:100%;object-fit:contain}
+
+
+/* Provider Health alignment fix: give each reconnect action its own centered row. */
+.provider-health-row{
+  display:grid;
+  grid-template-columns:38px minmax(0,1fr);
+  align-items:center;
+  column-gap:10px;
+  row-gap:10px;
+}
+.provider-health-row>.provider-brand-mark{grid-column:1;grid-row:1}
+.provider-health-row>.provider-health-copy{grid-column:2;grid-row:1;min-width:0}
+.provider-health-row .provider-reconnect-button{
+  grid-column:1 / -1;
+  grid-row:2;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  justify-self:stretch;
+  width:100%;
+  min-width:0;
+  max-width:none;
+  min-height:42px;
+  margin:0!important;
+  flex:none;
+  box-sizing:border-box;
+}
+
+/* RiftPulse evergreen theme: balanced mid-tone green with soft sea-glass accents. */
+:root{
+  --bg:#263d38;
+  --panel:#354f49;
+  --line:#58736a;
+  --muted:#c2d0c9;
+  --purple:#b9ddce;
+  --purple2:#83b6a3;
+  --cyan:#9bddd0;
+  --green:#83d6b0;
+  --rp-surface-1:#304943;
+  --rp-surface-2:#39564f;
+  --rp-surface-3:#426259;
+  --rp-border:#69877b;
+  --rp-text:#f4f7f3;
+  --rp-muted:#c8d5ce;
+}
+html,body,#root{background:#263d38;color:#f4f7f3}
+body{
+  background:
+    radial-gradient(ellipse at 78% -10%,#98bca52b,transparent 43%),
+    radial-gradient(ellipse at 0% 35%,#4d8a7450,transparent 38%),
+    #263d38;
+}
+.sidebar{background:#203832;border-color:#4b675c}
+.topbar{background:#2b443eeF;border-color:#526f63}
+.workspace-switcher,.sidebar-promo{background:#304b43;border-color:#5c776b}
+.nav-item{color:#d0ddd6}
+.nav-item:hover{background:#3a584d;border-color:#6f9180;color:#fff}
+.nav-item.active{background:linear-gradient(100deg,#45675a,#365349);border-color:#82a995;color:#f7fbf7}
+.nav-item.active svg{color:#b9e5d1}
+.nav-label,.brand-caption,.workspace-copy small,.footer-profile small{color:#bdd0c5}
+.section-overline,.eyebrow,.nav-label,.brand-caption,.modal-eyebrow{color:#b8dfcb}
+.sidebar-footer,.topbar,.auth-foot,.auth-footer{border-color:#526f63}
+.breadcrumbs{color:#c4d4cb}
+.breadcrumbs b,.brand-name{color:#f5f8f4}
+.page-content,.welcome-row h1,.hero-content h2,.section-heading h3,.panel-title h3{color:#f4f7f3}
+.welcome-sub,.section-heading p{color:#c8d7ce}
+.hero-card{
+  background:
+    radial-gradient(ellipse at 76% 51%,#7ab39a52,transparent 46%),
+    linear-gradient(115deg,#3c5c50,#36584d 49%,#2b4940);
+  border-color:#668b78;
+}
+.hero-kicker{color:#c0e8d2}
+.float-chip{background:#3a594de8;border-color:#789987;color:#edf5ef}
+.metrics-grid .metric-card,.metric-card{
+  background:linear-gradient(145deg,#3a574d,#304b43);
+  border-color:#5e7d6d;
+}
+.metric-label,.metric-detail{color:#c7d7ce}
+.metric-value{color:#f6faf6}
+.metric-icon{background:#426457;border-color:#7aa28e;color:#c0e7d2}
+.module-card,.panel-card,.download-card,.auth-card{
+  background:linear-gradient(150deg,#3a574d,#304a43);
+  border-color:#607e6e;
+}
+.module-card:hover{border-color:#9ac4aa}
+.module-card h4,.module-status,.download-card-head b{color:#f4f8f3}
+.module-card>p,.download-card p,.download-card-head small,.download-platform-note{color:#cad8d0}
+.module-card-bottom,.device-row{border-color:#587467}
+.configure-button,.outline-button,.connect-button,.disconnect-button{
+  background:#405f53;
+  border-color:#779987;
+  color:#edf7f0;
+}
+.configure-button:hover,.outline-button:hover,.connect-button:hover,.disconnect-button:hover{
+  background:#4b6d5e;
+  border-color:#9dc5ae;
+  color:#fff;
+}
+.download-card{background:linear-gradient(150deg,#3a574d,#304a43);border-color:#668575}
+.download-step-title{color:#f4f8f3!important}
+.download-steps{color:#e1ebe4}
+.download-steps li::marker{color:#b7e0cb}
+.download-platform-icon{background:#405d51;border-color:#7ba08c;color:#c7ebd9}
+.download-platform-icon.quest-download{background:#31594e;border-color:#75a994;color:#c0eee0}
+.download-state{border-color:#75a58e;color:#b7efd1;background:#2c5444}
+.provider-list{background:#304b43;border-color:#607d6e}
+.provider-row{background:#365249;border-color:#5c7a6b}
+.provider-row:hover{background:#405f53;border-color:#82a590}
+.provider-main>b,.connection-state{color:#edf5ef}
+.provider-main small{color:#c5d5cc}
+.integration-footnote,.page-footer{color:#c5d5cc}
+.chat-feed-panel,.chat-feed-main{
+  background:#304a43;
+  border-color:#5f7d6d;
+}
+.chat-feed-status{background:#2c473f}
+.chat-provider-status,.chat-status-heading{border-color:#587467}
+.chat-provider-status b,.chat-empty b{color:#f4f8f3}
+.chat-provider-status small,.chat-status-heading>span,.chat-message-meta time{color:#c0d2c7}
+.chat-message-row{border-bottom-color:#526e61}
+.chat-message-copy>p,.chat-empty,.chat-empty p{color:#d0ded5}
+.chat-empty-icon{background:#3d5d50;border-color:#7ca28d;color:#c8ead8}
+.chat-event-row{background:#3c5a4e;border-color:#71917e}
+.provider-health-panel{background:#38564c;border-color:#668475}
+.provider-health-heading{border-color:#668475}
+.provider-health-heading>div>span{color:#c0e6d0}
+.provider-health-heading>div>small,.provider-health-note{color:#d0ded5}
+.provider-health-row{border-color:#587568}
+.provider-health-copy>b{color:#f5f8f4}
+.provider-health-copy>small{color:#d0ded6}
+.provider-live-state.live{color:#9af0c3}
+.provider-reconnect-button,.check-all-button{
+  background:#426255;
+  border-color:#85a995;
+  color:#f5faf6;
+}
+.provider-reconnect-button small{color:#d9e8df;border-left-color:#83a292}
+.check-all-button:hover,.provider-reconnect-button:hover{
+  background:#4e715f;
+  border-color:#b0d1bb;
+}
+.provider-health-row .provider-reconnect-button:focus-visible,
+.check-all-button:focus-visible{
+  outline:2px solid #bce7d0;
+  outline-offset:3px;
+}
+.provider-health-viewers{color:#e0ece5}
+.auth-loading,.auth-shell{background-color:#263d38;color:#f0f6f1}
+.auth-top{background:#2b443eeb;border-color:#587568}
+.auth-card{background:linear-gradient(145deg,#3b594f,#304a43);border-color:#698776}
+.auth-card h2,.auth-copy h1{color:#f4f8f3}
+.auth-card-heading p,.auth-copy>p{color:#cedbd3}
+.auth-tabs{background:#304a43;border-color:#6a8878}
+.auth-tabs button{color:#c8d7cf}
+.auth-tabs button.active{background:#45685a;color:#f4faf5;box-shadow:inset 0 0 0 1px #94b9a2}
+.auth-foot,.auth-footer{color:#c5d5cc}
+.field-group input,.auth-form input{background:#304b43;border-color:#708e7c;color:#f4f8f3}
+.field-group input::placeholder,.auth-form input::placeholder{color:#c3d4ca}
+.field-group input:focus,.auth-form input:focus{background:#38564b;border-color:#a6d2b7;box-shadow:0 0 0 3px #a6d2b722}
+.modal-backdrop{background:#172a25bf}
+.modal-card,.profile-menu,.notification-dropdown,.updates-dropdown,.dropdown-panel{
+  background:linear-gradient(145deg,#3b594f,#304a43);
+  border-color:#6b8978;
+  color:#f3f8f4;
+}
+.modal-card h2,.settings-option b{color:#f5f8f4}
+.modal-copy,.modal-footnote,.settings-option small,.field-group>small{color:#cfddd4}
+.provider-permissions,.help-list,.pairing-code-area{background:#304b43;border-color:#668475}
+.provider-permissions>div,.help-list>div,.settings-option{border-color:#587568;color:#d9e5de}
+.settings-badge,.api-pill{background:#3b584d;border-color:#72917f;color:#e1ede5}
+.topbar-actions .icon-button{border-color:#638271;color:#dce9e1}
+.bottom-grid .panel-card{background:#38564c;border-color:#668475}
+.device-row b{color:#f1f7f2}
+.device-row p{color:#c8d8cf}
+.toast{background:#315848;border-color:#72a38a;color:#e6fff0}
+@media(max-width:760px){
+  .provider-health-row{
+    grid-template-columns:38px minmax(0,1fr);
+    row-gap:10px;
+  }
+  .provider-health-row .provider-reconnect-button{
+    grid-column:1 / -1;
+    width:100%;
+    margin:0!important;
+    justify-self:stretch;
+  }
+}
+@media(max-width:420px){
+  .provider-health-row{grid-template-columns:34px minmax(0,1fr)}
+  .provider-health-row .provider-reconnect-button{grid-column:1 / -1}
+}
