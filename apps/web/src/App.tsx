@@ -83,7 +83,7 @@ const onboardingSteps = [
   { title: "Welcome to RiftPulse", description: "This guide walks you through setup in a few clear steps. You can replay it any time from Support.", target: null },
   { title: "Install the Beat Saber mod", description: "Pick the build for your headset or PC: use the PCVR ZIP for Windows, or the Quest QMOD for standalone. Follow the four install steps on the matching download card.", target: "downloads" },
   { title: "Connect your platforms", description: "This is the platform-setup step. The highlighted Integrations area is the only dashboard section enabled here: connect Twitch or YouTube, or enter and save your TikTok username. Saving a TikTok username does not start a LIVE connection.", target: "integrations" },
-  { title: "Start a LIVE check", description: "The highlighted Provider Health area is enabled for this step. When you are ready, press Connect Live to check configured platforms once, or use a platform's Reconnect button for a separate check. Each button shows its cooldown.", target: "chat-feed" },
+  { title: "Start a LIVE check", description: "The highlighted Provider Health area is enabled for this step. When you are ready, press Connect Live to check configured platforms once, or use a platform's Reconnect button for a separate check. Each button shows its cooldown.", target: "provider-health" },
   { title: "Chat & Events", description: "This step is a read-only preview of incoming messages and supported stream events. Platform setup and provider controls are locked here, so you cannot open or edit TikTok settings while reviewing Chat & Events. Use Next to continue.", target: "chat-messages" },
   { title: "Pair your Beat Saber device", description: "Open RiftPulse in Beat Saber, choose Connect to website, and enter the five-digit code shown in-game. Your mod creates the code.", target: "devices" },
   { title: "Set up your modules", description: "Turn Chat and BSR Song Request on or off from the module cards. Open Configure to adjust settings and your song-request command.", target: "modules" },
@@ -1394,7 +1394,7 @@ function App() {
                     </article>;
                   })}</div>}
               </div>
-              <aside className="provider-health-panel">
+              <aside className="provider-health-panel" data-tour-target="provider-health">
                 <div className="provider-health-heading">
                   <div><span>PROVIDER HEALTH</span><small>Run checks only when you choose</small></div>
                   <button className="check-all-button" onClick={() => void checkAllProviders()} disabled={checkAllRunning || (globalReconnectCooldownUntil !== null && globalReconnectCooldownUntil > clockNow) || !providers.some(provider => isProviderConfigured(provider.key))}>
