@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { compactTikTokPayload, eventForMessage, makeEulerUrl, parseEulerMessages } from "../../services/railway-api/tiktok-euler.mjs";
+import { compactTikTokPayload, eventForMessage, makeEulerUrl, parseEulerMessages, startTikTokEulerConnector } from "../../services/railway-api/tiktok-euler.mjs";
 
 test("compacts a TikTok chat frame to fields used by RiftPulse", () => {
   const compact = compactTikTokPayload({
@@ -123,4 +123,29 @@ test("maps simplified Euler event aliases", () => {
   assert.equal(eventForMessage("follow", {}).eventName, "follow");
   assert.equal(eventForMessage("share", {}).eventName, "share");
   assert.equal(eventForMessage("subscription", {}), null);
+});
+
+
+test("does not start Euler or account polling until an explicit reconnect request", async () => {
+  const previousKey = process.env.EULER_API_KEY;
+  process.env.EULER_API_KEY = "test-euler-key";
+  let workerRequests = 0;
+  const stop = startTikTokEulerConnector({
+    worker: {
+      fetch: async () => {
+        workerRequests += 1;
+        return new Response(JSON.stringify({ accounts: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    },
+    env: { TIKTOK_CONNECTOR_INGEST_SECRET: "test-ingest-secret" },
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.equal(workerRequests, 0, "connector startup must not query configured TikTok accounts");
+  await stop();
+  if (previousKey === undefined) delete process.env.EULER_API_KEY;
+  else process.env.EULER_API_KEY = previousKey;
 });

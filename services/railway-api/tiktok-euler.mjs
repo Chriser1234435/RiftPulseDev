@@ -161,7 +161,6 @@ export function startTikTokEulerConnector({ worker, env }) {
     return async () => {};
   }
 
-  const pollMs = Math.max(15_000, Number(process.env.TIKTOK_ACCOUNT_POLL_MS) || 30_000);
   const maxAccounts = Math.max(1, Math.min(MAX_CONCURRENT, Number(process.env.TIKTOK_EULER_MAX_ACCOUNTS) || MAX_CONCURRENT));
   const runners = new Map();
   let stopped = false;
@@ -180,16 +179,13 @@ export function startTikTokEulerConnector({ worker, env }) {
   }
 
   class AccountRunner {
-    constructor(account, startupDelayMs = 0) {
-      this.startupDelayMs = startupDelayMs;
+    constructor(account) {
       this.accountId = account.accountId;
       this.username = account.username.replace(/^@/, "");
       this.channelId = this.username;
       this.socket = null;
       this.queue = Promise.resolve();
       this.stopped = false;
-      this.attempt = 0;
-      this.forceReconnect = false;
       this.lastStatus = null;
       this.statusQueue = Promise.resolve();
       this.firstEventAccepted = false;
@@ -298,23 +294,6 @@ export function startTikTokEulerConnector({ worker, env }) {
       }
     }
 
-    reconnectNow() {
-      if (this.stopped) return false;
-      this.forceReconnect = true;
-      this.attempt = 0;
-      const socket = this.socket;
-      if (socket && socket.readyState !== WebSocket.CLOSED) {
-        try { socket.close(4000, "Dashboard requested a reconnect"); } catch {}
-      } else {
-        const wake = this.retryResolve;
-        this.retryResolve = null;
-        if (this.retryTimer) clearTimeout(this.retryTimer);
-        this.retryTimer = null;
-        wake?.();
-      }
-      return true;
-    }
-
     async connectOnce() {
       return new Promise(resolve => {
         if (this.stopped) return resolve();
@@ -328,14 +307,9 @@ export function startTikTokEulerConnector({ worker, env }) {
           if (done) return;
           done = true;
           if (this.socket === socket) this.socket = null;
-          this.lastCloseCode = code;
-          // Surface Euler's connection-cap rejection as an actionable provider error.
+          // A closed/offline room ends this user-requested attempt. Only a new
+          // button press is allowed to open another Euler connection.
           void this.reportStatus(code === 4429 ? "error" : "disconnected");
-          // Euler 4404 means NOT_LIVE. Use a short standby probe interval so
-          // creators who go live while RiftPulse is running are detected promptly.
-          // 4005 (room/session issue) and 4429 (quota/cap) retain longer backoff.
-          if (code === 4005 || code === 4429) this.attempt = Math.max(this.attempt, 8);
-          if (code === 4404) this.attempt = Math.max(this.attempt, 2);
           resolve();
         };
         socket.on("open", () => {
@@ -343,7 +317,6 @@ export function startTikTokEulerConnector({ worker, env }) {
             socket.close(1000, "RiftPulse shutting down");
             return;
           }
-          this.attempt = 0;
           void this.reportStatus("connected");
           console.info("Euler TikTok LIVE connected for @" + this.username + ".");
         });
@@ -353,60 +326,21 @@ export function startTikTokEulerConnector({ worker, env }) {
           finish(code);
         });
         socket.on("error", () => {
-          console.warn("Euler TikTok WebSocket error for @" + this.username + "; reconnect scheduled.");
+          console.warn("Euler TikTok WebSocket error for @" + this.username + "; no automatic reconnect will run.");
           try { socket.close(); } catch { finish(); }
         });
       });
     }
 
-    async wait(ms) {
-      await new Promise(resolve => {
-        const timer = setTimeout(() => {
-          if (this.retryTimer === timer) this.retryTimer = null;
-          this.retryResolve = null;
-          resolve();
-        }, ms);
-        this.retryTimer = timer;
-        this.retryResolve = resolve;
-        timer.unref?.();
-      });
-    }
-
     async run() {
-      if (this.startupDelayMs > 0 && !this.stopped) await this.wait(this.startupDelayMs);
-      while (!this.stopped) {
-        await this.connectOnce();
-        if (this.stopped) break;
-        if (this.forceReconnect) {
-          this.forceReconnect = false;
-          continue;
-        }
-        this.attempt += 1;
-        const offlineStream = this.lastCloseCode === 4404;
-        const roomUnavailable = this.lastCloseCode === 4005;
-        const quotaRejected = this.lastCloseCode === 4429;
-        const maxDelay = offlineStream ? 30_000 : roomUnavailable || quotaRejected ? 1_800_000 : 300_000;
-        const baseDelay = Math.min(maxDelay, 5_000 * (2 ** Math.min(this.attempt, 12)));
-        // Euler NOT_LIVE standby probes every 30 seconds to pick up a live transition.
-        // Room/session and quota/cap errors back off for 30 minutes; transient failures use jitter.
-        const delay = offlineStream || roomUnavailable || quotaRejected
-          ? maxDelay
-          : Math.min(maxDelay, Math.round(baseDelay * (0.75 + Math.random() * 0.5)));
-        console.info("Euler TikTok retry scheduled for @" + this.username + " in "
-          + Math.round(delay / 1_000) + " second(s) (close code " + this.lastCloseCode + ").");
-        await this.wait(delay);
-      }
+      // One socket attempt per explicit dashboard request. A close/error ends this run.
+      if (!this.stopped) await this.connectOnce();
       await this.queue;
     }
 
     async stop() {
       if (this.stopped) return;
       this.stopped = true;
-      if (this.retryTimer) clearTimeout(this.retryTimer);
-      this.retryTimer = null;
-      const wakeRetry = this.retryResolve;
-      this.retryResolve = null;
-      wakeRetry?.();
       const socket = this.socket;
       if (socket && socket.readyState !== WebSocket.CLOSED) {
         try { socket.close(1000, "RiftPulse account removed"); } catch {}
@@ -416,7 +350,7 @@ export function startTikTokEulerConnector({ worker, env }) {
     }
   }
 
-  async function syncAccounts() {
+  async function syncAccounts(onlyAccountId) {
     if (syncInProgress || stopped) return;
     syncInProgress = true;
     try {
@@ -429,9 +363,11 @@ export function startTikTokEulerConnector({ worker, env }) {
         .filter(account => account && typeof account.accountId === "string" && typeof account.username === "string")
         .map(account => ({ accountId: account.accountId, username: account.username.trim().replace(/^@/, "") }))
         .filter(account => /^[A-Za-z0-9._]{2,24}$/.test(account.username));
-      const desired = new Map(accounts.slice(0, maxAccounts).map(account => [account.accountId, account]));
+      const eligibleAccounts = onlyAccountId ? accounts.filter(account => account.accountId === onlyAccountId) : accounts;
+      const desired = new Map(eligibleAccounts.slice(0, maxAccounts).map(account => [account.accountId, account]));
 
       for (const [accountId, runner] of runners) {
+        if (onlyAccountId && accountId !== onlyAccountId) continue;
         const next = desired.get(accountId);
         if (!next || next.username.toLowerCase() !== runner.username.toLowerCase()) {
           runners.delete(accountId);
@@ -439,10 +375,10 @@ export function startTikTokEulerConnector({ worker, env }) {
         }
       }
 
-      for (const [index, account] of [...desired.values()].entries()) {
+      for (const account of desired.values()) {
         if (runners.has(account.accountId)) continue;
-        // Stagger startup handshakes; launching every creator socket at once can trip Euler's cap.
-        const runner = new AccountRunner(account, index * 2_000);
+        // Start only the account explicitly selected by the user.
+        const runner = new AccountRunner(account);
         runners.set(account.accountId, runner);
       }
 
@@ -457,51 +393,21 @@ export function startTikTokEulerConnector({ worker, env }) {
     }
   }
 
-  async function reportRateLimits() {
-    try {
-      const response = await fetch("https://tiktok.eulerstream.com/webcast/rate_limits", {
-        headers: { "x-api-key": apiKey },
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!response.ok) {
-        console.warn("Euler sign-server rate-limit probe returned HTTP " + response.status + ".");
-        return;
-      }
-      const raw = await response.json();
-      const envelope = asRecord(raw);
-      const limits = asRecord(envelope?.response) ?? asRecord(envelope?.data) ?? envelope;
-      const format = (name) => {
-        const bucket = asRecord(limits?.[name]);
-        return bucket && typeof bucket.remaining === "number" && typeof bucket.max === "number"
-          ? bucket.remaining + "/" + bucket.max : "unknown";
-      };
-      console.info("Euler sign-server API quota (remaining/max): minute " + format("minute")
-        + ", hour " + format("hour") + ", day " + format("day") + ".");
-    } catch {
-      console.warn("Euler sign-server rate-limit probe failed; no credential data was logged.");
-    }
-  }
-
-  void reportRateLimits();
-  void syncAccounts();
-  const timer = setInterval(() => void syncAccounts(), pollMs);
-  timer.unref?.();
-
   const stopTikTokEulerConnector = async function stopTikTokEulerConnector() {
     if (stopped) return;
     stopped = true;
-    clearInterval(timer);
     await Promise.all([...runners.values()].map(runner => runner.stop()));
     runners.clear();
   };
   stopTikTokEulerConnector.reconnectAccount = async (accountId) => {
     if (stopped) return false;
-    let runner = runners.get(accountId);
-    if (!runner) {
-      await syncAccounts();
-      runner = runners.get(accountId);
+    const existing = runners.get(accountId);
+    if (existing) {
+      runners.delete(accountId);
+      await existing.stop();
     }
-    return runner ? runner.reconnectNow() : false;
+    await syncAccounts(accountId);
+    return runners.has(accountId);
   };
   return stopTikTokEulerConnector;
 }
