@@ -90,7 +90,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.3.6";
+static constexpr const char* MOD_VERSION = "0.3.7";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -119,8 +119,8 @@ struct WorldChatPanelSettings {
   float x = 0.0f;
   float y = 0.0f;
   float z = 2.15f;
-  float width = 110.0f;
-  float height = 70.0f;
+  float width = 88.0f;
+  float height = 54.0f;
   UnityEngine::Quaternion rotationOffset = UnityEngine::Quaternion(0.0f, 0.0f, 0.0f, 1.0f);
   bool hasRotationOffset = false;
 };
@@ -1192,8 +1192,16 @@ static void LoadWorldChatSettings() {
     worldChatSettings.x = std::clamp(x, -2.5f, 2.5f);
     worldChatSettings.y = std::clamp(y, -2.0f, 2.0f);
     worldChatSettings.z = std::clamp(z, 0.8f, 4.5f);
-    worldChatSettings.width = std::clamp(width, 60.0f, 180.0f);
-    worldChatSettings.height = std::clamp(height, 40.0f, 120.0f);
+    worldChatSettings.width = std::clamp(width, 60.0f, 130.0f);
+    worldChatSettings.height = std::clamp(height, 40.0f, 90.0f);
+    // The previous untouched defaults (110 x 70) produced an oversized
+    // floating sheet in Quest. Migrate only that exact default to a more
+    // readable headset-sized chat panel; preserve user-custom dimensions.
+    if (std::abs(worldChatSettings.width - 110.0f) < 0.001f &&
+        std::abs(worldChatSettings.height - 70.0f) < 0.001f) {
+      worldChatSettings.width = 88.0f;
+      worldChatSettings.height = 54.0f;
+    }
     float rx = 0.0f, ry = 0.0f, rz = 0.0f, rw = 1.0f;
     int hasRotation = 0;
     int coordinateFrame = 0;
@@ -1449,29 +1457,24 @@ static void ApplyQuestDarkBackground(UnityEngine::GameObject* object,
 static UnityEngine::UI::Image* CreateWorldChatLockPart(
     UnityEngine::RectTransform* parent, const std::string& name,
     UnityEngine::Vector2 size, UnityEngine::Vector2 position) {
-  if (!parent || !GetWorldChatWhiteSprite()) return nullptr;
-  ArrayW<System::Type*> componentTypes{
-      static_cast<System::Type*>(csTypeOf(UnityEngine::RectTransform*)),
-      static_cast<System::Type*>(csTypeOf(UnityEngine::UI::Image*))
-  };
-  auto* partObject = UnityEngine::GameObject::New_ctor(StringW(name), componentTypes);
-  if (!partObject) return nullptr;
-  auto* rect = partObject->GetComponent<UnityEngine::RectTransform*>();
-  auto* image = partObject->GetComponent<UnityEngine::UI::Image*>();
-  if (!rect || !image) {
-    UnityEngine::Object::Destroy(partObject);
-    return nullptr;
-  }
-  rect->SetParent(parent, false);
-  rect->set_anchorMin(UnityEngine::Vector2(0.5f, 0.5f));
-  rect->set_anchorMax(UnityEngine::Vector2(0.5f, 0.5f));
-  rect->set_pivot(UnityEngine::Vector2(0.5f, 0.5f));
-  rect->set_anchoredPosition(position);
-  rect->set_sizeDelta(size);
-  image->set_sprite(GetWorldChatWhiteSprite());
-  image->set_color(UnityEngine::Color(0.91f, 0.95f, 1.0f, 1.0f));
-  image->set_raycastTarget(false);
-  return image;
+  (void)name;
+  if (!parent) return nullptr;
+
+  auto* sprite = BSML::Utilities::ImageResources::GetWhitePixel();
+  if (!sprite) sprite = BSML::Utilities::ImageResources::GetBlankSprite();
+  if (!sprite) sprite = GetWorldChatWhiteSprite();
+  if (!sprite) return nullptr;
+
+  // Floating chat surfaces must use Beat Saber's HMUI ImageView/material.
+  // A raw Unity UI Image renders as solid white on the Quest world-space
+  // canvas even when its Graphic.color is changed.
+  auto* imageView = BSML::Lite::CreateImage(parent, sprite, position, size);
+  if (!imageView) return nullptr;
+  imageView->set_useScriptableObjectColors(false);
+  imageView->set_gradient(false);
+  imageView->set_color(UnityEngine::Color(0.91f, 0.95f, 1.0f, 1.0f));
+  imageView->set_raycastTarget(false);
+  return imageView;
 }
 
 static void ApplyWorldChatLockState() {
@@ -1678,10 +1681,10 @@ static void ShowChatPanelSettingsModal() {
       worldChatSettings.z, 0.8f, 4.5f,
       [](float value) { SetWorldChatPanelSetting(2, value); });
   BSML::Lite::CreateSliderSetting(container, "SURFACE WIDTH", 2.0f,
-      worldChatSettings.width, 60.0f, 180.0f,
+      worldChatSettings.width, 60.0f, 130.0f,
       [](float value) { SetWorldChatPanelSetting(3, value); });
   BSML::Lite::CreateSliderSetting(container, "SURFACE HEIGHT", 2.0f,
-      worldChatSettings.height, 40.0f, 120.0f,
+      worldChatSettings.height, 40.0f, 90.0f,
       [](float value) { SetWorldChatPanelSetting(4, value); });
   worldChatSettingsModal->Show();
 }
@@ -1828,9 +1831,9 @@ static bool CreateWorldChatPanel() {
   // The chat feed gets the full panel body now; no oversized title competes
   // with incoming messages. Keep a separate compact controller grab hint.
   worldChatText = CreateWorldChatText(
-      "RiftPulse Quest Chat Feed", 5.0f, 0.0f,
-      std::max(32.0f, worldChatSettings.width - 20.0f),
-      std::max(24.0f, worldChatSettings.height - 12.0f), 2.45f,
+      "RiftPulse Quest Chat Feed", 1.0f, 0.0f,
+      std::max(32.0f, worldChatSettings.width - 8.0f),
+      std::max(24.0f, worldChatSettings.height - 10.0f), 2.25f,
       TMPro::TextAlignmentOptions::BottomLeft);
   worldChatHandleLabel = CreateWorldChatText(
       "RiftPulse Quest Drag Hint", 0.0f, -worldChatSettings.height * 0.5f + 2.2f,
@@ -2094,10 +2097,10 @@ static void ChatPanelSettings_DidActivate(
       worldChatSettings.z, 0.8f, 4.5f,
       [](float value) { SetWorldChatPanelSetting(2, value); });
   BSML::Lite::CreateSliderSetting(container, "SURFACE WIDTH", 2.0f,
-      worldChatSettings.width, 60.0f, 180.0f,
+      worldChatSettings.width, 60.0f, 130.0f,
       [](float value) { SetWorldChatPanelSetting(3, value); });
   BSML::Lite::CreateSliderSetting(container, "SURFACE HEIGHT", 2.0f,
-      worldChatSettings.height, 40.0f, 120.0f,
+      worldChatSettings.height, 40.0f, 90.0f,
       [](float value) { SetWorldChatPanelSetting(4, value); });
 }
 

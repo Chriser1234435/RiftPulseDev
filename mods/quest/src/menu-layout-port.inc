@@ -138,115 +138,148 @@ static UnityEngine::UI::Button* CreateQuestLayoutButton(
   if (!button) return nullptr;
   ConfigureQuestLayoutElement(button->get_gameObject(), width, height);
   BSML::Lite::ToggleButtonWordWrapping(button, false);
-  BSML::Lite::SetButtonTextSize(button, 2.7f);
+  BSML::Lite::SetButtonTextSize(button, 2.35f);
   TrackMainMenuObject(button->get_gameObject());
   return button;
 }
 
 static void BuildRiftPulseMenuPcvrLayout(UnityEngine::Transform* root) {
   const auto clear = UnityEngine::Color(0.0f, 0.0f, 0.0f, 0.0f);
-  const auto surface = UnityEngine::Color(0.018f, 0.028f, 0.060f, 0.96f);
-  const auto headerSurface = UnityEngine::Color(0.035f, 0.055f, 0.105f, 0.98f);
+  const auto surface = UnityEngine::Color(0.022f, 0.035f, 0.068f, 0.985f);
+  const auto headerSurface = UnityEngine::Color(0.035f, 0.055f, 0.105f, 0.99f);
 
-  // Same BSML hierarchy as PCVR pairing.bsml: vertical root, a brand row,
-  // two side-by-side columns, then a contained device-status footer.
-  auto* page = CreateQuestVerticalLayout(root, "RiftPulse PCVR-Style Page",
-      64.0f, 58.0f, 1.2f, clear, false, 2);
+  // A wider, taller Quest-first layout with short copy and deliberately
+  // generous control rows. The previous compact grid caused labels and
+  // buttons to collide at headset scale.
+  auto* page = CreateQuestVerticalLayout(
+      root, "RiftPulse Quest Command Page", 82.0f, 68.0f,
+      0.9f, clear, false, 2);
   if (!page) return;
 
-  auto* header = CreateQuestHorizontalLayout(page, "RiftPulse Brand Header",
-      60.0f, 6.4f, 1.0f, headerSurface, true, 0);
+  auto* header = CreateQuestHorizontalLayout(
+      page, "RiftPulse Brand Header", 78.0f, 7.0f,
+      1.0f, headerSurface, true, 0);
   if (header) {
-    auto* brand = CreateQuestVerticalLayout(header, "RiftPulse Brand Block",
-        29.0f, 5.8f, 0.15f, clear, false, 0);
-    auto* game = CreateQuestVerticalLayout(header, "RiftPulse Game Descriptor",
-        29.0f, 5.8f, 0.15f, clear, false, 0);
+    auto* brand = CreateQuestVerticalLayout(
+        header, "RiftPulse Brand Block", 38.0f, 6.2f,
+        0.1f, clear, false, 0);
+    auto* game = CreateQuestVerticalLayout(
+        header, "RiftPulse Game Descriptor", 38.0f, 6.2f,
+        0.1f, clear, false, 0);
     if (brand) {
-      heading = CreateQuestLayoutText(brand, "RIFTPULSE", 5.5f, 28.0f, 3.5f);
-      instructions = CreateQuestLayoutText(brand, "NEXUS  /  STREAM COMMAND", 2.7f, 28.0f, 1.8f);
+      heading = CreateQuestLayoutText(
+          brand, "RIFTPULSE", 4.3f, 37.0f, 3.5f);
+      instructions = CreateQuestLayoutText(
+          brand, "QUEST STREAM CONTROL", 2.2f, 37.0f, 2.0f);
     }
     if (game) {
-      CreateQuestLayoutText(game, "BEAT SABER  ΓÇó  LIVE CONTROL", 2.8f, 28.0f, 2.2f,
+      CreateQuestLayoutText(
+          game, "BEAT SABER / QUEST", 2.45f, 37.0f, 2.4f,
           TMPro::TextAlignmentOptions::Right);
-      CreateQuestLayoutText(game, "YOUR STREAM. ONE CONTROL SURFACE.", 2.25f, 28.0f, 1.8f,
+      CreateQuestLayoutText(
+          game, "CHAT AND SONG REQUESTS", 2.05f, 37.0f, 2.0f,
           TMPro::TextAlignmentOptions::Right);
     }
   }
 
-  auto* body = CreateQuestHorizontalLayout(page, "RiftPulse Two Column Body",
-      60.0f, 39.0f, 1.0f, clear, false, 0);
+  auto* body = CreateQuestHorizontalLayout(
+      page, "RiftPulse Two Column Body", 78.0f, 48.0f,
+      1.0f, clear, false, 0);
   if (body) {
-    auto* leftColumn = CreateQuestVerticalLayout(body, "RiftPulse Left Column",
-        29.0f, 39.0f, 0.6f, clear, false, 0);
-    auto* rightColumn = CreateQuestVerticalLayout(body, "RiftPulse Right Column",
-        29.0f, 39.0f, 0.8f, clear, false, 0);
+    auto* leftColumn = CreateQuestVerticalLayout(
+        body, "RiftPulse Left Column", 38.5f, 48.0f,
+        0.8f, clear, false, 0);
+    auto* rightColumn = CreateQuestVerticalLayout(
+        body, "RiftPulse Right Column", 38.5f, 48.0f,
+        0.8f, clear, false, 0);
 
     if (leftColumn) {
-      auto* deviceCard = CreateQuestVerticalLayout(leftColumn, "01 Device Link Card",
-          29.0f, 24.4f, 0.4f, surface, true, 1);
+      auto* deviceCard = CreateQuestVerticalLayout(
+          leftColumn, "01 Device Link Card", 38.5f, 29.5f,
+          0.35f, surface, true, 1);
       if (deviceCard) {
-        CreateQuestLayoutText(deviceCard, "01  /  DEVICE LINK", 3.8f, 27.0f, 3.0f);
-        CreateQuestLayoutText(deviceCard, "PAIRING CODE", 2.5f, 27.0f, 2.0f,
+        CreateQuestLayoutText(
+            deviceCard, "01 / DEVICE LINK", 3.25f, 36.5f, 2.8f);
+        CreateQuestLayoutText(
+            deviceCard, "PAIRING CODE", 2.15f, 36.5f, 1.7f,
             TMPro::TextAlignmentOptions::Center);
-        const StringW displayCode = pairingCode.empty() ? StringW("-----") : StringW(pairingCode);
+        const StringW displayCode =
+            pairingCode.empty() ? StringW("-----") : StringW(pairingCode);
         pairingCodeLabel = CreateQuestLayoutText(
-            deviceCard, displayCode, 6.6f, 27.0f, 4.2f,
+            deviceCard, displayCode, 5.8f, 36.5f, 4.4f,
             TMPro::TextAlignmentOptions::Center);
         overview = CreateQuestLayoutText(
-            deviceCard, "Generate a code to link this installation.", 2.45f, 27.0f, 2.0f,
+            deviceCard, "Generate a code to pair this headset.",
+            2.05f, 36.5f, 2.2f,
             TMPro::TextAlignmentOptions::Center);
         codeButton = CreateQuestLayoutButton(
-            deviceCard, "GENERATE SECURE CODE", 26.8f, 3.2f,
+            deviceCard, "GENERATE CODE", 36.2f, 2.9f,
             []() { GeneratePairingCode(); });
         checkButton = CreateQuestLayoutButton(
-            deviceCard, "CHECK LINK STATUS", 26.8f, 3.2f,
+            deviceCard, "CHECK LINK STATUS", 36.2f, 2.9f,
             []() { CheckPairingStatus(); });
-        CreateQuestLayoutText(deviceCard, "Enter the five-digit code at app.riftpulse.me.",
-            2.1f, 27.0f, 1.5f, TMPro::TextAlignmentOptions::Center);
+        CreateQuestLayoutText(
+            deviceCard, "Enter your five-digit code at app.riftpulse.me.",
+            1.85f, 36.5f, 1.7f,
+            TMPro::TextAlignmentOptions::Center);
       }
 
-      auto* spatialCard = CreateQuestVerticalLayout(leftColumn, "04 Spatial Display Card",
-          29.0f, 13.2f, 0.3f, surface, true, 1);
+      auto* spatialCard = CreateQuestVerticalLayout(
+          leftColumn, "04 Chat Display Card", 38.5f, 16.0f,
+          0.4f, surface, true, 1);
       if (spatialCard) {
-        CreateQuestLayoutText(spatialCard, "04  /  SPATIAL DISPLAY", 3.4f, 27.0f, 2.4f);
-        CreateQuestLayoutText(spatialCard, "Position, size, and re-center your floating chat surface.",
-            2.25f, 27.0f, 1.8f);
-        CreateQuestLayoutButton(spatialCard, "OPEN DISPLAY LAB", 26.8f, 2.7f,
+        CreateQuestLayoutText(
+            spatialCard, "04 / CHAT DISPLAY", 3.0f, 36.5f, 2.6f);
+        CreateQuestLayoutText(
+            spatialCard, "Move and resize your floating chat panel.",
+            2.0f, 36.5f, 2.4f);
+        CreateQuestLayoutButton(
+            spatialCard, "DISPLAY SETTINGS", 36.2f, 2.8f,
             []() { ShowChatPanelSettingsModal(); });
-        CreateQuestLayoutButton(spatialCard, "RE-CENTER CHAT PANEL", 26.8f, 2.7f,
+        CreateQuestLayoutButton(
+            spatialCard, "RE-CENTER PANEL", 36.2f, 2.8f,
             []() { ShowWorldChatPanel(); });
       }
     }
 
     if (rightColumn) {
-      auto* chatCard = CreateQuestVerticalLayout(rightColumn, "02 Live Chat Card",
-          29.0f, 19.1f, 0.65f, surface, true, 1);
+      auto* chatCard = CreateQuestVerticalLayout(
+          rightColumn, "02 Live Chat Card", 38.5f, 22.8f,
+          0.6f, surface, true, 1);
       if (chatCard) {
-        CreateQuestLayoutText(chatCard, "02  /  LIVE CHAT", 3.7f, 27.0f, 3.0f);
-        CreateQuestLayoutText(chatCard, "Combined platform chat and supported stream events.",
-            2.45f, 27.0f, 3.2f);
-        chatButton = CreateQuestLayoutButton(chatCard, "CHAT MODULE: LOCKED",
-            26.8f, 3.4f, []() { ToggleChat(); });
+        CreateQuestLayoutText(
+            chatCard, "02 / LIVE CHAT", 3.25f, 36.5f, 2.9f);
+        CreateQuestLayoutText(
+            chatCard, "Messages and supported stream events from your connected platforms.",
+            2.1f, 36.5f, 4.0f);
+        chatButton = CreateQuestLayoutButton(
+            chatCard, "CHAT MODULE: LOCKED", 36.2f, 3.0f,
+            []() { ToggleChat(); });
       }
 
-      auto* songCard = CreateQuestVerticalLayout(rightColumn, "03 Song Requests Card",
-          29.0f, 19.1f, 0.65f, surface, true, 1);
+      auto* songCard = CreateQuestVerticalLayout(
+          rightColumn, "03 Song Requests Card", 38.5f, 22.8f,
+          0.6f, surface, true, 1);
       if (songCard) {
-        CreateQuestLayoutText(songCard, "03  /  SONG REQUESTS", 3.5f, 27.0f, 3.0f);
-        CreateQuestLayoutText(songCard, "Let viewers request songs through connected chats.",
-            2.45f, 27.0f, 3.2f);
-        bsrButton = CreateQuestLayoutButton(songCard, "BSR MODULE: LOCKED",
-            26.8f, 3.4f, []() { ToggleBsr(); });
+        CreateQuestLayoutText(
+            songCard, "03 / SONG REQUESTS", 3.1f, 36.5f, 2.9f);
+        CreateQuestLayoutText(
+            songCard, "Let viewers request songs through connected chat.",
+            2.1f, 36.5f, 4.0f);
+        bsrButton = CreateQuestLayoutButton(
+            songCard, "SONG REQUESTS: LOCKED", 36.2f, 3.0f,
+            []() { ToggleBsr(); });
       }
     }
   }
 
-  auto* footer = CreateQuestVerticalLayout(page, "RiftPulse Device Status Footer",
-      60.0f, 4.2f, 0.1f, headerSurface, true, 0);
+  auto* footer = CreateQuestVerticalLayout(
+      page, "RiftPulse Device Status Footer", 78.0f, 4.0f,
+      0.1f, headerSurface, true, 0);
   if (footer) {
     modulePreviewStatusLabel = CreateQuestLayoutText(
-        footer, "DEVICE STATUS  ΓÇó  Pair this headset to sync its modules.",
-        1.8f, 58.0f, 1.7f, TMPro::TextAlignmentOptions::Center);
+        footer, "DEVICE STATUS / PAIR THIS HEADSET TO SYNC ITS MODULES.",
+        1.75f, 76.0f, 2.0f,
+        TMPro::TextAlignmentOptions::Center);
   }
 }
-
