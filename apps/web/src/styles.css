@@ -604,3 +604,24 @@ body{background:radial-gradient(ellipse at 78% -10%,#7b69aa35,transparent 42%),r
   .provider-health-viewers{margin-left:38px}
   .download-steps{font-size:12px}
 }
+/* Mid-tone controls and forms to keep the brighter slate palette consistent. */
+.outline-button{background:#354a64;border-color:#647995;color:#e0d5ff}
+.outline-button:hover{background:#405873;border-color:#8f82c2;color:#f6f2ff}
+.connect-button,.disconnect-button{background:#354a64;border-color:#647995;color:#e8eff8}
+.connect-button:hover,.disconnect-button:hover{background:#405873;border-color:#8f82c2;color:#fff}
+.field-group input,.auth-form input{background:#344961;border-color:#647995;color:#f4f7fb}
+.field-group input::placeholder,.auth-form input::placeholder{color:#c0cada}
+.field-group input:focus,.auth-form input:focus{background:#3a506b;border-color:#b19aff;box-shadow:0 0 0 3px #b19aff20}
+.modal-card{background:radial-gradient(ellipse at 0 0,#8d78c333,transparent 45%),linear-gradient(145deg,#31445d,#273950);border-color:#60758f}
+.modal-card h2{color:#f5f7fb}
+.modal-copy{color:#d0d9e5}
+.modal-footnote{color:#c0cbda}
+.provider-permissions,.help-list,.pairing-code-area{background:#31465f;border-color:#5a708a}
+.provider-permissions>div,.help-list>div{border-color:#506680;color:#d3deeb}
+.provider-permissions>div:last-child,.help-list>div:last-child{border-bottom:0}
+.settings-option{border-color:#506680}
+.settings-option b{color:#f0f4fa}
+.settings-option small,.field-group>small{color:#c3cfdd}
+.settings-badge{background:#3a4d66;border-color:#7285a0;color:#e0e7f1}
+.api-pill{background:#34475e;border-color:#637894;color:#e0e7f1}
+.topbar-actions .icon-button{border-color:#556982;color:#d2dce8}

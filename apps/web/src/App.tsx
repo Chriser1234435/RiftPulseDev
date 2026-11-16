@@ -161,13 +161,15 @@ function App() {
     // When it is disconnected, offline, or unavailable, back off to 30 seconds.
     let pollAfterMs = 30_000;
     try {
-      const pollResponse = await fetch("/api/v1/providers/youtube/poll", {
-        method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: "{}",
-      }).catch(() => null);
-      if (pollResponse?.ok) {
-        const pollData = await pollResponse.json().catch(() => ({}));
-        if (typeof pollData.pollAfterMs === "number" && Number.isFinite(pollData.pollAfterMs)) {
-          pollAfterMs = Math.max(5_000, Math.min(300_000, pollData.pollAfterMs));
+      if (providerConnections.youtube.status === "connected" && providerConnections.youtube.configured) {
+        const pollResponse = await fetch("/api/v1/providers/youtube/poll", {
+          method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: "{}",
+        }).catch(() => null);
+        if (pollResponse?.ok) {
+          const pollData = await pollResponse.json().catch(() => ({}));
+          if (typeof pollData.pollAfterMs === "number" && Number.isFinite(pollData.pollAfterMs)) {
+            pollAfterMs = Math.max(5_000, Math.min(300_000, pollData.pollAfterMs));
+          }
         }
       }
       const response = await fetch("/api/v1/chat/messages", { credentials: "include" });
@@ -181,7 +183,7 @@ function App() {
       setChatLoading(false);
     }
     return pollAfterMs;
-  }, []);
+  }, [providerConnections.youtube.status, providerConnections.youtube.configured]);
 
   const refreshProviderConnections = useCallback(async () => {
     try {
@@ -195,11 +197,16 @@ function App() {
         for (const row of data.connections) {
           if (row && typeof row.provider === "string" && Object.hasOwn(next, row.provider)) {
             const key = row.provider as ProviderKey;
+            const displayName = typeof row.displayName === "string" ? row.displayName : null;
+            const configured = row.configured === true;
             const candidate: ProviderConnection = {
-              status: typeof row.status === "string" ? row.status : "error",
-              displayName: typeof row.displayName === "string" ? row.displayName : null,
+              // TikTok uses a saved public username rather than OAuth. Show it as
+              // connected in Integrations even while its LIVE socket is offline.
+              status: key === "tiktok" && configured && displayName?.trim()
+                ? "connected" : typeof row.status === "string" ? row.status : "error",
+              displayName,
               connectedAt: typeof row.connectedAt === "string" ? row.connectedAt : null,
-              configured: row.configured === true,
+              configured,
               detailCode: typeof row.detailCode === "string" ? row.detailCode : null,
             };
             const previous = current[key];
@@ -309,14 +316,13 @@ function App() {
       if (!healthResponse.ok) throw new Error("Could not check TikTok LIVE status.");
       const healthData = await healthResponse.json();
       const row = Array.isArray(healthData.providers) ? healthData.providers.find((item: ProviderHealth) => item.provider === "tiktok") : null;
-      const state: LiveState = row?.state === "connected" ? "live"
-        : row?.detailCode === "tiktok_stream_offline" || row?.state === "disconnected" || row?.state === "degraded" ? "not_live"
-          : row?.state === "error" ? "disconnected" : "connecting";
+      const state: LiveState = row?.state === "connected" ? "live" : row?.detailCode === "tiktok_stream_offline" || row?.detailCode === "not_live" ? "not_live" : row?.state === "disconnected" ? "disconnected" : row?.state === "error" || row?.detailCode === "connector_error" ? "error" : "connecting";
       setLiveStates(current => ({ ...current, [key]: { state, checkedAt: new Date().toISOString(), attempt } }));
       await refreshProviderHealth();
       return state;
-    } catch {
-      const state: LiveState = navigator.onLine ? "error" : "disconnected";
+    } catch (error) {
+      const networkFailure = !navigator.onLine || error instanceof TypeError;
+      const state: LiveState = networkFailure ? "disconnected" : "error";
       setLiveStates(current => ({ ...current, [key]: { state, checkedAt: new Date().toISOString(), attempt } }));
       return state;
     }
@@ -350,7 +356,7 @@ function App() {
         if (attempt === 4) {
           setLiveStates(current => {
             const next = { ...current };
-            for (const key of pendingTargets) if (next[key].state === "connecting" || next[key].state === "error") {
+            for (const key of pendingTargets) if (next[key].state === "connecting") {
               next[key] = { state: "not_live", checkedAt: new Date().toISOString(), attempt };
             }
             return next;
@@ -574,6 +580,16 @@ function App() {
     initialLiveCheckStarted.current = true;
     void checkAllProviders();
   }, [user?.id, providerConnections, isProviderConfigured, checkAllProviders]);
+  useEffect(() => {
+    if (!user?.id || !navigator.onLine || checkAllRunning) return;
+    const needsNetworkRecovery = providers.some(provider =>
+      isProviderConfigured(provider.key) && liveStates[provider.key].state === "disconnected");
+    if (!needsNetworkRecovery) return;
+    const timer = window.setTimeout(() => {
+      if (navigator.onLine && !checkAllRunning) void checkAllProviders();
+    }, 30_000);
+    return () => window.clearTimeout(timer);
+  }, [user?.id, liveStates, checkAllRunning, isProviderConfigured, checkAllProviders]);
   // Keep YouTube chat and stream events flowing while the Chat module is enabled.
   // Respect the pollingIntervalMillis-derived delay from YouTube and pause while hidden.
   useEffect(() => {
@@ -630,7 +646,7 @@ function App() {
         return next;
       });
     };
-    const handleOnline = () => { void checkAllProviders(); };
+    const handleOnline = () => { if (providers.some(provider => isProviderConfigured(provider.key))) void checkAllProviders(); };
     window.addEventListener("offline", handleOffline);
     window.addEventListener("online", handleOnline);
     if (!navigator.onLine) handleOffline();
@@ -639,7 +655,7 @@ function App() {
       window.removeEventListener("online", handleOnline);
       checkRunId.current += 1;
     };
-  }, [checkAllProviders]);
+  }, [checkAllProviders, isProviderConfigured]);
   // Automatically subscribe once a Twitch OAuth connection is persisted. This
   // also retries setup for already-connected accounts with pending/failed health.
   useEffect(() => {
@@ -1253,7 +1269,7 @@ function App() {
           </section>
 
           <section className="metrics-grid" data-tour-target="overview">
-            <MetricCard icon={<Radio size={17} />} label="PLATFORMS CONNECTED" value={String(Object.values(providerConnections).filter(connection => connection.status === "connected").length).padStart(2, "0")} detail="confirmed provider authorizations" />
+            <MetricCard icon={<Radio size={17} />} label="PLATFORMS CONNECTED" value={String(Object.values(providerConnections).filter(connection => connection.status === "connected").length).padStart(2, "0")} detail="connected platform accounts" />
             <MetricCard icon={<Gamepad2 size={17} />} label="DEVICES PAIRED" value={String(devices.length).padStart(2, "0")} detail={devices.length ? "Active paired devices" : "Connect Beat Saber to begin"} />
             <MetricCard icon={<WandSparkles size={17} />} label="ACTIVE MODULES" value={String(Object.values(enabled).filter(Boolean).length).padStart(2, "0")} detail="Chat + BSR Song Request" />
             <MetricCard icon={<Users size={17} />} label="LIVE VIEWERS" value={viewerAggregate?.total == null ? "—" : String(viewerAggregate.total)} detail={viewerAggregate?.total == null ? (healthLoading ? "Checking provider counts" : "No fresh counts available") : viewerAggregate.partial ? "Partial · some providers unavailable" : "Fresh counts across providers"} muted={viewerAggregate?.total == null} />
@@ -1277,7 +1293,7 @@ function App() {
                   <li>Download the PCVR ZIP.</li>
                   <li>Open your Beat Saber PCVR 1.40.8 folder — the one containing <code>Beat Saber.exe</code>.</li>
                   <li>Extract the ZIP into that folder and keep the included folder structure.</li>
-                  <li>Launch Beat Saber and open RiftPulse from the Mods panel.</li>
+                  <li>Start Beat Saber once to complete the installation.</li>
                 </ol>
                 <p className="download-platform-note">PCVR only · Windows ZIP · Beat Saber 1.40.8</p>
                 <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr-0.3.2.zip" download><Download size={15} /> Download PCVR ZIP</a>
@@ -1289,13 +1305,13 @@ function App() {
                   <li>Make sure the headset has standalone Beat Saber 1.40.8 installed.</li>
                   <li>Connect the Quest to ModsBeforeFriday (MBF).</li>
                   <li>Import the downloaded QMOD in MBF and install it.</li>
-                  <li>Launch Beat Saber and open RiftPulse from the Mods panel.</li>
+                  <li>Start Beat Saber once to complete the installation.</li>
                 </ol>
                 <p className="download-platform-note">Quest Standalone only · QMOD · Beat Saber 1.40.8</p>
                 <a className="primary-button download-link" href="/downloads/RiftPulse-Quest-0.3.4-Alpha.qmod" download="RiftPulse-Quest-0.3.4-Alpha.qmod"><Download size={15} /> Download Quest QMOD</a>
               </article>
             </div>
-            <div className="integration-footnote"><ShieldCheck size={15} /><span>Both packages are Alpha builds. Physical PCVR and Quest testing is still required.</span></div>
+
           </section>
 
           <section className="section-block integrations-block" id="integrations" data-tour-target="integrations">
