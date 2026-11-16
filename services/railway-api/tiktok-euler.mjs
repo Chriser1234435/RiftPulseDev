@@ -189,6 +189,7 @@ export function startTikTokEulerConnector({ worker, env }) {
       this.queue = Promise.resolve();
       this.stopped = false;
       this.attempt = 0;
+      this.forceReconnect = false;
       this.lastStatus = null;
       this.statusQueue = Promise.resolve();
       this.firstEventAccepted = false;
@@ -297,6 +298,23 @@ export function startTikTokEulerConnector({ worker, env }) {
       }
     }
 
+    reconnectNow() {
+      if (this.stopped) return false;
+      this.forceReconnect = true;
+      this.attempt = 0;
+      const socket = this.socket;
+      if (socket && socket.readyState !== WebSocket.CLOSED) {
+        try { socket.close(4000, "Dashboard requested a reconnect"); } catch {}
+      } else {
+        const wake = this.retryResolve;
+        this.retryResolve = null;
+        if (this.retryTimer) clearTimeout(this.retryTimer);
+        this.retryTimer = null;
+        wake?.();
+      }
+      return true;
+    }
+
     async connectOnce() {
       return new Promise(resolve => {
         if (this.stopped) return resolve();
@@ -359,6 +377,10 @@ export function startTikTokEulerConnector({ worker, env }) {
       while (!this.stopped) {
         await this.connectOnce();
         if (this.stopped) break;
+        if (this.forceReconnect) {
+          this.forceReconnect = false;
+          continue;
+        }
         this.attempt += 1;
         const offlineStream = this.lastCloseCode === 4404;
         const roomUnavailable = this.lastCloseCode === 4005;
@@ -465,11 +487,21 @@ export function startTikTokEulerConnector({ worker, env }) {
   const timer = setInterval(() => void syncAccounts(), pollMs);
   timer.unref?.();
 
-  return async function stopTikTokEulerConnector() {
+  const stopTikTokEulerConnector = async function stopTikTokEulerConnector() {
     if (stopped) return;
     stopped = true;
     clearInterval(timer);
     await Promise.all([...runners.values()].map(runner => runner.stop()));
     runners.clear();
   };
+  stopTikTokEulerConnector.reconnectAccount = async (accountId) => {
+    if (stopped) return false;
+    let runner = runners.get(accountId);
+    if (!runner) {
+      await syncAccounts();
+      runner = runners.get(accountId);
+    }
+    return runner ? runner.reconnectNow() : false;
+  };
+  return stopTikTokEulerConnector;
 }

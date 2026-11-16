@@ -473,3 +473,134 @@ button,a{touch-action:manipulation}
   .provider-row>.provider-icon{width:32px;height:32px}
   .provider-row>.connect-button,.provider-row>.disconnect-button{max-width:92px;min-width:78px}
 }
+
+/* RiftPulse mid-tone slate theme: balanced contrast without the near-black surfaces. */
+:root{
+  color-scheme:dark;
+  --bg:#172536;
+  --panel:#27384e;
+  --line:#435770;
+  --muted:#bdc8d8;
+  --purple:#c2a8ff;
+  --purple2:#9275dc;
+  --cyan:#8be2f1;
+  --green:#70dfb9;
+  --rp-surface-1:#22334a;
+  --rp-surface-2:#2b3d55;
+  --rp-surface-3:#344861;
+  --rp-border:#52657f;
+  --rp-text:#f2f5fb;
+  --rp-muted:#c2ccda;
+}
+html,body,#root{background:#172536;color:#f2f5fb}
+body{background:radial-gradient(ellipse at 78% -10%,#7b69aa35,transparent 42%),radial-gradient(ellipse at 0% 35%,#2d6e8050,transparent 36%),#172536}
+.sidebar{background:#1d2c40;border-color:#40536d}
+.main-panel{background:transparent}
+.topbar{background:#1d2c40ed;border-color:#40536d;backdrop-filter:blur(18px)}
+.page-content{color:#eff3fa}
+.panel-card,.metric-card,.module-card,.download-card,.auth-card,.modal-card,.profile-menu,.notification-dropdown,.updates-dropdown,.dropdown-panel,.chat-feed-panel,.provider-list,.workspace-switcher{
+  background:#27384e;
+  border-color:#465a75;
+  color:#f0f4fa;
+}
+.panel-card,.download-card,.chat-feed-panel,.provider-list{box-shadow:0 12px 34px #07101d30}
+.section-heading p,.modal-copy,.download-card p,.download-steps,.provider-main small,.chat-message-copy>p{color:#c1ccdc}
+.section-overline,.eyebrow,.nav-label,.brand-caption,.modal-eyebrow{color:#c0a9fa}
+.nav-item{color:#c1cbda}
+.nav-item:hover{background:#30445d;border-color:#4d6280;color:#f8faff}
+.nav-item.active{background:linear-gradient(100deg,#3c4261,#2a3d56);border-color:#65769a;color:#fff}
+.metric-card{background:linear-gradient(145deg,#2b3e55,#26374c);border-color:#4a5d77}
+.module-card{background:linear-gradient(145deg,#2b3d55,#26374c);border-color:#4b5e78}
+.provider-row{background:#293b52;border-color:#4a5f79}
+.provider-row:hover{background:#344963;border-color:#7083a0}
+.connection-state{color:#c0ccdc}
+.download-card{background:linear-gradient(145deg,#2d4058,#26374d);border-color:#50647f}
+.download-platform-icon{background:#322d4d;border-color:#7d6aa8;color:#d4c6ff}
+.download-platform-icon.quest-download{background:#21434b;border-color:#568994;color:#a6edf2}
+.download-card-head b{color:#f5f7fc}
+.download-card-head small{color:#c3cedd}
+.download-state{border-color:#5c8b7d;color:#9ce9cb;background:#25473f}
+.download-step-title{margin:15px 0 7px!important;color:#f2f5fb!important;font-size:12px!important;font-weight:800}
+.download-steps{margin:0 0 13px;padding-left:22px;font-size:11px;line-height:1.65}
+.download-steps li{padding:3px 0 3px 3px}
+.download-steps li::marker{color:#c4adff;font-weight:800}
+.download-platform-note{font-size:9px!important;line-height:1.4!important;color:#bdc9d9!important;margin:9px 0 15px!important;min-height:0!important}
+.download-link{margin-top:auto}
+.provider-icon{box-shadow:0 4px 12px #0c17263d}
+.provider-list{background:#27384e}
+.provider-row{border-color:#455a74}
+.provider-row:not(:last-child){border-bottom-color:#3d526c}
+.integration-footnote{color:#bdc9d8}
+.chat-feed-panel{grid-template-columns:minmax(0,1.6fr) minmax(300px,1fr);background:#26384e;border-color:#4b607b}
+.chat-feed-main{background:#26384e;border-color:#4b607b}
+.chat-message-row{border-bottom-color:#425772}
+.chat-message-copy>p{color:#d2dbe7}
+.chat-message-meta time{color:#b2c0d2}
+.chat-empty{color:#c1ccdc}
+.chat-empty b{color:#f2f5fb}
+.chat-empty p{color:#bdc8d8}
+.chat-empty-icon{background:#394360;border-color:#75649f;color:#d9caff}
+
+/* Custom platform marks and platform-coloured chat identities. */
+.provider-brand-mark{display:inline-grid;place-items:center;flex:0 0 25px;width:25px;height:25px;border-radius:8px;overflow:hidden}
+.provider-brand-mark svg{display:block;width:23px;height:23px}
+.provider-brand-mark.twitch{background:#384b80;border:1px solid #91a9ff}
+.provider-brand-mark.youtube{background:#6c3545;border:1px solid #ffd4d9}
+.provider-brand-mark.tiktok{background:#202a39;border:1px solid #dfe5ec}
+.chat-message-meta{gap:9px}
+.chat-sender-name{font-size:11px;font-weight:850;letter-spacing:.01em}
+.chat-message-text{font-size:11px;line-height:1.65}
+.chat-message-row.twitch .chat-sender-name,.chat-message-row.twitch .chat-message-text{-webkit-text-stroke:.28px #ffffff;color:#88a6ff;text-shadow:0 0 9px #6588ff30}
+.chat-message-row.youtube .chat-sender-name,.chat-message-row.youtube .chat-message-text{-webkit-text-stroke:.28px #ffffff;color:#ff6675;text-shadow:0 0 9px #ff50632c}
+.chat-message-row.tiktok .chat-sender-name,.chat-message-row.tiktok .chat-message-text{-webkit-text-stroke:.32px #172233;color:#ffffff;text-shadow:0 1px 2px #121a28}
+.chat-event-row{margin:10px 2px;padding:13px 12px;border:1px solid #7284a5;border-radius:12px;background:#32455f;box-shadow:inset 0 0 0 1px #dce7ff0b,0 4px 16px #0c17262e}
+.chat-event-row.twitch{border-color:#819bff;background:linear-gradient(120deg,#334a7c,#2d405d);box-shadow:inset 0 0 0 1px #b7c7ff20,0 0 16px #6989ff2b}
+.chat-event-row.youtube{border-color:#ff909b;background:linear-gradient(120deg,#633c4c,#38435b);box-shadow:inset 0 0 0 1px #ffdce020,0 0 16px #ef56692b}
+.chat-event-row.tiktok{border-color:#dce5ee;background:linear-gradient(120deg,#425066,#303f54);box-shadow:inset 0 0 0 1px #ffffff20,0 0 16px #d4e0ee25}
+.chat-event-row .chat-message-text{font-weight:750;letter-spacing:.01em}
+.chat-event-kind{font-size:8px;font-weight:850;letter-spacing:.08em;text-transform:uppercase;padding:4px 7px;border-radius:6px;background:#edf3ff18;border:1px solid #d8e3f34d;color:#f5f7fb}
+.chat-event-row.twitch .chat-event-kind{background:#708cff36;border-color:#c1ceff;color:#ffffff}
+.chat-event-row.youtube .chat-event-kind{background:#ed65783b;border-color:#ffc0c7;color:#ffffff}
+.chat-event-row.tiktok .chat-event-kind{background:#ffffff28;border-color:#e5ebf3;color:#ffffff}
+
+/* Provider Health reconnect controls. */
+.provider-health-panel{padding:16px;background:#2a3c53;border-left:1px solid #506580;min-width:0}
+.provider-health-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:13px;border-bottom:1px solid #50617a}
+.provider-health-heading>div{display:grid;gap:5px;min-width:0}
+.provider-health-heading>div>span{font:800 10px 'DM Mono',monospace;letter-spacing:.12em;color:#e0d2ff}
+.provider-health-heading>div>small{color:#c0ccdc;font-size:9px}
+.check-all-button,.provider-reconnect-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid #8d79c3;background:#3f4160;color:#f7f4ff;border-radius:9px;font-weight:800;cursor:pointer}
+.check-all-button{min-height:38px;padding:8px 11px;font-size:10px;white-space:nowrap}
+.check-all-button:hover,.provider-reconnect-button:hover{background:#55527b;border-color:#b5a1ee}
+.check-all-button:disabled,.provider-reconnect-button:disabled{opacity:.42;cursor:not-allowed}
+.provider-health-list{display:grid;gap:0}
+.provider-health-row{display:flex;align-items:center;gap:10px;min-width:0;padding:12px 0;border-bottom:1px solid #465a73}
+.provider-health-row:last-child{border-bottom:0}
+.provider-health-row>.provider-brand-mark{flex-shrink:0;width:30px;height:30px}
+.provider-health-copy{display:grid;gap:4px;flex:1;min-width:0}
+.provider-health-copy>b{font-size:11px;color:#f4f6fb}
+.provider-health-copy>small{font-size:9px;line-height:1.4;color:#c0ccda}
+.provider-live-state{font-size:9px;letter-spacing:.08em;font-weight:900}
+.provider-live-state.live{color:#85efc5}
+.provider-live-state.connecting{color:#ffd78a}
+.provider-live-state.not_live,.provider-live-state.not-connected{color:#c3cedc}
+.provider-live-state.disconnected,.provider-live-state.error{color:#ff9da6}
+.provider-health-viewers{display:inline-flex;align-items:center;gap:4px;color:#d8e2f0;font:10px 'DM Mono',monospace}
+.provider-reconnect-button{flex-shrink:0;min-height:34px;padding:7px 8px;font-size:9px;background:#354861;border-color:#667b98}
+.provider-reconnect-button small{font-size:8px;color:#d1dbea;padding-left:3px;border-left:1px solid #8b9bb0}
+.provider-health-note{margin:10px 0 0;color:#c0ccda;font-size:9px;line-height:1.55}
+.bottom-grid{grid-template-columns:1fr}
+.devices-card{width:100%}
+@media(max-width:900px){
+  .chat-feed-panel{grid-template-columns:1fr}
+  .provider-health-panel{border-left:0;border-top:1px solid #506580}
+}
+@media(max-width:600px){
+  .provider-health-heading{align-items:flex-start;flex-direction:column}
+  .check-all-button{width:100%;min-height:42px}
+  .provider-health-row{gap:7px;flex-wrap:wrap}
+  .provider-health-copy{min-width:calc(100% - 45px);flex-basis:calc(100% - 45px)}
+  .provider-reconnect-button{margin-left:38px;min-height:40px;flex:1}
+  .provider-health-viewers{margin-left:38px}
+  .download-steps{font-size:12px}
+}

@@ -44,6 +44,8 @@ export interface Env {
   YOUTUBE_REDIRECT_URI?: string;
   /** HMAC secret shared only with the isolated unofficial TikTok LIVE connector bridge. */
   TIKTOK_CONNECTOR_INGEST_SECRET?: string;
+  /** In-process Railway bridge control; configured only by the Node API host. */
+  TIKTOK_RECONNECT?: (accountId: string) => Promise<boolean>;
   /** Base64-encoded 32-byte AES-256-GCM key for provider tokens; never commit the value. */
   TOKEN_ENCRYPTION_KEY?: string;
   /** Optional upstream Railway API origin; Cloudflare forwards /api/* while keeping the browser same-origin. */

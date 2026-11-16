@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import { useRef } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
-  Activity, ArrowDown, ArrowDownRight, ArrowRight, ArrowUpRight, AudioLines, Bell, Check, ChevronDown,
+  ArrowDown, ArrowDownRight, ArrowRight, ArrowUpRight, AudioLines, Bell, Check, ChevronDown,
   CircleHelp, Command, Download, ExternalLink, Gamepad2, Headphones, LayoutDashboard,
   Link2, LockKeyhole, LogOut, MessageCircle, Monitor, MoreHorizontal, Music2,
   Plus, Radio, RefreshCw, Settings2, ShieldCheck, SlidersHorizontal, Sparkles,
@@ -11,10 +12,12 @@ import {
 type User = { id: string; name: string; email: string };
 type ReleaseUpdate = { id: string; title: string; category: "website" | "mod" | "both"; version: string | null; summary: string; changes: string[]; publishedAt: string; isRead: boolean };
 type Device = { id: string; platform: "pcvr" | "quest"; gameVersion: string; modVersion: string; label: string | null; createdAt: string; lastSeenAt: string | null };
-type ChatMessage = { id: string; provider: ProviderKey; senderName: string; text: string; receivedAt: string; badges: { moderator: boolean; subscriber: boolean; verified: boolean } };
+type ChatMessage = { id: string; provider: ProviderKey; senderName: string; text: string; receivedAt: string; recordType?: "chat" | "event"; eventKind?: string | null; badges: { moderator: boolean; subscriber: boolean; verified: boolean } };
 type ProviderState = "connected" | "disconnected" | "degraded" | "error" | "unsupported";
-type ProviderHealth = { provider: ProviderKey; state: ProviderState; viewerCount: number | null; detailCode: string | null; unofficial: boolean };
+type ProviderHealth = { provider: ProviderKey; state: ProviderState; viewerCount: number | null; detailCode: string | null; observedAt?: string };
 type ProviderConnection = { status: string; displayName: string | null; connectedAt: string | null; configured: boolean; detailCode: string | null };
+type LiveState = "live" | "connecting" | "not_live" | "disconnected" | "error";
+type ProviderLiveStatus = { state: LiveState; checkedAt: string | null; attempt: number };
 type ViewerAggregate = { total: number | null; includedProviders: ProviderKey[]; missingProviders: ProviderKey[]; partial: boolean };
 type ModuleKey = "chat" | "bsr-song-request";
 type ProviderKey = "twitch" | "youtube" | "tiktok";
@@ -22,7 +25,7 @@ type Provider = { key: ProviderKey; name: string; short: string; className: stri
 const providers: Provider[] = [
   { key: "twitch", name: "Twitch", short: "T", className: "twitch", note: "Live chat + viewers" },
   { key: "youtube", name: "YouTube", short: "▶", className: "youtube", note: "Live chat + viewers" },
-  { key: "tiktok", name: "TikTok LIVE", short: "♫", className: "tiktok", note: "Unofficial · best effort" },
+  { key: "tiktok", name: "TikTok", short: "♫", className: "tiktok", note: "Save username · LIVE status detected automatically" },
 ];
 type ProviderEventPayload = {
   id: string; provider: ProviderKey; kind: string; actorName: string | null;
@@ -57,10 +60,28 @@ function providerEventAsChatMessage(value: unknown): ChatMessage | null {
   return {
     id: event.id, provider: event.provider as ProviderKey, senderName: actor,
     text: description.slice(0, 500), receivedAt: event.receivedAt,
+    recordType: "event", eventKind: event.kind,
     badges: { moderator: false, subscriber: event.kind === "subscription", verified: false },
   };
 }
 
+
+function ProviderGlyph({ provider }: { provider: ProviderKey }) {
+  return <span className={"provider-brand-mark " + provider} aria-hidden="true">
+    <svg viewBox="0 0 28 28" role="img">
+      {provider === "youtube" ? <>
+        <rect x="2.5" y="6" width="23" height="16" rx="5" fill="#ee3548" stroke="#ffffff" strokeWidth="1.5" />
+        <path d="M12 10.2 18.2 14 12 17.8Z" fill="#ffffff" />
+      </> : provider === "twitch" ? <>
+        <path d="M4 3.5h20v14l-5.2 4.4h-4.6L11 25v-3.1H4Z" fill="#557dff" stroke="#ffffff" strokeWidth="1.5" strokeLinejoin="round" />
+        <path d="M10 8v7M17 8v7" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" />
+      </> : <>
+        <path d="M15.7 3.2c.5 4.1 2.7 6 6.1 6.2v4.2c-2.2-.1-4.2-.8-6-2.3v7.1c0 4-2.8 6.4-6.2 6.4-3.2 0-5.6-2.2-5.6-5.3 0-3.5 2.7-5.9 6.2-5.9.5 0 1 .1 1.4.2v4.1c-.4-.2-.8-.3-1.3-.3-1.3 0-2.3.8-2.3 2 0 1.1.8 1.8 1.9 1.8 1.3 0 2-.9 2-2.3V3.2Z" fill="#ffffff" stroke="#111827" strokeWidth="1.4" strokeLinejoin="round" />
+        <path d="M15.7 3.2c.5 4.1 2.7 6 6.1 6.2" fill="none" stroke="#151b27" strokeWidth="2.4" strokeLinecap="round" />
+      </>}
+    </svg>
+  </span>;
+}
 const initialEnabled: Record<ModuleKey, boolean> = { chat: true, "bsr-song-request": true };
 
 const onboardingSteps = [
@@ -81,7 +102,7 @@ function App() {
   const [providerConnections, setProviderConnections] = useState<Record<ProviderKey, ProviderConnection>>({
     twitch: { status: "disconnected", displayName: null, connectedAt: null, configured: false, detailCode: "oauth_credentials_not_configured" },
     youtube: { status: "disconnected", displayName: null, connectedAt: null, configured: false, detailCode: null },
-    tiktok: { status: "disconnected", displayName: null, connectedAt: null, configured: false, detailCode: "unofficial_connector_not_configured" },
+    tiktok: { status: "disconnected", displayName: null, connectedAt: null, configured: false, detailCode: "tiktok_username_required" },
   });
   const [twitchEventSubAutoAttempted, setTwitchEventSubAutoAttempted] = useState(false);
   const [modal, setModal] = useState<"pair" | "provider" | "settings" | "help" | "auth" | null>(null);
@@ -90,7 +111,7 @@ function App() {
   const [selectedProvider, setSelectedProvider] = useState<ProviderKey>("twitch");
   const [tiktokUsername, setTiktokUsername] = useState("");
   const [tiktokSaving, setTiktokSaving] = useState(false);
-  const [tiktokAccountId, setTiktokAccountId] = useState("");
+
   const [notice, setNotice] = useState("");
   const [command, setCommand] = useState("!bsr");
   const [autoSave, setAutoSave] = useState(true);
@@ -117,6 +138,18 @@ function App() {
   const [providerHealth, setProviderHealth] = useState<ProviderHealth[]>([]);
   const [viewerAggregate, setViewerAggregate] = useState<ViewerAggregate | null>(null);
   const [healthLoading, setHealthLoading] = useState(true);
+  const [liveStates, setLiveStates] = useState<Record<ProviderKey, ProviderLiveStatus>>({
+    twitch: { state: "disconnected", checkedAt: null, attempt: 0 },
+    youtube: { state: "disconnected", checkedAt: null, attempt: 0 },
+    tiktok: { state: "disconnected", checkedAt: null, attempt: 0 },
+  });
+  const [checkAllRunning, setCheckAllRunning] = useState(false);
+  const [manualReconnectsRemaining, setManualReconnectsRemaining] = useState<Record<ProviderKey, number>>({
+    twitch: 2, youtube: 2, tiktok: 2,
+  });
+  const [reconnectCountsLoadedFor, setReconnectCountsLoadedFor] = useState<string | null>(null);
+  const checkRunId = useRef(0);
+  const initialLiveCheckStarted = useRef(false);
   const [tourOpen, setTourOpen] = useState(false);
   const [tourStep, setTourStep] = useState(0);
   const [tourCompleted, setTourCompleted] = useState(false);
@@ -158,18 +191,27 @@ function App() {
       if (!Array.isArray(data.connections)) throw new Error("Invalid provider connection response");
       setProviderConnections(current => {
         const next = { ...current };
+        let changed = false;
         for (const row of data.connections) {
           if (row && typeof row.provider === "string" && Object.hasOwn(next, row.provider)) {
-            next[row.provider as ProviderKey] = {
+            const key = row.provider as ProviderKey;
+            const candidate: ProviderConnection = {
               status: typeof row.status === "string" ? row.status : "error",
               displayName: typeof row.displayName === "string" ? row.displayName : null,
               connectedAt: typeof row.connectedAt === "string" ? row.connectedAt : null,
               configured: row.configured === true,
               detailCode: typeof row.detailCode === "string" ? row.detailCode : null,
             };
+            const previous = current[key];
+            if (previous.status !== candidate.status || previous.displayName !== candidate.displayName
+              || previous.connectedAt !== candidate.connectedAt || previous.configured !== candidate.configured
+              || previous.detailCode !== candidate.detailCode) {
+              next[key] = candidate;
+              changed = true;
+            }
           }
         }
-        return next;
+        return changed ? next : current;
       });
     } catch {
       // Keep the last confirmed connection state; never invent a connected state.
@@ -181,8 +223,36 @@ function App() {
       const response = await fetch("/api/v1/integrations/health", { credentials: "include" });
       if (!response.ok) throw new Error("Could not load provider health");
       const data = await response.json();
-      setProviderHealth(Array.isArray(data.providers) ? data.providers : []);
+      const rows = Array.isArray(data.providers) ? data.providers as ProviderHealth[] : [];
+      setProviderHealth(rows);
       setViewerAggregate(data.viewers ?? null);
+      setLiveStates(current => {
+        const next = { ...current };
+        for (const row of rows) {
+          // EventSub being subscribed means Twitch is authorized, not that it is live.
+          if (row.provider === "twitch") {
+            if (row.detailCode === "live_detected") {
+              next.twitch = { state: "live", checkedAt: row.observedAt ?? new Date().toISOString(), attempt: next.twitch.attempt };
+            } else if (row.detailCode === "not_live") {
+              next.twitch = { state: "not_live", checkedAt: row.observedAt ?? new Date().toISOString(), attempt: next.twitch.attempt };
+            } else if (row.detailCode === "live_check_failed") {
+              next.twitch = { state: "error", checkedAt: row.observedAt ?? new Date().toISOString(), attempt: next.twitch.attempt };
+            }
+            continue;
+          }
+          if (next[row.provider]?.state === "connecting") continue;
+          const observed = row.observedAt ? Date.parse(row.observedAt) : 0;
+          const fresh = Number.isFinite(observed) && Date.now() - observed <= 90_000;
+          if ((row.provider === "tiktok" || row.provider === "youtube") && row.state === "connected" && fresh) {
+            next[row.provider] = { state: "live", checkedAt: row.observedAt ?? new Date().toISOString(), attempt: next[row.provider].attempt };
+          } else if (row.detailCode === "tiktok_stream_offline" || row.detailCode === "no_active_live_chat" || row.detailCode === "not_live") {
+            next[row.provider] = { state: "not_live", checkedAt: row.observedAt ?? new Date().toISOString(), attempt: next[row.provider].attempt };
+          } else if (row.state === "error" || row.state === "disconnected") {
+            next[row.provider] = { state: "disconnected", checkedAt: row.observedAt ?? new Date().toISOString(), attempt: next[row.provider].attempt };
+          }
+        }
+        return next;
+      });
     } catch {
       setProviderHealth([]);
       setViewerAggregate(null);
@@ -191,6 +261,153 @@ function App() {
     }
   }, []);
 
+  const isProviderConfigured = useCallback((key: ProviderKey) => {
+    const connection = providerConnections[key];
+    if (key === "tiktok") return Boolean(connection.displayName?.trim() && connection.configured);
+    return connection.status === "connected" && connection.configured;
+  }, [providerConnections]);
+
+  const checkProviderLive = useCallback(async (key: ProviderKey, attempt: number): Promise<LiveState> => {
+    if (!navigator.onLine) {
+      setLiveStates(current => ({ ...current, [key]: { state: "disconnected", checkedAt: new Date().toISOString(), attempt } }));
+      return "disconnected";
+    }
+    if (!isProviderConfigured(key)) {
+      setLiveStates(current => ({ ...current, [key]: { state: "disconnected", checkedAt: new Date().toISOString(), attempt } }));
+      return "disconnected";
+    }
+    setLiveStates(current => ({ ...current, [key]: { state: "connecting", checkedAt: current[key].checkedAt, attempt } }));
+    try {
+      if (key === "twitch") {
+        const response = await fetch("/api/v1/providers/twitch/live-check", {
+          method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: "{}",
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error?.message ?? "Twitch LIVE check failed.");
+        const state: LiveState = data.status === "live" ? "live" : "not_live";
+        setLiveStates(current => ({ ...current, [key]: { state, checkedAt: data.checkedAt ?? new Date().toISOString(), attempt } }));
+        return state;
+      }
+      if (key === "youtube") {
+        const response = await fetch("/api/v1/providers/youtube/poll", {
+          method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: "{}",
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error?.message ?? "YouTube LIVE check failed.");
+        const state: LiveState = data.status === "polled" ? "live" : data.status === "not_live" ? "not_live" : "connecting";
+        setLiveStates(current => ({ ...current, [key]: { state, checkedAt: new Date().toISOString(), attempt } }));
+        return state;
+      }
+
+      const reconnectResponse = await fetch("/api/v1/providers/tiktok/reconnect", {
+        method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: "{}",
+      });
+      const reconnectData = await reconnectResponse.json().catch(() => ({}));
+      if (!reconnectResponse.ok) throw new Error(reconnectData.error?.message ?? "TikTok reconnect failed.");
+      await new Promise(resolve => window.setTimeout(resolve, 1600));
+      const healthResponse = await fetch("/api/v1/integrations/health", { credentials: "include" });
+      if (!healthResponse.ok) throw new Error("Could not check TikTok LIVE status.");
+      const healthData = await healthResponse.json();
+      const row = Array.isArray(healthData.providers) ? healthData.providers.find((item: ProviderHealth) => item.provider === "tiktok") : null;
+      const state: LiveState = row?.state === "connected" ? "live"
+        : row?.detailCode === "tiktok_stream_offline" || row?.state === "disconnected" || row?.state === "degraded" ? "not_live"
+          : row?.state === "error" ? "disconnected" : "connecting";
+      setLiveStates(current => ({ ...current, [key]: { state, checkedAt: new Date().toISOString(), attempt } }));
+      await refreshProviderHealth();
+      return state;
+    } catch {
+      const state: LiveState = navigator.onLine ? "error" : "disconnected";
+      setLiveStates(current => ({ ...current, [key]: { state, checkedAt: new Date().toISOString(), attempt } }));
+      return state;
+    }
+  }, [isProviderConfigured, refreshProviderHealth]);
+
+  const checkAllProviders = useCallback(async () => {
+    const targets = providers.map(provider => provider.key).filter(isProviderConfigured);
+    if (!targets.length) {
+      flash("Connect Twitch or YouTube, or save a TikTok username, before checking LIVE status.");
+      return;
+    }
+    const runId = ++checkRunId.current;
+    let pendingTargets = [...targets];
+    setCheckAllRunning(true);
+    try {
+      const retryDelays = [10_000, 20_000, 30_000];
+      for (let attempt = 1; attempt <= 4; attempt++) {
+        if (runId !== checkRunId.current) return;
+        if (!navigator.onLine) {
+          setLiveStates(current => {
+            const next = { ...current };
+            for (const key of targets) next[key] = { state: "disconnected", checkedAt: new Date().toISOString(), attempt: attempt - 1 };
+            return next;
+          });
+          break;
+        }
+        const results = await Promise.all(pendingTargets.map(key => checkProviderLive(key, attempt)));
+        if (runId !== checkRunId.current) break;
+        pendingTargets = pendingTargets.filter((key, index) => results[index] !== "live");
+        if (!pendingTargets.length) break;
+        if (attempt === 4) {
+          setLiveStates(current => {
+            const next = { ...current };
+            for (const key of pendingTargets) if (next[key].state === "connecting" || next[key].state === "error") {
+              next[key] = { state: "not_live", checkedAt: new Date().toISOString(), attempt };
+            }
+            return next;
+          });
+          break;
+        }
+        await new Promise(resolve => window.setTimeout(resolve, retryDelays[attempt - 1]));
+      }
+    } finally {
+      if (runId === checkRunId.current) setCheckAllRunning(false);
+    }
+  }, [isProviderConfigured, checkProviderLive]);
+
+  const reconnectProviderManually = useCallback(async (key: ProviderKey) => {
+    if (!isProviderConfigured(key)) return;
+    if (manualReconnectsRemaining[key] <= 0) {
+      flash("No manual reconnect attempts remain for " + providers.find(provider => provider.key === key)?.name + ".");
+      return;
+    }
+    const remaining = manualReconnectsRemaining[key] - 1;
+    setManualReconnectsRemaining(current => ({ ...current, [key]: remaining }));
+    const result = await checkProviderLive(key, 1);
+    await refreshProviderConnections();
+    await refreshProviderHealth();
+    if (result === "live") flash((providers.find(provider => provider.key === key)?.name ?? key) + " is LIVE.");
+    else if (result === "not_live") flash((providers.find(provider => provider.key === key)?.name ?? key) + " is connected but not live yet. " + remaining + " manual attempts left.");
+    else flash("Reconnect check finished. " + remaining + " manual attempts left.");
+  }, [checkProviderLive, isProviderConfigured, manualReconnectsRemaining, refreshProviderConnections, refreshProviderHealth]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setReconnectCountsLoadedFor(null);
+      return;
+    }
+    const defaults: Record<ProviderKey, number> = { twitch: 2, youtube: 2, tiktok: 2 };
+    try {
+      const stored = JSON.parse(window.localStorage.getItem("riftpulse-manual-reconnects:" + user.id) ?? "null");
+      if (stored && typeof stored === "object") {
+        for (const key of Object.keys(defaults) as ProviderKey[]) {
+          if (Number.isInteger(stored[key]) && stored[key] >= 0 && stored[key] <= 2) defaults[key] = stored[key];
+        }
+      }
+    } catch {
+      // A blocked or malformed browser storage entry falls back to two attempts.
+    }
+    setManualReconnectsRemaining(defaults);
+    setReconnectCountsLoadedFor(user.id);
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || reconnectCountsLoadedFor !== user.id) return;
+    try {
+      window.localStorage.setItem("riftpulse-manual-reconnects:" + user.id, JSON.stringify(manualReconnectsRemaining));
+    } catch {
+      // The retry buttons still enforce their limit for this page session.
+    }
+  }, [user?.id, reconnectCountsLoadedFor, manualReconnectsRemaining]);
   const refreshDevices = useCallback(async () => {
     const response = await fetch("/api/v1/devices", { credentials: "include" });
     if (response.ok) {
@@ -348,6 +565,15 @@ function App() {
     void refreshUpdates();
   }, [user?.id, refreshDevices, refreshProviderHealth, refreshProviderConnections, refreshUpdates]);
 
+  useEffect(() => {
+    if (!user?.id) {
+      initialLiveCheckStarted.current = false;
+      return;
+    }
+    if (initialLiveCheckStarted.current || !providers.some(provider => isProviderConfigured(provider.key))) return;
+    initialLiveCheckStarted.current = true;
+    void checkAllProviders();
+  }, [user?.id, providerConnections, isProviderConfigured, checkAllProviders]);
   // Keep YouTube chat and stream events flowing while the Chat module is enabled.
   // Respect the pollingIntervalMillis-derived delay from YouTube and pause while hidden.
   useEffect(() => {
@@ -392,6 +618,28 @@ function App() {
     };
   }, [user?.id, refreshProviderConnections, refreshProviderHealth]);
 
+  useEffect(() => {
+    const handleOffline = () => {
+      checkRunId.current += 1;
+      setCheckAllRunning(false);
+      setLiveStates(current => {
+        const next = { ...current };
+        for (const provider of providers) {
+          next[provider.key] = { state: "disconnected", checkedAt: new Date().toISOString(), attempt: next[provider.key].attempt };
+        }
+        return next;
+      });
+    };
+    const handleOnline = () => { void checkAllProviders(); };
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("online", handleOnline);
+    if (!navigator.onLine) handleOffline();
+    return () => {
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("online", handleOnline);
+      checkRunId.current += 1;
+    };
+  }, [checkAllProviders]);
   // Automatically subscribe once a Twitch OAuth connection is persisted. This
   // also retries setup for already-connected accounts with pending/failed health.
   useEffect(() => {
@@ -444,7 +692,7 @@ function App() {
         try {
           const payload = JSON.parse(String(event.data));
           const message: ChatMessage | null = payload?.type === "chat.message"
-            ? payload.message as ChatMessage
+            ? { ...(payload.message as ChatMessage), recordType: "chat" }
             : payload?.type === "provider.event" ? providerEventAsChatMessage(payload.event) : null;
           if (!message || typeof message.id !== "string" || typeof message.text !== "string"
             || typeof message.senderName !== "string" || !providers.some(provider => provider.key === message.provider)) return;
@@ -628,8 +876,10 @@ function App() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error?.message ?? "Could not save TikTok settings.");
       setTiktokUsername(typeof data.username === "string" ? data.username : "");
-      setTiktokAccountId(typeof data.accountId === "string" ? data.accountId : user?.id ?? "");
-      flash(data.username ? "TikTok LIVE username saved to your account." : "TikTok LIVE username cleared.");
+
+      await refreshProviderConnections();
+      await refreshProviderHealth();
+      flash(data.username ? "TikTok LIVE username saved. We will detect when the account goes live." : "TikTok LIVE username cleared.");
     } catch (error) {
       flash(error instanceof Error ? error.message : "Could not save TikTok settings.");
     } finally {
@@ -644,9 +894,9 @@ function App() {
       .then(data => {
         if (!active) return;
         setTiktokUsername(typeof data.username === "string" ? data.username : "");
-        setTiktokAccountId(typeof data.accountId === "string" ? data.accountId : user.id);
+
       })
-      .catch(() => { if (active) setTiktokAccountId(user.id); });
+      .catch(() => {});
     return () => { active = false; };
   }, [modal, selectedProvider, user?.id]);
   const disconnectSelectedProvider = async () => {
@@ -716,8 +966,8 @@ function App() {
       }
       return;
     }
-    if (selectedProvider !== "twitch") {
-      flash("TikTok LIVE is unavailable in this build.");
+    if (selectedProvider === "tiktok") {
+      flash("Enter and save your TikTok LIVE username to connect this platform.");
       return;
     }
     if (!current.configured) {
@@ -1018,20 +1268,34 @@ function App() {
           </section>
 
           <section className="section-block downloads-block" id="downloads" data-tour-target="downloads">
-            <div className="section-heading"><div><div className="section-overline">ALPHA TEST BUILDS</div><h3>Development downloads <span className="subtle-count">02</span></h3><p>Alpha packages for Beat Saber 1.40.8. PCVR v0.3.1 and Quest v0.3.0 Alpha are the current builds. PCVR 0.3.1 fixes the Nexus menu layout, chat header/feed placement, and floating-panel recentering. Quest remains on its existing v0.3.0 Alpha package. Live-stream and real-headset validation is still required.</p></div><span className="settings-badge">PCVR v0.3.1 / Quest v0.3.0</span></div>
+            <div className="section-heading"><div><div className="section-overline">LATEST MOD BUILDS</div><h3>Beat Saber downloads <span className="subtle-count">02</span></h3><p>Choose your Beat Saber 1.40.8 version and follow the matching install steps.</p></div><span className="settings-badge">PCVR v0.3.2 / Quest v0.3.4 Alpha</span></div>
             <div className="downloads-grid">
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR</b><small>Windows / Beat Saber 1.40.8 (PCVR)</small></div><span className="download-state">v0.3.1 | ZIP verified</span></div>
-                <p><b>Install on PCVR (Beat Saber 1.40.8):</b> Download the ZIP and extract it directly into your PCVR 1.40.8 Beat Saber game folder (the folder containing <code>Beat Saber.exe</code>). Keep the ZIP's folder structure; it places <code>RiftPulse.Pcvr.dll</code> in the <code>Plugins</code> folder automatically. The BSIPA manifest is embedded inside the DLL, so do not copy a separate <code>manifest.json</code> into <code>Plugins</code>. If you tried an earlier package, remove the old RiftPulse <code>Plugins/manifest.json</code> first. Launch PCVR 1.40.8 and open RiftPulse from the Mods panel. PCVR 0.3.1 keeps the Nexus design but rearranges Device Link and Spatial Display into one column and Live Chat and Song Requests into the other to prevent overlapping cards. The chat title and combined viewer count stay pinned above the bottom-aligned message feed, making the header visible even when chat is empty. Incoming messages remain newest-at-bottom. Choose <b>OPEN DISPLAY LAB</b> to adjust X/Y/Z, width, and height. <b>RE-CENTER CHAT PANEL</b> now resets the panel to a centered, front-facing position and clears the saved rotation that caused the diagonal orientation. The restore state displays <b>LINKED</b> when the device connection is already saved. The visible white <b>DRAG TO MOVE</b> bar remains available for manual placement. If the panel says <b>DEVICE LINK REQUIRED</b>, generate a new pairing code in the RiftPulse Mods menu and link this installation on the website. Real headset validation is still required.</p>
-                <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr-0.3.1.zip" download><Download size={15} /> Download PCVR ZIP</a>
+                <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR</b><small>Windows / Beat Saber 1.40.8 (PCVR)</small></div><span className="download-state">v0.3.2 | ZIP BUILT</span></div>
+                <p className="download-step-title">Install PCVR</p>
+                <ol className="download-steps">
+                  <li>Download the PCVR ZIP.</li>
+                  <li>Open your Beat Saber PCVR 1.40.8 folder — the one containing <code>Beat Saber.exe</code>.</li>
+                  <li>Extract the ZIP into that folder and keep the included folder structure.</li>
+                  <li>Launch Beat Saber and open RiftPulse from the Mods panel.</li>
+                </ol>
+                <p className="download-platform-note">PCVR only · Windows ZIP · Beat Saber 1.40.8</p>
+                <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr-0.3.2.zip" download><Download size={15} /> Download PCVR ZIP</a>
               </article>
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest Standalone</b><small>Meta Quest headset / Beat Saber 1.40.8</small></div><span className="download-state">v0.3.0 Alpha | QMOD built</span></div>
-                <p><b>Install on Quest Standalone (Beat Saber 1.40.8):</b> Download the QMOD and import it into ModsBeforeFriday (MBF) while your Quest is connected and running the standalone 1.40.8 version of Beat Saber. Install the mod through MBF, launch Beat Saber, and open RiftPulse from the Mods panel. Select <b>MOVE CHAT PANEL TO VIEW</b> to create/reposition the world-space chat screen. Select <b>CONFIGURE CHAT PANEL</b> inside the RiftPulse mod menu to open its settings popup. X/Y/Z adjust panel placement; width/height adjust panel geometry and scale chat text with the panel. Values save automatically. Quest v0.3.0 Alpha uses PCVR-like pairing, Chat, and BSR cards. Panel setting changes preserve facing and persist a headset-relative rotation offset. Chat usernames show platform display names with a blue marker: Twitch purple, YouTube red, TikTok white. Grab the visible white <b>DRAG TO MOVE</b> bar to reposition the panel. If the panel says <b>DEVICE LINK REQUIRED</b>, choose <b>GENERATE PAIRING CODE</b> and link the headset again on the website. The download is a QMOD only; there is no Quest ZIP.</p>
-                <a className="primary-button download-link" href="/downloads/RiftPulse-Quest-0.3.0-Alpha.qmod" download="RiftPulse-Quest-0.3.0-Alpha.qmod"><Download size={15} /> Download Quest QMOD</a>
+                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest Standalone</b><small>Meta Quest headset / Beat Saber 1.40.8</small></div><span className="download-state">v0.3.4 Alpha | QMOD BUILT</span></div>
+                <p className="download-step-title">Install Quest Standalone</p>
+                <ol className="download-steps">
+                  <li>Make sure the headset has standalone Beat Saber 1.40.8 installed.</li>
+                  <li>Connect the Quest to ModsBeforeFriday (MBF).</li>
+                  <li>Import the downloaded QMOD in MBF and install it.</li>
+                  <li>Launch Beat Saber and open RiftPulse from the Mods panel.</li>
+                </ol>
+                <p className="download-platform-note">Quest Standalone only · QMOD · Beat Saber 1.40.8</p>
+                <a className="primary-button download-link" href="/downloads/RiftPulse-Quest-0.3.4-Alpha.qmod" download="RiftPulse-Quest-0.3.4-Alpha.qmod"><Download size={15} /> Download Quest QMOD</a>
               </article>
             </div>
-            <div className="integration-footnote"><ShieldCheck size={15} /><span>Alpha build for tester validation. The device-authenticated in-game chat feed, world-space panel, and combined viewer summary are included. Real headset and live-stream testing is still required. ChatIntegrations command execution and BSR song-request fulfillment remain separate unfinished workstreams. Use a test instance; not a release build.</span></div>
+            <div className="integration-footnote"><ShieldCheck size={15} /><span>Both packages are Alpha builds. Physical PCVR and Quest testing is still required.</span></div>
           </section>
 
           <section className="section-block integrations-block" id="integrations" data-tour-target="integrations">
@@ -1039,12 +1303,12 @@ function App() {
             <div className="provider-list">
               {providers.map(provider => <div className="provider-row" key={provider.key}>
                 <div className={`provider-icon ${provider.className}`}>{provider.short}</div>
-                <div className="provider-main"><b>{provider.name}{provider.key === "tiktok" && <>{providerConnections.tiktok.status === "connected" && <span className="tiktok-live-viewers" title="Current TikTok LIVE viewers"><Users size={13} /><span>{providerHealth.find(item => item.provider === "tiktok")?.viewerCount ?? "-"}</span></span>}<span className="unofficial-label">UNOFFICIAL</span></>}</b><small>{providerConnections[provider.key].status === "connected" ? "Connected as " + (providerConnections[provider.key].displayName ?? "account") : providerConnections[provider.key].status === "unsupported" ? "Unavailable in this build" : providerConnections[provider.key].configured ? provider.note : providerConnections[provider.key].detailCode === "oauth_credentials_not_configured" ? "Local OAuth credentials not configured" : provider.note}</small></div>
+                <div className="provider-main"><b>{provider.name}{provider.key === "tiktok" && <>{providerConnections.tiktok.status === "connected" && <span className="tiktok-live-viewers" title="Current TikTok LIVE viewers"><Users size={13} /><span>{providerHealth.find(item => item.provider === "tiktok")?.viewerCount ?? "-"}</span></span>}</>}</b><small>{providerConnections[provider.key].status === "connected" ? "Connected as " + (providerConnections[provider.key].displayName ?? "account") : providerConnections[provider.key].status === "unsupported" ? "Unavailable in this build" : providerConnections[provider.key].configured ? provider.note : providerConnections[provider.key].detailCode === "oauth_credentials_not_configured" ? "Local OAuth credentials not configured" : provider.note}</small></div>
                 <div className={"connection-state " + (providerConnections[provider.key].status === "connected" ? "is-connected" : "")}><span className="status-dot" />{providerConnections[provider.key].status === "connected" ? "Connected" : providerConnections[provider.key].status === "unsupported" ? "Unavailable" : providerConnections[provider.key].status === "degraded" ? "Needs attention" : providerConnections[provider.key].status === "error" ? "Error" : "Not connected"}</div>
                 <button className={providerConnections[provider.key].status === "connected" ? "disconnect-button" : "connect-button"} onClick={() => openProvider(provider.key)}>{providerConnections[provider.key].status === "connected" ? "Manage" : providerConnections[provider.key].status === "unsupported" ? "Details" : "Connect"}{providerConnections[provider.key].status === "connected" ? <ChevronDown size={14} /> : <ExternalLink size={13} />}</button>
               </div>)}
             </div>
-            <div className="integration-footnote"><ShieldCheck size={15} /><span>Connection status comes from the API. Twitch uses EventSub webhooks, YouTube polls live chat and supported stream events, and TikTok LIVE uses an unofficial best-effort bridge. A real live-stream test is still needed to confirm end-to-end delivery.</span></div>
+            <div className="integration-footnote"><ShieldCheck size={15} /><span>Connection status shows which platforms are configured. Provider Health checks whether each configured channel is actually LIVE; save a TikTok username to include TikTok in those checks.</span></div>
           </section>
 
           <section className="section-block chat-feed-block" id="chat-feed" data-tour-target="chat-feed">
@@ -1059,33 +1323,57 @@ function App() {
                   : chatMessages.length === 0 ? <div className="chat-empty"><div className="chat-empty-icon"><MessageCircle size={21} /></div><div><b>No live messages yet</b><p>Provider connectors are not authorized yet, so no real messages are being received.</p></div></div>
                   : <div className="chat-message-list">{chatMessages.slice(-8).map(message => {
                     const provider = providers.find(item => item.key === message.provider);
-                    return <article className="chat-message-row" key={message.id}>
-                      <div className={`provider-icon ${provider?.className ?? "tiktok"} chat-provider-icon`}>{provider?.short ?? "?"}</div>
-                      <div className="chat-message-copy"><div className="chat-message-meta"><b>{message.senderName}</b><span className="chat-provider-label">{provider?.name ?? message.provider}</span><time>{new Date(message.receivedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></div><p>{message.text}</p></div>
+                    return <article className={"chat-message-row " + (message.recordType === "event" ? "chat-event-row " : "chat-plain-row ") + (provider?.className ?? "tiktok")} key={message.id}>
+                      <div className="chat-message-copy">
+                        <div className="chat-message-meta">
+                          <ProviderGlyph provider={message.provider} />
+                          <b className="chat-sender-name">{message.senderName}</b>
+                          {message.recordType === "event" && <span className="chat-event-kind">{(message.eventKind ?? "event").replace(/_/g, " ")}</span>}
+                          <time>{new Date(message.receivedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
+                        </div>
+                        <p className="chat-message-text">{message.text}</p>
+                      </div>
                     </article>;
                   })}</div>}
               </div>
-              <aside className="chat-feed-status">
-                <div className="chat-status-heading"><span>PROVIDER HEALTH</span><small>{healthLoading ? "Checking…" : `${providerHealth.filter(item => item.state === "connected" || item.state === "degraded").length}/3 active`}</small></div>
-                {(providerHealth.length ? providerHealth : providers.map(item => ({ provider: item.key, state: item.key === "tiktok" ? "unsupported" as const : "disconnected" as const, viewerCount: null, detailCode: null, unofficial: item.key === "tiktok" }))).map(health => {
-                  const provider = providers.find(item => item.key === health.provider);
-                  const label = health.state === "connected" ? "Connected" : health.state === "degraded" ? "Degraded" : health.state === "unsupported" ? "Unavailable" : health.state === "error" ? "Error" : "Not connected";
-                  return <div className={`chat-provider-status ${health.state}`} key={health.provider}><span className="status-dot" /><div><b>{provider?.name ?? health.provider}</b><small>{label}{health.detailCode ? ` · ${health.detailCode.replace(/_/g, " ")}` : ""}</small></div><strong>{health.viewerCount == null ? "—" : health.viewerCount}</strong></div>;
-                })}
+              <aside className="provider-health-panel">
+                <div className="provider-health-heading">
+                  <div><span>PROVIDER HEALTH</span><small>LIVE status and reconnect controls</small></div>
+                  <button className="check-all-button" onClick={() => void checkAllProviders()} disabled={checkAllRunning || !providers.some(provider => isProviderConfigured(provider.key))}>
+                    {checkAllRunning ? <><RefreshCw size={14} className="spin" /> Checking</> : <><RefreshCw size={14} /> Reconnect all</>}
+                  </button>
+                </div>
+                <div className="provider-health-list">
+                  {providers.map(provider => {
+                    const configured = isProviderConfigured(provider.key);
+                    const status = liveStates[provider.key].state;
+                    const statusLabel = !configured ? "NOT CONNECTED" : status === "live" ? "LIVE" : status === "connecting" ? "CONNECTING" : status === "disconnected" ? "DISCONNECTED" : status === "error" ? "CHECK FAILED" : "NOT LIVE";
+                    const viewer = providerHealth.find(item => item.provider === provider.key)?.viewerCount;
+                    const remaining = manualReconnectsRemaining[provider.key];
+                    return <div className={"provider-health-row " + (configured ? status : "not-connected")} key={provider.key}>
+                      <ProviderGlyph provider={provider.key} />
+                      <div className="provider-health-copy">
+                        <b>{provider.name}</b>
+                        <span className={"provider-live-state " + (configured ? status : "not-connected")}>{statusLabel}</span>
+                        <small>{!configured ? (provider.key === "tiktok" ? (providerConnections.tiktok.displayName ? "TikTok connection service is unavailable" : "Save a username to include TikTok") : "Connect this platform to check LIVE status") : status === "live" ? "LIVE status confirmed" : status === "connecting" ? "Checking the live channel" : status === "disconnected" ? "Internet or provider connection unavailable" : status === "error" ? "Could not confirm status" : "Channel is not live right now"}</small>
+                      </div>
+                      {configured && status === "live" && viewer != null && <span className="provider-health-viewers"><Users size={12} />{viewer}</span>}
+                      <button className="provider-reconnect-button" onClick={() => void reconnectProviderManually(provider.key)} disabled={!configured || remaining <= 0 || checkAllRunning || status === "connecting"}>
+                        <RefreshCw size={13} /> Reconnect <small>{remaining} left</small>
+                      </button>
+                    </div>;
+                  })}
+                </div>
+                <p className="provider-health-note">{checkAllRunning ? "Checking connected platforms. Offline channels are retried after 10, 20, then 30 seconds." : "Reconnect all checks each configured platform up to four times. Each provider also has two manual reconnect attempts."}</p>
               </aside>
             </div>
-            <div className="integration-footnote"><ShieldCheck size={15} /><span>Viewer totals only include fresh counts. “—” means unknown, not zero. TikTok LIVE uses an unofficial bridge and remains best-effort until a real stream test confirms its event payloads and reconnect behavior.</span></div>
+            <div className="integration-footnote"><ShieldCheck size={15} /><span>Viewer totals only include fresh counts. A blank count means unknown, not zero. Only platforms configured on your account are checked.</span></div>
           </section>
 
           <section className="bottom-grid" id="devices">
             <div className="panel-card devices-card" data-tour-target="devices">
               <div className="panel-title"><div><div className="section-overline">YOUR HARDWARE</div><h3>Connected devices</h3></div><button className="icon-button" onClick={() => { startPairing(); setModal("pair"); }} aria-label="Add device"><Plus size={17} /></button></div>
               {devices.length === 0 ? <div className="empty-device"><div className="empty-device-icon"><Monitor size={22} /></div><div><b>No devices paired yet</b><p>Connect Beat Saber to bring RiftPulse into your game.</p><button className="inline-action" onClick={() => { startPairing(); setModal("pair"); }}>Pair your first device <ArrowUpRight size={14} /></button></div></div> : <div className="device-list">{devices.map(device => <div className="device-row" key={device.id}><div className="empty-device-icon"><Gamepad2 size={20}/></div><div><b>{device.label || (device.platform === "pcvr" ? "Beat Saber · PCVR" : "Beat Saber · Quest")}</b><p>Game {device.gameVersion} · Mod {device.modVersion}</p></div><button className="disconnect-button" onClick={() => void revokeDevice(device.id)}>Disconnect</button></div>)}</div>}
-            </div>
-            <div className="panel-card activity-card">
-              <div className="panel-title"><div><div className="section-overline">SYSTEM STATUS</div><h3>Activity</h3></div><Activity size={17} className="activity-icon" /></div>
-              <div className="activity-row"><div className="activity-symbol green"><Check size={14} /></div><div><b>Workspace initialized</b><small>RiftPulse V1 foundation is ready</small></div><time>NOW</time></div>
-              <div className="activity-row"><div className="activity-symbol blue"><RefreshCw size={14} /></div><div><b>API health check</b><small>{apiStatus === "online" ? "Worker responding normally" : apiStatus === "offline" ? "Worker unavailable in this environment" : "Checking local Worker"}</small></div><time>{apiStatus === "checking" ? "…" : "LIVE"}</time></div>
             </div>
           </section>
 
@@ -1135,10 +1423,9 @@ function App() {
             <button className="primary-button modal-submit" disabled={pairCode.length !== 5 || pairStatus === "checking"} onClick={verifyPairing}>{pairStatus === "checking" ? <><RefreshCw size={16} className="spin" /> Verifying…</> : <>Verify code <ArrowUpRight size={15} /></>}</button>
             <p className="modal-footnote">This form never generates pairing codes. Enter only the current code displayed by your own Beat Saber installation.</p>
           </>}
-          {modal === "provider" && <><div className={`modal-icon provider-icon ${providers.find(p => p.key === selectedProvider)?.className}`}>{providers.find(p => p.key === selectedProvider)?.short}</div><div className="modal-eyebrow">PLATFORM INTEGRATION</div><h2 id="modal-title">{providerConnections[selectedProvider].status === "connected" ? "Manage" : "Connect"} {providers.find(p => p.key === selectedProvider)?.name}</h2><p className="modal-copy">{selectedProvider === "twitch" ? (providerConnections.twitch.configured ? "Authorize your Twitch account securely. After authorization, EventSub subscription setup is still required before live messages arrive." : "The Twitch OAuth flow is implemented locally, but app credentials and a token encryption key have not been configured in this workspace.") : selectedProvider === "youtube" ? (providerConnections.youtube.configured ? "Authorize read-only access for your YouTube channel. While Chat is enabled, RiftPulse automatically polls live chat and supported Super Chat/membership events during an active broadcast." : "Google OAuth and YouTube Data API credentials have not been configured in this workspace.") : selectedProvider === "tiktok" ? "RiftPulse uses a separate Railway bridge for TikTok LIVE chat and supported events such as gifts, follows, likes, and shares. The bridge securely discovers the public username saved to your RiftPulse account, waits for that account to go LIVE, and forwards events to the API using signed requests. This is an unofficial, best-effort integration; event delivery must still be verified during an actual LIVE broadcast." : (providers.find(p => p.key === selectedProvider)?.name + " authorization is not implemented yet. The account will remain disconnected until its secure OAuth flow is ready.")}</p>
-            {selectedProvider === "tiktok" && <><div className="warning-note"><ShieldCheck size={16} /><span><b>Unofficial connector</b><br />TikTok LIVE support is best effort and may be unavailable or change without notice.</span></div>
-              <div className="field-group"><label htmlFor="tiktok-username">Public TikTok LIVE username</label><input id="tiktok-username" autoComplete="off" maxLength={25} placeholder="yourusername" value={tiktokUsername} onChange={e => setTiktokUsername(e.target.value.replace(/^@/, "").slice(0, 24))} /><small>Enter the username only, without @ or a profile URL. This is saved privately to your RiftPulse account.</small></div>
-              <div className="field-group"><label htmlFor="tiktok-account-id">RiftPulse account ID (managed automatically)</label><input id="tiktok-account-id" readOnly value={tiktokAccountId || user?.id || "Available after sign-in"} /><small>The Railway bridge automatically discovers the username saved above from your signed-in account. You do not need to copy this ID or configure a separate connector process.</small></div>
+          {modal === "provider" && <><div className={`modal-icon provider-icon ${providers.find(p => p.key === selectedProvider)?.className}`}>{providers.find(p => p.key === selectedProvider)?.short}</div><div className="modal-eyebrow">PLATFORM INTEGRATION</div><h2 id="modal-title">{providerConnections[selectedProvider].status === "connected" ? "Manage" : "Connect"} {providers.find(p => p.key === selectedProvider)?.name}</h2><p className="modal-copy">{selectedProvider === "twitch" ? (providerConnections.twitch.configured ? "Authorize your Twitch account securely. After authorization, EventSub subscription setup is still required before live messages arrive." : "The Twitch OAuth flow is implemented locally, but app credentials and a token encryption key have not been configured in this workspace.") : selectedProvider === "youtube" ? (providerConnections.youtube.configured ? "Authorize read-only access for your YouTube channel. While Chat is enabled, RiftPulse automatically polls live chat and supported Super Chat/membership events during an active broadcast." : "Google OAuth and YouTube Data API credentials have not been configured in this workspace.") : selectedProvider === "tiktok" ? "Enter your public TikTok username below. RiftPulse checks the saved account for LIVE status and brings supported chat, gifts, follows, likes, and shares into your dashboard while the account is live." : (providers.find(p => p.key === selectedProvider)?.name + " authorization is not implemented yet. The account will remain disconnected until its secure OAuth flow is ready.")}</p>
+            {selectedProvider === "tiktok" && <>
+              <div className="field-group"><label htmlFor="tiktok-username">TikTok username</label><input id="tiktok-username" autoComplete="off" maxLength={25} placeholder="yourusername" value={tiktokUsername} onChange={e => setTiktokUsername(e.target.value.replace(/^@/, "").slice(0, 24))} /><small>Enter the username only, without @ or a profile URL. After saving, TikTok appears as Connected and LIVE status is checked automatically.</small></div>
               <button className="primary-button modal-submit" disabled={tiktokSaving || !user?.id} onClick={() => void saveTikTokSettings()}>{tiktokSaving ? <><RefreshCw size={16} className="spin" /> Saving…</> : <>Save TikTok username <Check size={15} /></>}</button></>}
             <div className="provider-permissions"><div><Check size={15} /> Chat event capability</div><div><Users size={15} /> Viewer count where supported</div><div><LockKeyhole size={15} /> Secure account authorization</div></div>
             {selectedProvider !== "tiktok" && <><button className="primary-button modal-submit" disabled={(providerConnections[selectedProvider].status !== "connected" && ((selectedProvider === "twitch" && !providerConnections.twitch.configured) || (selectedProvider === "youtube" && !providerConnections.youtube.configured))) || (providerConnections[selectedProvider].detailCode === "eventsub_verification_pending")} onClick={() => void handleProviderAction()}>{selectedProvider === "twitch" && providerConnections.twitch.status === "connected" ? providerConnections.twitch.detailCode === "eventsub_verification_pending" ? <><RefreshCw size={16} className="spin" /> Waiting for verification</> : <><Radio size={16} /> Enable / repair chat events</> : providerConnections[selectedProvider].status === "connected" ? <><Unplug size={16} /> Disconnect account</> : selectedProvider === "twitch" && providerConnections.twitch.configured ? <><Link2 size={16} /> Connect with Twitch</> : selectedProvider === "youtube" && providerConnections.youtube.configured ? <><Link2 size={16} /> Connect with YouTube</>: <>Not configured yet <LockKeyhole size={15} /></>}</button>{selectedProvider === "twitch" && providerConnections.twitch.status === "connected" && providerConnections.twitch.detailCode !== "eventsub_verification_pending" && <button className="primary-button modal-submit" onClick={() => void disconnectSelectedProvider()}><Unplug size={16} /> Disconnect Twitch</button>}<p className="modal-footnote">{providerConnections[selectedProvider].status === "connected" && selectedProvider === "twitch" && providerConnections[selectedProvider].detailCode === "eventsub_subscription_pending" ? "Twitch is authorized. Enable the signed webhook subscription to receive live chat." : providerConnections[selectedProvider].status === "connected" && selectedProvider === "twitch" && providerConnections[selectedProvider].detailCode === "eventsub_verification_pending" ? "Twitch is validating the webhook endpoint. The status will update after its signed challenge arrives." : providerConnections[selectedProvider].status === "connected" && selectedProvider === "youtube" && providerConnections[selectedProvider].detailCode === "live_chat_polling_pending" ? "YouTube is authorized. Keep Chat enabled and the dashboard visible during a live broadcast; chat and supported events poll automatically." : providerConnections[selectedProvider].status === "connected" ? "Disconnecting clears stored token ciphertext." : "No external account is contacted until you choose an enabled connection action."}</p></>}
@@ -1146,7 +1433,7 @@ function App() {
           {modal === "settings" && <><div className="modal-icon purple-modal"><Settings2 size={22} /></div><div className="modal-eyebrow">PREFERENCES</div><h2 id="modal-title">Tune your setup.</h2><p className="modal-copy">Module switches and the BSR command save to your account. Provider OAuth and device preferences remain gated until their integrations are complete.</p>
             <div className="settings-option"><div><b>Automatically save toggles</b><small>Apply module changes immediately.</small></div><button className={`toggle ${autoSave ? "on" : ""}`} role="switch" aria-checked={autoSave} onClick={() => setAutoSave(!autoSave)}><span /></button></div>
             <div className="field-group"><label htmlFor="command-input">BSR song request command</label><input id="command-input" value={command} maxLength={20} onChange={e => setCommand(e.target.value.replace(/\s/g, ""))} placeholder="!bsr" /><small>Saved to your account when you choose Save. Format: ! followed by letters, numbers, _ or -.</small></div>
-            <div className="settings-option"><div><b>Reduced motion</b><small>Respect your device's motion preference.</small></div><span className="settings-badge">PCVR v0.3.1 / Quest v0.3.0</span></div>
+            <div className="settings-option"><div><b>Reduced motion</b><small>Respect your device's motion preference.</small></div><span className="settings-badge">PCVR v0.3.2 / Quest v0.3.4 Alpha</span></div>
             <button className="primary-button modal-submit" onClick={() => void saveSettings()}>Save settings to account <Check size={15} /></button>
           </>}
           {modal === "help" && <><div className="modal-icon purple-modal"><Headphones size={22} /></div><div className="modal-eyebrow">RIFTPULSE GUIDE</div><h2 id="modal-title">Ready when you are.</h2><p className="modal-copy">RiftPulse connects your livestream community with Beat Saber. V1 is focused on two modules: in-game Chat and BSR Song Request.</p><div className="help-list"><div><MessageCircle size={18} /><span><b>Chat</b><small>Bring supported live messages into your game.</small></span></div><div><Music2 size={18} /><span><b>BSR Song Request</b><small>Queue viewer song requests with configurable commands.</small></span></div><div><Gamepad2 size={18} /><span><b>Pair your game</b><small>Use the in-game five-digit pairing flow once the mod is installed.</small></span></div></div><button className="primary-button modal-submit" onClick={() => { setModal(null); startPairing(); setModal("pair"); }}>Connect a device <ArrowUpRight size={15} /></button></>}

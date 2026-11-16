@@ -550,3 +550,162 @@ Date: 2026-11-14
 - Development Cloudflare Worker `riftpulse-dev` deployed to `https://riftpulse-dev.chrismeten0.workers.dev`, Version ID `b4789026-253b-486b-8bbe-885753a54c8f`. Persistent development D1 release record: `release-b6e39532-4467-447a-97e7-d2d8c171b401`.
 - Quest Standalone was not rebuilt or modified; its existing v0.3.0 Alpha QMOD remains in place (local SHA-256: `7E7A075E42E160D5498DA54D25C05DFC0406127D668C56842BC8D1188094F69E`).
 - Runtime gate remains open: the new PCVR menu and panel transform were not physically checked in a live Beat Saber headset session during this build. Local installation/package and hosted artifact validation passed; headset confirmation is still needed for the visual layout and recenter orientation.
+
+
+## Production download cards and dual-platform 0.3.1 package upload — November 16, 2026
+
+- Published the RiftPulse PCVR 0.3.1 Windows ZIP and Quest Standalone 0.3.1 Alpha QMOD on the production site `https://app.riftpulse.me`.
+- Updated the downloads section to say “Beat Saber downloads” / “Latest Mod Builds”, show PCVR 0.3.1 and Quest 0.3.1 Alpha, point the Quest card at `RiftPulse-Quest-0.3.1-Alpha.qmod`, and describe the current Quest Display Settings and headset-facing Re-center behavior. Removed the stale Quest 0.3.0 card references.
+- Updated `public/downloads/Quest-README.txt` and `README.txt`. Refreshed stable aliases `RiftPulse.Pcvr.zip` and `RiftPulse.Quest.qmod`; Quest distribution remains QMOD-only. PCVR 0.3.1 ZIP remains `RiftPulse.Pcvr-0.3.1.zip`.
+- PCVR ZIP: 24,168 bytes; SHA-256 `A4C4843ED8B29F389503F4CBC1D7A0E5F11962266F668696067AF9ED3335E458`.
+- Quest QMOD: 366,439 bytes; embedded manifest version 0.3.1 and Beat Saber target `1.40.8_7379`; archive members `mod.json` and `libriftpulse.so`; SHA-256 `2B9768C52BE02FB3503335841566A748EC023BA7A78D0A224EC3941765FC71D1`.
+- Website validation: `npm test` passed TypeScript typecheck, 75/75 unit/contract tests, 2/2 isolated migration tests, and Vite Worker/client production build.
+- Cloudflare production Worker `riftpulse`: uploaded Worker Version 143 `116f18af-1f2d-4698-94af-02bccfb054fd`, deployed at 100%. Deployment ID `67fed480-6ce5-4a25-be44-263a48d0f866`.
+- Production verification: homepage and updated client JS returned HTTP 200; PCVR/Quest versioned downloads, both stable aliases, and both platform READMEs returned HTTP 200. PCVR ZIP and Quest QMOD downloaded SHA-256 hashes exactly matched local files. Quest response uses `application/octet-stream` and attachment filename `RiftPulse-Quest-0.3.1-Alpha.qmod`. The client bundle references both 0.3.1 packages and no longer references the Quest 0.3.0 package.
+- Persistent release update written and read back from D1: `release-3990b2cb-9503-4160-8c54-4b6d4af6ff7a`.
+- Production Worker bindings were intentionally not changed in this downloads/cards-only deployment. The existing Worker still points to the development Railway API and `riftpulse-dev-db`; a separate production-backend migration is still needed before production API/database isolation can be considered complete.
+- Runtime gate remains open: Quest QMOD archive and native ARM64 build are verified, but the updated Quest menu and panel behavior have not yet been confirmed in a physical headset session. Live-stream provider behavior also remains a separate test.
+
+
+## Quest Standalone Nexus menu layout pass — 0.3.2 menu test — November 16, 2026
+
+- Based on the user-provided headset video and reference screenshot. Target is the screenshot's clean card layout: Device Link on the left, Live Chat and Song Requests as vertically stacked right-side cards, and Spatial Display as a wide bottom footer card.
+- Resized/repositioned the Live Chat card to fully contain the chat description, Chat Display Lab button, and Chat Module toggle (center Y -0.5, height 21).
+- Compact Song Requests card (center Y -15.5, height 11) now contains the section heading, description, and BSR toggle without intruding into the Spatial Display footer.
+- Spatial Display footer is now anchored at the bottom of the main frame (center Y -26, height 9); its heading/description and Display Settings/Re-center buttons were moved together into the footer bounds.
+- Increased Live Chat and Song Requests description font from 2.3 to 2.5 for readability. Kept all pairing, Chat, BSR, display settings, and recenter callbacks intact.
+- Bumped Quest package metadata and internal mod version to 0.3.2 for this menu test.
+- Clean ARM64 native build succeeded. QMOD archive validated: manifest 0.3.2, Beat Saber target 1.40.8_7379, entries `mod.json` and `libriftpulse.so`; native library size 1,241,368 bytes; QMOD size 366,440 bytes; SHA-256 `63221A7B067E4429832EA63FA232211E8743160FEA68C87C210B06AE4EB01B0D`.
+- Local headset test package: `dist/RiftPulse-Quest-0.3.2-MenuTest.qmod`. Not published to app.riftpulse.me yet; wait for user visual confirmation from the physical Quest headset. QMOD script warns that its JSON schema check cannot run with the currently installed PowerShell version (<6), but archive/manifest contents were independently validated.
+
+
+## Quest Standalone menu / floating surface refinement — November 16, 2026
+
+- Investigated the uploaded Quest recording and reference screenshot. The recording showed crowded right-column cards and a bright, plain white floating chat surface.
+- Rebalanced the main RiftPulse Nexus layout to match the reference composition: Device Link left; Live Chat above Song Requests on the right; Spatial Display spanning the bottom. The Chat/Song Request cards now have separate bounds and a small intentional gap. Display controls were kept inside the bottom deck. The Chat settings button label now reads OPEN CHAT DISPLAY LAB.
+- Changed the Quest FloatingScreen creation to omit its default white background. Added a dark midnight RiftPulse surface with violet top strip and cyan left rail. The three image rects are tracked and resized/repositioned when the user changes surface width or height; the existing chat feed and grab handle remain separate children above the background.
+- Kept existing world-space positioning, headset-relative rotation persistence, saved size/position, and controller drag handle. Re-center continues to clear the saved orientation offset and return the panel in front of the headset.
+- Quest mod version and QPM package metadata are both 0.3.2; target remains Beat Saber 1.40.8_7379.
+- Clean ARM64 build succeeded via the Quest build script. Incremental build after the final button label/position tweaks also succeeded.
+- QMOD helper script could not run because it requires PowerShell 6+, while this machine is running Windows PowerShell 5.1. Created the same two-entry QMOD structure directly using .NET ZipArchive and validated the embedded mod.json version and package target.
+- Test QMOD: `dist/RiftPulse-Quest-0.3.2-Test.qmod`; archive entries are `mod.json` and `libriftpulse.so`; archive size 367,230 bytes; SHA-256 `43BB765AA195CFEC30A82D1E0D2D2E56200E7D01AAB58277782B2C43A17FAFEB`.
+- Native library is ELF64 AArch64; size 1,242,440 bytes; SHA-256 `7B6181B112EA600D83FC2DE7A0EF8E231355C39BDFD79CB7B5DB21A6A901E898`.
+- Test instructions saved as `dist/RiftPulse-Quest-0.3.2-Test-README.txt`.
+- Not deployed to app.riftpulse.me. Wait for physical Quest testing of the menu, panel background resizing, drag handle, and recenter behavior before publishing 0.3.2.
+
+
+### Final 0.3.2 spacing pass and packaged binary — November 16, 2026
+
+- Added a 0.6-unit vertical gap between Live Chat and Song Requests; added a 0.9-unit gap between Song Requests and Spatial Display. Chat toggle and Song Request controls were repositioned to remain inside their tile bounds.
+- Final clean/incremental ARM64 builds completed successfully after the layout and label changes. `git diff --check` passed.
+- Rebuilt test QMOD at `dist/RiftPulse-Quest-0.3.2-Test.qmod`. Final archive size: 367,303 bytes. Entries: `mod.json`, `libriftpulse.so`. Manifest: version 0.3.2; target: Beat Saber 1.40.8_7379.
+- Final QMOD SHA-256: `0720845A9A840742AAA9E8DE77AD43070D1341AB981AC421AD0D1AC0CEA0E2AE`.
+- Final Quest native library: ELF64 AArch64; 1,242,440 bytes; SHA-256 `6AE811FF8B1C66D2811C7FD55E21A3A97FBE4426C37AF4587BFD23A98475F397`.
+- The QMOD is kept in `dist` for headset testing. It has not been copied to the production website or deployed. Physical headset verification is still the release gate.
+
+## Quest Standalone 0.3.2 Alpha published — November 16, 2026
+
+- Published `RiftPulse-Quest-0.3.2-Alpha.qmod` to production `app.riftpulse.me` and updated the Quest download card, version labels, installation instructions, and download README.
+- PCVR remains at 0.3.1. The PCVR download card and ZIP were not changed.
+- Quest QMOD archive: 367,303 bytes; manifest version 0.3.2; Beat Saber target `1.40.8_7379`; entries `mod.json` and `libriftpulse.so`.
+- Quest QMOD SHA-256: `0720845A9A840742AAA9E8DE77AD43070D1341AB981AC421AD0D1AC0CEA0E2AE`.
+- Production Worker Version 144: `d381c6bd-a606-40c0-8494-9c22827ec5e2`, deployed at 100% traffic. Deployment ID `67fed480-6ce5-4a25-be44-263a48d0f866` was the previous deployment before promotion.
+- Build checks: `npm test` passed TypeScript, 75/75 unit/contract tests, 2/2 isolated migration tests, and the production Vite Worker/client builds.
+- Production checks: homepage and JS bundle HTTP 200; versioned Quest QMOD HTTP 200 and remote SHA-256 exactly matches local; stable Quest QMOD alias HTTP 200 and hash matches; Quest README and combined README HTTP 200 and hashes match. PCVR 0.3.1 ZIP HTTP 200 and hash unchanged.
+- The production JavaScript references Quest 0.3.2, removes the stale Quest 0.3.1 URL, and retains PCVR 0.3.1.
+- Production Worker bindings were kept identical to the previous deployment. They still point at `riftpulse-dev-db` and `riftpulse-api-development.up.railway.app`; this was a download/card deployment, not a production-backend migration.
+- Quest 0.3.2 remains Alpha. Native ARM64 and QMOD structure are verified, but the updated menu/panel still require physical Quest headset validation, and live provider behavior still requires a separate stream test.- Confirmed deployment ID for Worker Version 144: `c25591c2-14c0-48c6-9f0a-a45a7caeb70a` (100% traffic; created 2026-11-16T17:37:32Z).
+
+## Display Lab / panel placement QA pass — November 16, 2026
+
+- Installed PowerShell 7.7.0 (PowerShell 6+ requirement satisfied); confirmed `pwsh` is available.
+- PCVR sources audited: defaults X=0, Y=0, Z=2.15; width=110, height=70. X/Y/Z and width/height sliders are bound, clamped, and saved in `%LOCALAPPDATA%\RiftPulse\pcvr-chat-panel-settings.txt`. Existing `RE-CENTER CHAT PANEL` action resets centered/front offsets and rotation. Build/package/install verification passed using `mods/pcvr/build-release.ps1`; version remains 0.3.1. DLL SHA256 `ADF592BA6DAA70A526B43E84F307BD77038615E6CD7D6094DC55355184610A73`; package ZIP SHA256 `AF178D746BA3C0806271E77AEDA3F77318DFBE35AA69FAE5D31DD521D6112953`.
+- Quest sources audited: defaults X=0, Y=0, Z=2.15; width=110, height=70. Five Display Lab sliders enforce the same ranges and save in the Quest persistentDataPath settings file. Existing re-center button resets X/Y/Z and clears saved rotation offset, so panel is recreated in front facing the headset.
+- Quest menu overlap fix: reduced the Device Link status text to a one-line compact limit and resized/moved its text slot to 27 x 2.3 at y=-6.4, leaving a clear gap above the Generate Secure Code button. This prevents long module/account status strings from wrapping/spilling into adjacent Song Request/Spatial Display cards.
+- Quest native ARM64 build passed. Created local release candidate `dist/release-candidate/display-lab-fix/RiftPulse-Quest-0.3.2-DisplayLabFix-Alpha.qmod`, manifest version 0.3.2, target Beat Saber 1.40.8_7379, two entries only (mod.json and libriftpulse.so); native library 1,243,928 bytes; QMOD SHA256 `AF538756E3ABD02F854D7C5D5B5803BCAAA507B5AB847BCC884E8A2AC2B391D7`.
+- PCVR package candidate copied to `dist/release-candidate/display-lab-fix/RiftPulse.Pcvr-0.3.1-DisplayLabFix.zip`; archive contains Plugins/RiftPulse.Pcvr.dll (57,344 bytes) and README.txt only. Existing production version label remains 0.3.1.
+- Static QA script `dist/release-candidate/display-lab-fix/validate-settings.ps1` passed 11 checks for defaults, range clamps, five slider bindings, recenter reset actions, and durable settings storage on both platforms.
+- Website/backend `npm test` passed typecheck, all 75 contract/unit tests, both isolated migration tests, and production Vite worker/client build.
+- Hardware gate: ADB detects the Quest headset but reports it as `unauthorized`. No headset-side menu/layout or in-game panel verification was performed. Unlock headset and accept USB debugging authorization to permit installation and live Quest QA. These packages are release candidates only; they have not been promoted to app.riftpulse.me.
+- Scope remains menu/display placement only; icons and Beat Saber Song Request (BSR) work are intentionally deferred pending the other team's all-clear.
+## Production download cards refresh — PCVR 0.3.1 / Quest 0.3.2 Alpha
+
+Date: 2026-11-16
+
+- User explicitly requested publishing the two platform packages and updating the calling/download cards on `https://app.riftpulse.me`.
+- Synced current release-candidate files into the canonical `public/downloads` URLs and refreshed the frontend cards: PCVR badge `v0.3.1 | ZIP BUILT`; Quest Standalone badge `v0.3.2 Alpha | QMOD BUILT`. Updated the overview paragraph and install notes to describe durable X/Y/Z/size settings, recenter, and the compact single-line Quest Device Link status slot.
+- Package hashes compared before copying: candidate PCVR ZIP and existing canonical PCVR ZIP were byte-identical (SHA-256 `AF178D746BA3C0806271E77AEDA3F77318DFBE35AA69FAE5D31DD521D6112953`). Quest candidate and existing canonical Quest QMOD were byte-identical (SHA-256 `AF538756E3ABD02F854D7C5D5B5803BCAAA507B5AB847BCC884E8A2AC2B391D7`). Thus no package version bump was needed: the exact current-version package payloads were already the published binaries.
+- `npm test` passed: TypeScript typecheck, all 75 unit/contract tests, both isolated migration tests, and Vite worker/client production build.
+- Production Worker `riftpulse` deployed using `wrangler.production.jsonc`; Cloudflare deployment ID `1936ad6d-8ec9-4495-99dd-8246fb9957b0`, Worker version ID `179662ef-3fad-4ed5-b75d-d31d80342424`, deployment time `2026-11-16T18:15:33.085974Z`. Domain bindings for `app.riftpulse.me` and `riftpulse.me` remained attached to the production Worker.
+- Live checks: homepage HTTP 200; current client JS HTTP 200 and contains the updated card labels and display-settings copy. PCVR ZIP and Quest QMOD HEAD/GET return HTTP 200; Quest response includes `Content-Disposition: attachment; filename="RiftPulse-Quest-0.3.2-Alpha.qmod"`. Downloaded live SHA-256 hashes exactly match local public artifacts.
+- Persisted Updates record to the production D1 binding (release record ID `release-7059faa1-fba4-4a1c-a32b-e9868d52e74c`).
+- Hardware gate remains: no visual Quest headset verification is claimed. Previously ADB authorization was unauthorized; test in headset after installing. BSR remains deferred until the team all-clear.
+## PCVR floor-placement / menu overflow and Quest PCVR-layout port — release candidates, November 16, 2026
+
+- User screenshots reviewed: Quest standalone displayed oversized white surfaces and its separate hand-positioned menu text was overlapping; PCVR placed the floating chat panel too low and its standalone Device Status footer crossed the lower cards.
+- PCVR source version bumped to 0.3.2. Positioning now uses the HMD's horizontal heading for X/Z and true world vertical for Y; the default/recenter position is X=0, Y=0, Z=2.15. Saved facing uses a level-horizon reference. Placement-file format marker `2` migrates legacy pitch-relative quaternion values while preserving existing X/Y/Z and surface dimensions.
+- PCVR menu overflow fix: removed the separate Device Status footer from `pairing.bsml`; module/account status is shown in the existing compact Device Link status label instead. Status text is limited to one line and the font reduced to fit the card. This removes the separate text row that appeared over the lower Spatial Display and Song Request cards in the screenshot.
+- PCVR release build completed successfully, 0 compiler warnings / 0 errors. PCVR ZIP contains only `Plugins/RiftPulse.Pcvr.dll` and `README.txt`; the DLL retains its embedded BSIPA manifest and both BSML resources. DLL SHA-256 `EA5D24ED8F5C7F65571C80FB1E8085AD4524867ADFE2E8FD4D1E243211D18718`; ZIP SHA-256 `939CC3205A3796C0853001E4065E01513E0BA16CF0589D8D4E05054497FF56C7`.
+- Quest Standalone source version bumped to 0.3.3 Alpha. The menu now uses a native C++/BSML port of the PCVR layout hierarchy: brand header, two constrained columns, Device Link + Spatial Display in the left column, Live Chat + Song Requests in the right column, and a compact Device Status footer. The port uses nested Unity vertical/horizontal layout groups and LayoutElements rather than the former independent free-positioned text labels. Button actions include Generate Secure Code, Check Link Status, Open Display Lab, Re-center Chat Panel, Chat Module, and BSR Module.
+- Quest layout-only background images are disabled for transparent containers; dark surfaces are rendered only on actual cards. Text alignment follows the PCVR structure (left card labels, centered pairing code/status, right-aligned brand descriptor). Measured page content: 56.0 units in 58.0 allocated; header content 59.0 in 60.0; left card stack 38.2 in 39.0; right card stack 39.0 in 39.0.
+- Quest world-chat panel also uses level-horizon coordinates (X/Z against yaw, Y world vertical) and the same coordinate-frame marker `2`, preserving offsets/dimensions while migrating old pitch-relative rotation data.
+- Quest clean ARM64 native build completed with exit code 0; QMOD generated and validated. QMOD entries are `mod.json` and `libriftpulse.so` only; manifest version 0.3.3 targets Beat Saber `1.40.8_7379`; native library size 1,268,680 bytes. QMOD SHA-256 `76884EDDC1155BF2C86C656E5B86FBB7CD25695C85BFB994FC1AE738A92449D1`.
+- Staged release candidates (not production-published) in `dist/release-candidate/pcvr-0.3.2-quest-0.3.3-display-lab-port/`: `RiftPulse.Pcvr-0.3.2.zip` and `RiftPulse-Quest-0.3.3-DisplayLab-Port-Alpha.qmod`.
+- Static package QA passed for both archive contents, manifest versions/game target, level-horizon position code, persistent coordinate-frame migration, retained Quest pairing controls, PCVR footer removal, and Quest layout measurements.
+- Hardware blocker: ADB still reports Quest serial `1WMHHA6ABC2097` as `unauthorized`. Neither new Quest screen layout nor the bright-white surfaces were visually verified inside the headset. The panel code creates the Quest FloatingScreen with `hasBackground=false` and places a dark custom surface, but root/modal white surfaces may still require visual inspection. Unlock the Quest and accept USB debugging authorization before physical install and QA.
+- No deployment was made to `app.riftpulse.me`. Existing live website cards/downloads remain at PCVR 0.3.1 and Quest 0.3.2 Alpha until headset visual QA. Icons and actual Beat Saber Song Request fulfillment remain deferred; their code paths were not changed.
+### Final Quest root-background pass — 0.3.3 candidate rebuild
+
+- After the first 0.3.3 package QA, added `ApplyQuestDarkBackground` to tint any existing direct root `Image` on the Quest floating-screen GameObject, Display Lab modal GameObject, and scroll-container GameObject to RiftPulse dark colors. The helper only changes a root Image if present; nested controls/sliders/accent surfaces are not traversed or recolored.
+- Rebuilt Quest 0.3.3 Alpha from clean ARM64 sources and regenerated the QMOD after this addition. Final native library size: 1,268,952 bytes. Final QMOD SHA-256: `06B9EFBB7B16B2485F40DC1A60DB4781F91F53F8BF535092281B3F2ECA9285FC`.
+- Final PCVR 0.3.2 ZIP SHA-256 remains `939CC3205A3796C0853001E4065E01513E0BA16CF0589D8D4E05054497FF56C7`.
+- Final validation passed: both archive layouts/manifests, Quest 1.40.8_7379 target, horizontal-heading/Y-vertical coordinate code, persistent coordinate-frame migration, active two-column Quest port, retained pairing actions, root dark-background calls, measured column/page heights, and removal of the separate PCVR status footer.
+- Updated staged files in `dist/release-candidate/pcvr-0.3.2-quest-0.3.3-display-lab-port/`. Still not production-published and not headset visual-tested: ADB remains unauthorized.
+## Production package upload - PCVR 0.3.2 / Quest Standalone 0.3.3 Alpha
+
+Date: 2026-11-16
+
+- Published the current PCVR ZIP and Quest Standalone QMOD to https://app.riftpulse.me. Updated the website download cards, release labels, direct versioned download links, and platform README files.
+- PCVR 0.3.2 package: RiftPulse.Pcvr-0.3.2.zip, 25,140 bytes. Archive entries are Plugins/RiftPulse.Pcvr.dll (56,832 bytes) and README.txt. The packaged DLL hash matches public/downloads/RiftPulse.Pcvr.dll.
+- PCVR ZIP SHA-256: 939CC3205A3796C0853001E4065E01513E0BA16CF0589D8D4E05054497FF56C7.
+- Quest Standalone 0.3.3 Alpha package: RiftPulse-Quest-0.3.3-Alpha.qmod, 394,013 bytes. Its archive contains mod.json and libriftpulse.so; the embedded manifest reports version 0.3.3 and the mod library entry libriftpulse.so.
+- Quest QMOD SHA-256: 03797857C35D9D06CCB523BF03237D6530E7B25E2D05433483BADF444038476B.
+- Stable aliases RiftPulse.Pcvr.zip and RiftPulse.Quest.qmod contain byte-identical copies of their current versioned packages.
+- Production Worker riftpulse deployed using wrangler.production.jsonc; current Worker Version ID: c5a7f2a1-5606-4fed-9f02-3d530faaf616.
+- Live verification: homepage and JavaScript bundle HTTP 200; both versioned package URLs and both stable aliases HTTP 200; all three README URLs HTTP 200. SHA-256 for every package, alias, and README downloaded from the live domain matches the local source file. The live JavaScript bundle contains both new card labels and download paths.
+- Full npm test passed: TypeScript typecheck, 75/75 contract tests, 2/2 database migration tests, and production Worker/client build. A final production build after syncing the PCVR README also passed.
+- Published Updates history record: release-5fa1315d-ff61-4436-9c3d-b25512794b2a.
+- Runtime gate is unchanged: PCVR in-game behavior and Quest headset behavior have not been physically re-tested in this release. ADB previously detected the Quest but reported it as unauthorized; do not treat the headset layout as physically verified.
+- This was a website/download deployment only. Existing production Worker bindings were left unchanged; the Worker is still bound to riftpulse-dev-db and riftpulse-api-development.up.railway.app.
+
+## Production package upload - PCVR 0.3.2 / Quest Standalone 0.3.4 Alpha
+
+Date: 2026-11-16
+
+- Published the PCVR 0.3.2 ZIP and freshly rebuilt Quest Standalone 0.3.4 Alpha QMOD to https://app.riftpulse.me. Updated the download cards, version labels, direct package URLs, stable Quest alias, and tester README files.
+- PCVR 0.3.2 package: RiftPulse.Pcvr-0.3.2.zip, 25,140 bytes. Archive entries: Plugins/RiftPulse.Pcvr.dll (56,832 bytes) and README.txt.
+- PCVR ZIP SHA-256: 939CC3205A3796C0853001E4065E01513E0BA16CF0589D8D4E05054497FF56C7.
+- Quest 0.3.4 Alpha package: RiftPulse-Quest-0.3.4-Alpha.qmod, 394,282 bytes. Clean ARM64 build and QMOD generation passed. Archive entries: mod.json and libriftpulse.so; manifest version 0.3.4, target Beat Saber 1.40.8_7379.
+- Quest QMOD SHA-256: 0DA8BC05B8571468CF47D8F680C545A2AA52EBB2B1599A5A12884030F1C405BC.
+- Quest 0.3.4 includes the additional root-image dark palette pass for existing images on the Quest floating-screen GameObject, Display Lab modal, and scroll-container GameObject. Nested controls are not recolored.
+- Stable aliases RiftPulse.Pcvr.zip and RiftPulse.Quest.qmod are byte-identical to their respective current versioned packages.
+- Production Worker riftpulse deployed using wrangler.production.jsonc; Worker Version ID: ab6f0d65-ec86-4f43-a0a8-d8a2fee544be.
+- Live verification: homepage and JavaScript bundle HTTP 200; the live JS includes the PCVR 0.3.2 and Quest 0.3.4 Alpha card labels and direct links. Both versioned downloads, both stable aliases, and all three README URLs return HTTP 200. Downloaded SHA-256 hashes match all local package, alias, and README files.
+- Full npm test passed after the Quest 0.3.4 metadata/card updates: TypeScript typecheck, 75/75 unit/contract tests, 2/2 database migration tests, and production Worker/client build.
+- Published Updates history record: release-520b1820-cb23-4eb5-9a6b-8b5611758ca0.
+- Hardware runtime gate remains: Quest ADB previously reported the headset as unauthorized, so no physical Quest visual test is claimed. PCVR in-game behavior was not physically re-tested during this website upload.
+- This was a package/download website deployment only. Production Worker bindings were left unchanged and still reference riftpulse-dev-db and riftpulse-api-development.up.railway.app.
+
+## Dashboard refresh - theme, provider connections, chat/events, and reconnect controls
+
+Date: 2026-11-16
+
+- Updated the RiftPulse dashboard to a balanced slate-blue mid-tone palette. Surfaces, side navigation, cards, and inputs use lighter contrast without moving to a bright/light theme.
+- Simplified both Beat Saber download cards to four installation steps each. PCVR instructions cover the Windows ZIP and extracting it into the Beat Saber PCVR 1.40.8 folder; Quest instructions cover standalone Beat Saber 1.40.8, ModsBeforeFriday, importing the QMOD, and launching the game. Removed in-mod feature walkthrough text.
+- TikTok Integrations now treats a valid saved public username as Connected and uses that username as the displayed account label. Removed the visible Unofficial badge and extra internal RiftPulse account-ID field. Provider Health still reports live detection separately.
+- Chat & Events now includes an inline icon mark ahead of each sender name and provider-coloured sender/message text (Twitch blue, YouTube red, TikTok white). Normalized events use provider-coloured highlighted cards with an outline and event-kind label.
+- Provider Health now includes Reconnect all and one manual Reconnect control per provider. The all-provider check only targets configured platforms, performs an immediate probe followed by 10-, 20-, and 30-second retries, and stops retrying a provider once LIVE is confirmed. Each provider has two manual attempts with the remaining count shown beside its button. Offline browser state shows DISCONNECTED; returning online triggers a new check sequence.
+- Twitch has an authenticated Helix streams live check; YouTube successful active-broadcast polling records the explicit live_detected health marker; TikTok reconnect requests are authenticated and forwarded to the existing Railway Euler bridge without exposing bridge credentials to the browser.
+- Removed the System Status / Activity card. Connected Devices remains visible.
+- Full verification: TypeScript typecheck passed; 75/75 unit/contract tests passed; 2/2 isolated database migration tests passed; production Worker and client build passed; git diff --check passed.
+- Deployment is being prepared. Physical Twitch/YouTube/TikTok stream-state checks and browser visual review remain to be performed after the API and dashboard deploy.

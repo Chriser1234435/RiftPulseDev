@@ -115,6 +115,7 @@ const env = {
 };
 
 const stopTikTokEulerConnector = startTikTokEulerConnector({ worker, env });
+env.TIKTOK_RECONNECT = async (accountId) => typeof stopTikTokEulerConnector.reconnectAccount === "function" ? stopTikTokEulerConnector.reconnectAccount(accountId) : false;
 
 const server = createServer(async (req, res) => {
   try {

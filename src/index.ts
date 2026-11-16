@@ -644,6 +644,33 @@ export default {
       } catch { /* treat malformed settings as empty */ }
       return Response.json({ accountId: authContext.userId, username, saved: !!row, updatedAt: row?.updatedAt ?? null }, { headers: JSON_HEADERS });
     }
+    if (url.pathname === "/api/v1/providers/tiktok/reconnect" && request.method === "POST") {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!isTrustedMutationOrigin(request, env)) return jsonError(403, "untrusted_origin", "Request origin is not trusted.", requestId);
+      if (!env.DB || !env.TIKTOK_CONNECTOR_INGEST_SECRET) {
+        return jsonError(503, "tiktok_connector_not_configured", "TikTok connector is not configured.", requestId);
+      }
+      const row = await env.DB.prepare(
+        "SELECT settings_json AS settingsJson FROM provider_settings WHERE account_id = ? AND provider = 'tiktok' LIMIT 1",
+      ).bind(authContext.userId).first<{ settingsJson: string }>();
+      let username = "";
+      try {
+        const settings = row ? JSON.parse(row.settingsJson) as Record<string, unknown> : {};
+        username = typeof settings.username === "string" ? settings.username.trim().replace(/^@/, "") : "";
+      } catch { username = ""; }
+      if (!/^[A-Za-z0-9._]{2,24}$/.test(username)) {
+        return jsonError(409, "tiktok_username_required", "Save a TikTok LIVE username before reconnecting.", requestId);
+      }
+      if (!env.TIKTOK_RECONNECT) return jsonError(503, "tiktok_reconnect_unavailable", "The TikTok bridge control is not available on this API host.", requestId);
+      try {
+        const accepted = await env.TIKTOK_RECONNECT(authContext.userId);
+        if (!accepted) return jsonError(409, "tiktok_runner_not_found", "The TikTok connector is starting. Try again in a moment.", requestId);
+        return Response.json({ status: "connecting", username }, { headers: JSON_HEADERS });
+      } catch {
+        return jsonError(502, "tiktok_reconnect_failed", "The TikTok connector could not be restarted.", requestId);
+      }
+    }
     if (url.pathname === "/api/v1/internal/tiktok/accounts" && request.method === "GET") {
       if (!env.DB || !env.TIKTOK_CONNECTOR_INGEST_SECRET) {
         return jsonError(503, "tiktok_connector_not_configured", "TikTok connector is not configured.", requestId);
@@ -794,18 +821,31 @@ export default {
       ).bind(authContext.userId).all<{ provider: string; displayName: string | null; status: string; connectedAt: string | null; healthStatus: string | null; healthDetailCode: string | null }>();
       if (!result.success) return jsonError(503, "provider_store_unavailable", "Could not load provider connections.", requestId);
       const rows = new Map((result.results ?? []).map(row => [row.provider, row]));
+      const tiktokSettings = await env.DB.prepare(
+        "SELECT settings_json AS settingsJson FROM provider_settings WHERE account_id = ? AND provider = 'tiktok' LIMIT 1",
+      ).bind(authContext.userId).first<{ settingsJson: string }>();
+      let tiktokUsername = "";
+      try {
+        const settings = tiktokSettings ? JSON.parse(tiktokSettings.settingsJson) as Record<string, unknown> : {};
+        tiktokUsername = typeof settings.username === "string" ? settings.username.trim().replace(/^@/, "") : "";
+      } catch { tiktokUsername = ""; }
+      const hasTikTokUsername = /^[A-Za-z0-9._]{2,24}$/.test(tiktokUsername);
       const twitchConfigured = !!(env.TWITCH_CLIENT_ID && env.TWITCH_CLIENT_SECRET && env.TOKEN_ENCRYPTION_KEY && env.APP_BASE_URL);
       const youtubeConfigured = !!(env.YOUTUBE_CLIENT_ID && env.YOUTUBE_CLIENT_SECRET && env.TOKEN_ENCRYPTION_KEY && env.APP_BASE_URL);
-      const tiktokConfigured = !!(env.TIKTOK_CONNECTOR_INGEST_SECRET && env.APP_BASE_URL);
+      const tiktokConfigured = hasTikTokUsername && !!(env.TIKTOK_CONNECTOR_INGEST_SECRET && env.APP_BASE_URL);
       const connections = PROVIDERS.map(provider => {
         const row = rows.get(provider);
+        const isConfiguredTikTok = provider === "tiktok" && hasTikTokUsername;
         return {
           provider,
-          status: row?.status ?? "disconnected",
-          displayName: row?.displayName ?? null,
+          // TikTok is Connected in Integrations once its username is saved.
+          // Provider Health separately reflects whether a LIVE session is detected.
+          status: isConfiguredTikTok ? "connected" : row?.status ?? "disconnected",
+          displayName: isConfiguredTikTok ? tiktokUsername : row?.displayName ?? null,
           connectedAt: row?.connectedAt ?? null,
           configured: provider === "twitch" ? twitchConfigured : provider === "youtube" ? youtubeConfigured : provider === "tiktok" ? tiktokConfigured : false,
-          detailCode: provider === "tiktok" && !tiktokConfigured ? "unofficial_connector_not_configured"
+          detailCode: provider === "tiktok" && !hasTikTokUsername ? "tiktok_username_required"
+            : provider === "tiktok" && !tiktokConfigured ? "tiktok_connector_not_configured"
             : provider === "twitch" && !twitchConfigured ? "oauth_credentials_not_configured"
             : provider === "youtube" && !youtubeConfigured ? "oauth_credentials_not_configured"
             : provider === "twitch" && row?.status === "connected" && row.healthStatus !== "healthy" ? row?.healthDetailCode ?? "eventsub_subscription_pending"
@@ -1011,6 +1051,60 @@ export default {
       }
     }
 
+    if (url.pathname === "/api/v1/providers/twitch/live-check" && request.method === "POST") {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!isTrustedMutationOrigin(request, env)) return jsonError(403, "untrusted_origin", "Request origin is not trusted.", requestId);
+      if (!env.DB || !env.TWITCH_CLIENT_ID || !env.TWITCH_CLIENT_SECRET) {
+        return jsonError(503, "twitch_live_check_not_configured", "Twitch app credentials and provider storage must be configured.", requestId);
+      }
+      const connection = await env.DB.prepare(
+        "SELECT external_account_id AS externalAccountId FROM provider_connections WHERE account_id = ? AND provider = 'twitch' AND status = 'connected' LIMIT 1",
+      ).bind(authContext.userId).first<{ externalAccountId: string | null }>();
+      if (!connection?.externalAccountId) return jsonError(409, "twitch_not_connected", "Connect Twitch before checking its LIVE status.", requestId);
+      try {
+        const tokenResponse = await fetch("https://id.twitch.tv/oauth2/token", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+          body: new URLSearchParams({
+            client_id: env.TWITCH_CLIENT_ID,
+            client_secret: env.TWITCH_CLIENT_SECRET,
+            grant_type: "client_credentials",
+          }),
+        });
+        if (!tokenResponse.ok) return jsonError(502, "twitch_app_token_failed", "Could not obtain the Twitch application token.", requestId);
+        const tokenPayload: unknown = await tokenResponse.json();
+        const appToken = tokenPayload && typeof tokenPayload === "object" && !Array.isArray(tokenPayload)
+          ? (tokenPayload as Record<string, unknown>).access_token : null;
+        if (typeof appToken !== "string" || !appToken) return jsonError(502, "twitch_app_token_failed", "Twitch returned an invalid application token.", requestId);
+        const streamsUrl = new URL("https://api.twitch.tv/helix/streams");
+        streamsUrl.searchParams.set("user_id", connection.externalAccountId);
+        const streamsResponse = await fetch(streamsUrl, {
+          headers: { "Client-Id": env.TWITCH_CLIENT_ID, authorization: "Bearer " + appToken, accept: "application/json" },
+        });
+        if (!streamsResponse.ok) {
+          await env.DB.prepare(
+            "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'twitch', 'degraded', NULL, ?, 'live_check_failed', NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'degraded', viewer_count = NULL, observed_at = excluded.observed_at, detail_code = 'live_check_failed', viewer_count_observed_at = NULL",
+          ).bind(crypto.randomUUID(), authContext.userId, new Date().toISOString()).run();
+          return jsonError(502, "twitch_live_check_failed", "Twitch could not confirm the channel LIVE status.", requestId);
+        }
+        const payload: unknown = await streamsResponse.json();
+        const streamRows = payload && typeof payload === "object" && !Array.isArray(payload)
+          ? (payload as Record<string, unknown>).data : null;
+        const stream = Array.isArray(streamRows) && streamRows.length > 0 && streamRows[0] && typeof streamRows[0] === "object"
+          ? streamRows[0] as Record<string, unknown> : null;
+        const now = new Date().toISOString();
+        const viewerCount = typeof stream?.viewer_count === "number" && Number.isFinite(stream.viewer_count) ? stream.viewer_count : null;
+        const live = !!stream;
+        const health = await env.DB.prepare(
+          "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'twitch', ?, ?, ?, ?, ?) ON CONFLICT(account_id, provider) DO UPDATE SET status = excluded.status, viewer_count = excluded.viewer_count, observed_at = excluded.observed_at, detail_code = excluded.detail_code, viewer_count_observed_at = excluded.viewer_count_observed_at",
+        ).bind(crypto.randomUUID(), authContext.userId, live ? "healthy" : "degraded", live ? viewerCount : null, now, live ? "live_detected" : "not_live", live && viewerCount !== null ? now : null).run();
+        if (!health.success) return jsonError(503, "provider_health_update_failed", "Could not store Twitch LIVE status.", requestId);
+        return Response.json({ status: live ? "live" : "not_live", viewerCount: live ? viewerCount : null, checkedAt: now }, { headers: JSON_HEADERS });
+      } catch {
+        return jsonError(502, "twitch_live_check_failed", "Could not check Twitch LIVE status.", requestId);
+      }
+    }
     if (url.pathname === "/api/v1/providers/twitch/eventsub/subscribe" && request.method === "POST") {
       const authContext = await getAuthContext(request, env);
       if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
@@ -1449,7 +1543,7 @@ export default {
           "INSERT INTO youtube_live_chat_cursors (account_id, live_chat_id, next_page_token, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET live_chat_id = excluded.live_chat_id, next_page_token = excluded.next_page_token, updated_at = excluded.updated_at WHERE youtube_live_chat_cursors.live_chat_id IS NOT excluded.live_chat_id OR youtube_live_chat_cursors.next_page_token IS NOT excluded.next_page_token",
         ).bind(authContext.userId, liveChatId, nextPageToken, receivedAt.toISOString()).run();
         if (!savedCursor.success) return jsonError(503, "youtube_cursor_store_failed", "Could not save the YouTube live-chat cursor.", requestId);
-        const healthUpdated = await writeYouTubeHealth(env.DB, authContext.userId, "healthy", null, receivedAt);
+        const healthUpdated = await writeYouTubeHealth(env.DB, authContext.userId, "healthy", "live_detected", receivedAt);
         if (!healthUpdated) return jsonError(503, "youtube_health_update_failed", "Could not update YouTube provider health.", requestId);
         const pollingIntervalMillis = typeof payload.pollingIntervalMillis === "number" && Number.isFinite(payload.pollingIntervalMillis)
           ? Math.max(5_000, Math.min(300_000, payload.pollingIntervalMillis)) : 10_000;
@@ -1464,9 +1558,9 @@ export default {
       if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
       if (!env.DB) return jsonError(503, "database_unavailable", "Database binding is not configured.", requestId);
       const result = await env.DB.prepare(
-        "SELECT * FROM (SELECT id, provider, external_message_id AS externalMessageId, channel_id AS channelId, channel_name AS channelName, sender_id AS senderId, sender_name AS senderName, text, sent_at AS sentAt, received_at AS receivedAt, badges_json AS badgesJson FROM chat_messages WHERE account_id = ? UNION ALL SELECT id, provider, external_event_id AS externalMessageId, channel_id AS channelId, channel_name AS channelName, COALESCE(actor_id, 'event') AS senderId, COALESCE(actor_name, 'Stream event') AS senderName, CASE kind WHEN 'follow' THEN 'followed the channel' WHEN 'subscription' THEN 'subscribed' WHEN 'gift' THEN 'sent ' || COALESCE(CASE WHEN quantity IS NOT NULL THEN CAST(quantity AS TEXT) || ' x ' ELSE '' END, '') || COALESCE(item_name, 'a gift') WHEN 'bits' THEN 'cheered ' || COALESCE(CAST(amount AS TEXT), '') || ' Bits' WHEN 'super_chat' THEN 'sent a Super Chat' WHEN 'donation' THEN 'donated ' || COALESCE(currency, '') || COALESCE(CAST(amount AS TEXT), '') WHEN 'like' THEN 'liked the stream' WHEN 'share' THEN 'shared the stream' WHEN 'raid' THEN 'raided the channel' WHEN 'member_join' THEN 'joined the stream' WHEN 'viewer_count' THEN 'Viewer count: ' || COALESCE(CAST(quantity AS TEXT), 'unknown') ELSE kind END || CASE WHEN message IS NOT NULL THEN ': ' || message ELSE '' END AS text, occurred_at AS sentAt, received_at AS receivedAt, '{}' AS badgesJson FROM provider_events WHERE account_id = ? AND kind != 'viewer_count') ORDER BY receivedAt DESC LIMIT 100",
+        "SELECT * FROM (SELECT id, provider, 'chat' AS recordType, NULL AS eventKind, external_message_id AS externalMessageId, channel_id AS channelId, channel_name AS channelName, sender_id AS senderId, sender_name AS senderName, text, sent_at AS sentAt, received_at AS receivedAt, badges_json AS badgesJson FROM chat_messages WHERE account_id = ? UNION ALL SELECT id, provider, 'event' AS recordType, kind AS eventKind, external_event_id AS externalMessageId, channel_id AS channelId, channel_name AS channelName, COALESCE(actor_id, 'event') AS senderId, COALESCE(actor_name, 'Stream event') AS senderName, CASE kind WHEN 'follow' THEN 'followed the channel' WHEN 'subscription' THEN 'subscribed' WHEN 'gift' THEN 'sent ' || COALESCE(CASE WHEN quantity IS NOT NULL THEN CAST(quantity AS TEXT) || ' x ' ELSE '' END, '') || COALESCE(item_name, 'a gift') WHEN 'bits' THEN 'cheered ' || COALESCE(CAST(amount AS TEXT), '') || ' Bits' WHEN 'super_chat' THEN 'sent a Super Chat' WHEN 'donation' THEN 'donated ' || COALESCE(currency, '') || COALESCE(CAST(amount AS TEXT), '') WHEN 'like' THEN 'liked the stream' WHEN 'share' THEN 'shared the stream' WHEN 'raid' THEN 'raided the channel' WHEN 'member_join' THEN 'joined the stream' WHEN 'viewer_count' THEN 'Viewer count: ' || COALESCE(CAST(quantity AS TEXT), 'unknown') ELSE kind END || CASE WHEN message IS NOT NULL THEN ': ' || message ELSE '' END AS text, occurred_at AS sentAt, received_at AS receivedAt, '{}' AS badgesJson FROM provider_events WHERE account_id = ? AND kind != 'viewer_count') ORDER BY receivedAt DESC LIMIT 100",
       ).bind(authContext.userId, authContext.userId).all<{
-        id: string; provider: string; externalMessageId: string; channelId: string; channelName: string;
+        id: string; provider: string; recordType: string; eventKind: string | null; externalMessageId: string; channelId: string; channelName: string;
         senderId: string; senderName: string; text: string; sentAt: string; receivedAt: string; badgesJson: string;
       }>();
       if (!result.success) return jsonError(503, "chat_store_unavailable", "Could not load chat messages.", requestId);
@@ -1475,7 +1569,7 @@ export default {
         try { parsed = JSON.parse(row.badgesJson); } catch { parsed = {}; }
         const flags = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
         return {
-          id: row.id, provider: row.provider, externalMessageId: row.externalMessageId,
+          id: row.id, provider: row.provider, recordType: row.recordType, eventKind: row.eventKind, externalMessageId: row.externalMessageId,
           channelId: row.channelId, channelName: row.channelName, senderId: row.senderId,
           senderName: row.senderName, text: row.text, sentAt: row.sentAt, receivedAt: row.receivedAt,
           badges: { moderator: flags.moderator === true, subscriber: flags.subscriber === true, verified: flags.verified === true },
