@@ -150,6 +150,8 @@ function App() {
   const [reconnectCountsLoadedFor, setReconnectCountsLoadedFor] = useState<string | null>(null);
   const checkRunId = useRef(0);
   const initialLiveCheckStarted = useRef(false);
+  const recoveryTimer = useRef<number | null>(null);
+  const latestCheckAllProviders = useRef<() => Promise<void>>(async () => {});
   const [tourOpen, setTourOpen] = useState(false);
   const [tourStep, setTourStep] = useState(0);
   const [tourCompleted, setTourCompleted] = useState(false);
@@ -202,7 +204,7 @@ function App() {
             const candidate: ProviderConnection = {
               // TikTok uses a saved public username rather than OAuth. Show it as
               // connected in Integrations even while its LIVE socket is offline.
-              status: key === "tiktok" && configured && displayName?.trim()
+              status: key === "tiktok" && displayName?.trim()
                 ? "connected" : typeof row.status === "string" ? row.status : "error",
               displayName,
               connectedAt: typeof row.connectedAt === "string" ? row.connectedAt : null,
@@ -254,8 +256,10 @@ function App() {
             next[row.provider] = { state: "live", checkedAt: row.observedAt ?? new Date().toISOString(), attempt: next[row.provider].attempt };
           } else if (row.detailCode === "tiktok_stream_offline" || row.detailCode === "no_active_live_chat" || row.detailCode === "not_live") {
             next[row.provider] = { state: "not_live", checkedAt: row.observedAt ?? new Date().toISOString(), attempt: next[row.provider].attempt };
-          } else if (row.state === "error" || row.state === "disconnected") {
+          } else if (row.state === "disconnected") {
             next[row.provider] = { state: "disconnected", checkedAt: row.observedAt ?? new Date().toISOString(), attempt: next[row.provider].attempt };
+          } else if (row.state === "error" || (row.state === "degraded" && row.detailCode !== "tiktok_stream_offline" && row.detailCode !== "no_active_live_chat" && row.detailCode !== "not_live")) {
+            next[row.provider] = { state: "error", checkedAt: row.observedAt ?? new Date().toISOString(), attempt: next[row.provider].attempt };
           }
         }
         return next;
@@ -369,6 +373,8 @@ function App() {
       if (runId === checkRunId.current) setCheckAllRunning(false);
     }
   }, [isProviderConfigured, checkProviderLive]);
+
+  latestCheckAllProviders.current = checkAllProviders;
 
   const reconnectProviderManually = useCallback(async (key: ProviderKey) => {
     if (!isProviderConfigured(key)) return;
@@ -581,15 +587,29 @@ function App() {
     void checkAllProviders();
   }, [user?.id, providerConnections, isProviderConfigured, checkAllProviders]);
   useEffect(() => {
-    if (!user?.id || !navigator.onLine || checkAllRunning) return;
+    if (!user?.id || !navigator.onLine || checkAllRunning) {
+      if (recoveryTimer.current !== null) window.clearTimeout(recoveryTimer.current);
+      recoveryTimer.current = null;
+      return;
+    }
     const needsNetworkRecovery = providers.some(provider =>
       isProviderConfigured(provider.key) && liveStates[provider.key].state === "disconnected");
-    if (!needsNetworkRecovery) return;
-    const timer = window.setTimeout(() => {
-      if (navigator.onLine && !checkAllRunning) void checkAllProviders();
-    }, 30_000);
-    return () => window.clearTimeout(timer);
-  }, [user?.id, liveStates, checkAllRunning, isProviderConfigured, checkAllProviders]);
+    if (!needsNetworkRecovery) {
+      if (recoveryTimer.current !== null) window.clearTimeout(recoveryTimer.current);
+      recoveryTimer.current = null;
+      return;
+    }
+    // Keep the fallback timer armed across the regular five-second status refresh.
+    if (recoveryTimer.current === null) {
+      recoveryTimer.current = window.setTimeout(() => {
+        recoveryTimer.current = null;
+        if (navigator.onLine) void latestCheckAllProviders.current();
+      }, 30_000);
+    }
+  }, [user?.id, providerConnections, liveStates, checkAllRunning]);
+  useEffect(() => () => {
+    if (recoveryTimer.current !== null) window.clearTimeout(recoveryTimer.current);
+  }, []);
   // Keep YouTube chat and stream events flowing while the Chat module is enabled.
   // Respect the pollingIntervalMillis-derived delay from YouTube and pause while hidden.
   useEffect(() => {
@@ -766,13 +786,6 @@ function App() {
     const timer = window.setInterval(() => { void refreshStoredChat(); }, 5000);
     return () => { active = false; window.clearInterval(timer); };
   }, [user?.id, enabled.chat]);
-  useEffect(() => {
-    let alive = true;
-    fetch("/api/v1/health").then(r => { if (!r.ok) throw new Error("API unavailable"); return r.json(); })
-      .then(() => { if (alive) setApiStatus("online"); })
-      .catch(() => { if (alive) setApiStatus("offline"); });
-    return () => { alive = false; };
-  }, []);
 
   const flash = (message: string) => {
     setNotice(message);
@@ -1241,7 +1254,7 @@ function App() {
       <main className="main-panel">
         <header className="topbar">
           <div className="breadcrumbs"><span>Workspace</span><span className="crumb-sep">/</span><b>{activeTab}</b></div>
-          <div className="topbar-actions"><button className="icon-button support-trigger" data-tour-target="support" title="Support and getting started guide" aria-label="Support and getting started guide" onClick={startTour}><CircleHelp size={18} /></button><div className={`api-pill ${apiStatus}`}><span className="status-dot" />{apiStatus === "online" ? "API operational" : apiStatus === "checking" ? "Checking API" : "API offline"}</div><div className="notification-anchor"><button className={"icon-button notification-button" + (updates.some(update => !update.isRead) ? " has-unread" : "")} aria-label="Updates" aria-haspopup="dialog" aria-expanded={updatesOpen} onClick={() => { const next = !updatesOpen; setUpdatesOpen(next); if (next) void refreshUpdates(); }}><Bell size={17} />{updates.some(update => !update.isRead) && <i />}</button>{updatesOpen && <div className="updates-dropdown" role="dialog" aria-label="RiftPulse updates"><div className="updates-header"><div><b>RiftPulse updates</b><small>Website and mod release notes</small></div><button className="updates-close" aria-label="Close updates" onClick={() => setUpdatesOpen(false)}><X size={15} /></button></div><div className="updates-toolbar"><span>{updates.some(update => !update.isRead) ? updates.filter(update => !update.isRead).length + " new update" + (updates.filter(update => !update.isRead).length === 1 ? "" : "s") : "You’re all caught up"}</span>{updates.some(update => !update.isRead) && <button onClick={() => void markUpdatesRead()}>Mark all read</button>}</div><div className="updates-list">{updatesLoading && updates.length === 0 ? <div className="updates-empty"><RefreshCw size={16} className="spin" /> Loading updates…</div> : updates.length === 0 ? <div className="updates-empty"><Bell size={18} /><b>No updates yet</b><span>Website and mod changes will show up here.</span></div> : updates.map(update => <article className={"update-entry" + (update.isRead ? "" : " unread")} key={update.id}><div className="update-entry-top"><span className={"update-tag " + update.category}>{update.category === "both" ? "Website + Mod" : update.category === "mod" ? "Mod update" : "Website update"}</span><time dateTime={update.publishedAt}>{new Date(update.publishedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</time></div><div className="update-entry-title">{update.title}{update.version && <small>{update.version}</small>}</div><p>{update.summary}</p>{update.changes.length > 0 && <ul>{update.changes.map((change, index) => <li key={update.id + "-" + index}>{change}</li>)}</ul>}</article>)}</div></div>}</div><div className="account-menu-anchor"><button className="avatar top-avatar" onClick={() => setProfileOpen(!profileOpen)} aria-label="Account menu" aria-haspopup="menu" aria-expanded={profileOpen}><img className="avatar-image" src="/images/riftpulse-profile.jpg" alt="" /></button>{profileOpen && <div className="profile-menu account-dropdown" role="menu"><div className="account-dropdown-heading"><div className="avatar"><img className="avatar-image" src="/images/riftpulse-profile.jpg" alt="" /></div><span><b>{user.name}</b><small>{user.email}</small></span></div><div className="profile-menu-title">ACCOUNT</div><button role="menuitem" onClick={() => { setProfileOpen(false); setModal("settings"); }}><Settings2 size={15} /> Preferences</button><button role="menuitem" onClick={() => { void signOut(); }}><LogOut size={15} /> Sign out</button></div>}</div></div>
+          <div className="topbar-actions"><button className="icon-button support-trigger" data-tour-target="support" title="Support and getting started guide" aria-label="Support and getting started guide" onClick={startTour}><CircleHelp size={18} /></button><div className="notification-anchor"><button className={"icon-button notification-button" + (updates.some(update => !update.isRead) ? " has-unread" : "")} aria-label="Updates" aria-haspopup="dialog" aria-expanded={updatesOpen} onClick={() => { const next = !updatesOpen; setUpdatesOpen(next); if (next) void refreshUpdates(); }}><Bell size={17} />{updates.some(update => !update.isRead) && <i />}</button>{updatesOpen && <div className="updates-dropdown" role="dialog" aria-label="RiftPulse updates"><div className="updates-header"><div><b>RiftPulse updates</b><small>Website and mod release notes</small></div><button className="updates-close" aria-label="Close updates" onClick={() => setUpdatesOpen(false)}><X size={15} /></button></div><div className="updates-toolbar"><span>{updates.some(update => !update.isRead) ? updates.filter(update => !update.isRead).length + " new update" + (updates.filter(update => !update.isRead).length === 1 ? "" : "s") : "You’re all caught up"}</span>{updates.some(update => !update.isRead) && <button onClick={() => void markUpdatesRead()}>Mark all read</button>}</div><div className="updates-list">{updatesLoading && updates.length === 0 ? <div className="updates-empty"><RefreshCw size={16} className="spin" /> Loading updates…</div> : updates.length === 0 ? <div className="updates-empty"><Bell size={18} /><b>No updates yet</b><span>Website and mod changes will show up here.</span></div> : updates.map(update => <article className={"update-entry" + (update.isRead ? "" : " unread")} key={update.id}><div className="update-entry-top"><span className={"update-tag " + update.category}>{update.category === "both" ? "Website + Mod" : update.category === "mod" ? "Mod update" : "Website update"}</span><time dateTime={update.publishedAt}>{new Date(update.publishedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</time></div><div className="update-entry-title">{update.title}{update.version && <small>{update.version}</small>}</div><p>{update.summary}</p>{update.changes.length > 0 && <ul>{update.changes.map((change, index) => <li key={update.id + "-" + index}>{change}</li>)}</ul>}</article>)}</div></div>}</div><div className="account-menu-anchor"><button className="avatar top-avatar" onClick={() => setProfileOpen(!profileOpen)} aria-label="Account menu" aria-haspopup="menu" aria-expanded={profileOpen}><img className="avatar-image" src="/images/riftpulse-profile.jpg" alt="" /></button>{profileOpen && <div className="profile-menu account-dropdown" role="menu"><div className="account-dropdown-heading"><div className="avatar"><img className="avatar-image" src="/images/riftpulse-profile.jpg" alt="" /></div><span><b>{user.name}</b><small>{user.email}</small></span></div><div className="profile-menu-title">ACCOUNT</div><button role="menuitem" onClick={() => { setProfileOpen(false); setModal("settings"); }}><Settings2 size={15} /> Preferences</button><button role="menuitem" onClick={() => { void signOut(); }}><LogOut size={15} /> Sign out</button></div>}</div></div>
         </header>
 
         <div className="page-content">
