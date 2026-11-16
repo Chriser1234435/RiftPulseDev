@@ -1326,7 +1326,7 @@ function App() {
           </section>
 
           <section className="section-block downloads-block" id="downloads" data-tour-target="downloads">
-            <div className="section-heading"><div><div className="section-overline">LATEST MOD BUILDS</div><h3>Beat Saber downloads <span className="subtle-count">02</span></h3><p>Choose your Beat Saber 1.40.8 version and follow the matching install steps.</p></div><span className="settings-badge">PCVR v0.3.2 / Quest v0.3.4 Alpha</span></div>
+            <div className="section-heading"><div><div className="section-overline">LATEST MOD BUILDS</div><h3>Beat Saber downloads <span className="subtle-count">02</span></h3><p>Choose your Beat Saber 1.40.8 version and follow the matching install steps.</p></div><span className="settings-badge">PCVR v0.3.2 / Quest v0.3.5 Alpha</span></div>
             <div className="downloads-grid">
               <article className="panel-card download-card">
                 <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR</b><small>Windows / Beat Saber 1.40.8 (PCVR)</small></div><span className="download-state">v0.3.2 | ZIP BUILT</span></div>
@@ -1341,7 +1341,7 @@ function App() {
                 <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr-0.3.2.zip" download><Download size={15} /> Download PCVR ZIP</a>
               </article>
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest Standalone</b><small>Meta Quest headset / Beat Saber 1.40.8</small></div><span className="download-state">v0.3.4 Alpha | QMOD BUILT</span></div>
+                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest Standalone</b><small>Meta Quest headset / Beat Saber 1.40.8</small></div><span className="download-state">v0.3.5 Alpha | QMOD BUILT</span></div>
                 <p className="download-step-title">Install Quest Standalone</p>
                 <ol className="download-steps">
                   <li>Make sure the headset has standalone Beat Saber 1.40.8 installed.</li>
@@ -1350,7 +1350,7 @@ function App() {
                   <li>Start Beat Saber once to complete the installation.</li>
                 </ol>
                 <p className="download-platform-note">Quest Standalone only · QMOD · Beat Saber 1.40.8</p>
-                <a className="primary-button download-link" href="/downloads/RiftPulse-Quest-0.3.4-Alpha.qmod" download="RiftPulse-Quest-0.3.4-Alpha.qmod"><Download size={15} /> Download Quest QMOD</a>
+                <a className="primary-button download-link" href="/downloads/RiftPulse-Quest-0.3.5-Alpha.qmod" download="RiftPulse-Quest-0.3.5-Alpha.qmod"><Download size={15} /> Download Quest QMOD</a>
               </article>
             </div>
 
@@ -1495,7 +1495,7 @@ function App() {
           {modal === "settings" && <><div className="modal-icon purple-modal"><Settings2 size={22} /></div><div className="modal-eyebrow">PREFERENCES</div><h2 id="modal-title">Tune your setup.</h2><p className="modal-copy">Module switches and the BSR command save to your account. Provider OAuth and device preferences remain gated until their integrations are complete.</p>
             <div className="settings-option"><div><b>Automatically save toggles</b><small>Apply module changes immediately.</small></div><button className={`toggle ${autoSave ? "on" : ""}`} role="switch" aria-checked={autoSave} onClick={() => setAutoSave(!autoSave)}><span /></button></div>
             <div className="field-group"><label htmlFor="command-input">BSR song request command</label><input id="command-input" value={command} maxLength={20} onChange={e => setCommand(e.target.value.replace(/\s/g, ""))} placeholder="!bsr" /><small>Saved to your account when you choose Save. Format: ! followed by letters, numbers, _ or -.</small></div>
-            <div className="settings-option"><div><b>Reduced motion</b><small>Respect your device's motion preference.</small></div><span className="settings-badge">PCVR v0.3.2 / Quest v0.3.4 Alpha</span></div>
+            <div className="settings-option"><div><b>Reduced motion</b><small>Respect your device's motion preference.</small></div><span className="settings-badge">PCVR v0.3.2 / Quest v0.3.5 Alpha</span></div>
             <button className="primary-button modal-submit" onClick={() => void saveSettings()}>Save settings to account <Check size={15} /></button>
           </>}
           {modal === "help" && <><div className="modal-icon purple-modal"><Headphones size={22} /></div><div className="modal-eyebrow">RIFTPULSE GUIDE</div><h2 id="modal-title">Ready when you are.</h2><p className="modal-copy">RiftPulse connects your livestream community with Beat Saber. V1 is focused on two modules: in-game Chat and BSR Song Request.</p><div className="help-list"><div><MessageCircle size={18} /><span><b>Chat</b><small>Bring supported live messages into your game.</small></span></div><div><Music2 size={18} /><span><b>BSR Song Request</b><small>Queue viewer song requests with configurable commands.</small></span></div><div><Gamepad2 size={18} /><span><b>Pair your game</b><small>Use the in-game five-digit pairing flow once the mod is installed.</small></span></div></div><button className="primary-button modal-submit" onClick={() => { setModal(null); startPairing(); setModal("pair"); }}>Connect a device <ArrowUpRight size={15} /></button></>}

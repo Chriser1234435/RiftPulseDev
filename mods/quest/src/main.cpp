@@ -1,4 +1,4 @@
-﻿#include "main.hpp"
+#include "main.hpp"
 #include "RiftPulseChatPanel.hpp"
 #include "bsml/shared/BSML/FloatingScreen/FloatingScreen.hpp"
 #include "UnityEngine/PrimitiveType.hpp"
@@ -7,7 +7,12 @@
 #include "UnityEngine/Quaternion.hpp"
 #include "UnityEngine/GameObject.hpp"
 #include "UnityEngine/RectTransform.hpp"
+#include "UnityEngine/CanvasRenderer.hpp"
+#include "UnityEngine/RectOffset.hpp"
 #include "UnityEngine/UI/Button.hpp"
+#include "UnityEngine/UI/VerticalLayoutGroup.hpp"
+#include "UnityEngine/UI/HorizontalLayoutGroup.hpp"
+#include "UnityEngine/UI/LayoutElement.hpp"
 #include "TMPro/TextMeshProUGUI.hpp"
 #include "TMPro/TextAlignmentOptions.hpp"
 #include "TMPro/TMP_Settings.hpp"
@@ -83,11 +88,12 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.3.0";
+static constexpr const char* MOD_VERSION = "0.3.5";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
 static HMUI::CurvedTextMeshPro* overview = nullptr;
+static HMUI::CurvedTextMeshPro* modulePreviewStatusLabel = nullptr;
 static HMUI::CurvedTextMeshPro* pairingCodeLabel = nullptr;
 static UnityEngine::UI::Button* codeButton = nullptr;
 static UnityEngine::UI::Button* checkButton = nullptr;
@@ -108,8 +114,8 @@ static bool chatEnabled = true;
 static bool bsrEnabled = true;
 
 struct WorldChatPanelSettings {
-  float x = 0.72f;
-  float y = -0.12f;
+  float x = 0.0f;
+  float y = 0.0f;
   float z = 2.15f;
   float width = 110.0f;
   float height = 70.0f;
@@ -131,8 +137,54 @@ static void SaveWorldChatSettings();
 static void SetWorldChatPanelSetting(int field, float value);
 static void ShowChatPanelSettingsModal();
 
+// Keep the panel at eye level regardless of HMD pitch. Z follows headset yaw,
+// while Y is world vertical; looking down must never drive the panel into the floor.
+static UnityEngine::Vector3 WorldChatHorizontalForward(UnityEngine::Transform* transform) {
+  auto forward = transform->get_forward();
+  forward.y = 0.0f;
+  const float length = std::sqrt(forward.x * forward.x + forward.z * forward.z);
+  if (length < 0.0001f) return UnityEngine::Vector3(0.0f, 0.0f, 1.0f);
+  return UnityEngine::Vector3(forward.x / length, 0.0f, forward.z / length);
+}
+
+static UnityEngine::Vector3 WorldChatHorizontalRight(UnityEngine::Transform* transform) {
+  const auto forward = WorldChatHorizontalForward(transform);
+  return UnityEngine::Vector3(forward.z, 0.0f, -forward.x);
+}
+
+static UnityEngine::Quaternion WorldChatHorizontalCameraRotation(UnityEngine::Transform* transform) {
+  return UnityEngine::Quaternion::LookRotation(
+      WorldChatHorizontalForward(transform), UnityEngine::Vector3(0.0f, 1.0f, 0.0f));
+}
+
 static void SetStatus(const std::string& text) {
-  if (overview) overview->set_text(StringW(text));
+  if (!overview) return;
+  // This label is confined to the Device Link card's status slot. Keep it
+  // single-line and short so long account/API messages never spill beneath
+  // the neighboring Song Request or Spatial Display cards.
+  std::string compact;
+  compact.reserve(std::min<size_t>(text.size(), 32));
+  bool previousSpace = true;
+  for (const unsigned char ch : text) {
+    if (std::isspace(ch)) {
+      if (!previousSpace) compact.push_back(' ');
+      previousSpace = true;
+    } else {
+      compact.push_back(static_cast<char>(ch));
+      previousSpace = false;
+    }
+    if (compact.size() >= 29) break;
+  }
+  while (!compact.empty() && compact.back() == ' ') compact.pop_back();
+  if (text.size() > compact.size() && compact.size() >= 29) compact.replace(26, 3, "...");
+  overview->set_text(StringW(compact));
+  if (modulePreviewStatusLabel) {
+    std::string footer = text;
+    footer.erase(std::remove_if(footer.begin(), footer.end(),
+        [](unsigned char ch) { return ch == 13 || ch == 10; }), footer.end());
+    if (footer.size() > 60) footer = footer.substr(0, 57) + "...";
+    modulePreviewStatusLabel->set_text(StringW(footer));
+  }
 }
 
 static void RefreshPairingCodeLabel() {
@@ -865,6 +917,20 @@ static void GeneratePairingCode() {
 
 static void ShowWorldChatPanel();
 static UnityEngine::Sprite* GetWorldChatWhiteSprite();
+// Native Quest canvases can leave custom white-sprite Images at their default
+// white tint after a layout rebuild. Apply the surface color directly to the
+// CanvasRenderer while keeping the Image vertex color neutral.
+static void ApplyQuestImageTint(
+    UnityEngine::GameObject* object, UnityEngine::UI::Image* image,
+    UnityEngine::Color tint) {
+  if (!image) return;
+  image->set_color(UnityEngine::Color(1.0f, 1.0f, 1.0f, 1.0f));
+  auto* renderer = object
+      ? object->GetComponent<UnityEngine::CanvasRenderer*>()
+      : nullptr;
+  if (renderer) renderer->SetColor(tint);
+  else image->set_color(tint);
+}
 
 static void CreateQuestMenuCardPart(
     UnityEngine::Transform* parent, const std::string& name,
@@ -890,7 +956,7 @@ static void CreateQuestMenuCardPart(
   rect->set_anchoredPosition(position);
   rect->set_sizeDelta(size);
   image->set_sprite(GetWorldChatWhiteSprite());
-  image->set_color(color);
+  ApplyQuestImageTint(partObject, image, color);
   image->set_raycastTarget(false);
   mainMenuObjects.push_back(partObject);
 }
@@ -915,6 +981,8 @@ static void TrackMainMenuObject(UnityEngine::GameObject* object) {
   if (object) mainMenuObjects.push_back(object);
 }
 
+#include "menu-layout-port.inc"
+
 static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
                                bool firstActivation,
                                bool addedToHierarchy,
@@ -925,18 +993,23 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
   mainMenuObjects.clear();
   LoadWorldChatSettings();
 
+  BuildRiftPulseMenuPcvrLayout(root);
+  ResumePairing();
+  return;
+
+
   // Shared PCVR / Quest design blueprint: brand header, device-link rail,
   // paired module tiles, then a full-width spatial-display control deck.
   CreateQuestMenuCard(root, "RiftPulse Nexus Main Frame",
-      UnityEngine::Vector2(0.0f, -9.5f), UnityEngine::Vector2(64.0f, 59.0f));
+      UnityEngine::Vector2(0.0f, -4.0f), UnityEngine::Vector2(64.0f, 55.0f));
   CreateQuestMenuCard(root, "RiftPulse Device Link",
-      UnityEngine::Vector2(-15.0f, -5.6f), UnityEngine::Vector2(30.0f, 26.0f));
+      UnityEngine::Vector2(-15.0f, -4.5f), UnityEngine::Vector2(30.0f, 26.0f));
   CreateQuestMenuCard(root, "RiftPulse Live Chat",
-      UnityEngine::Vector2(15.0f, -1.0f), UnityEngine::Vector2(29.0f, 17.0f));
+      UnityEngine::Vector2(15.0f, -2.0f), UnityEngine::Vector2(29.0f, 15.4f));
   CreateQuestMenuCard(root, "RiftPulse Song Requests",
-      UnityEngine::Vector2(15.0f, -18.5f), UnityEngine::Vector2(29.0f, 17.0f));
+      UnityEngine::Vector2(15.0f, -15.8f), UnityEngine::Vector2(29.0f, 11.0f));
   CreateQuestMenuCard(root, "RiftPulse Spatial Display",
-      UnityEngine::Vector2(0.0f, -33.4f), UnityEngine::Vector2(59.0f, 9.6f));
+      UnityEngine::Vector2(0.0f, -26.6f), UnityEngine::Vector2(59.0f, 8.8f));
 
   heading = BSML::Lite::CreateText(
       root, "RIFTPULSE", 5.2f,
@@ -955,33 +1028,33 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
 
   auto* pairingTitle = BSML::Lite::CreateText(
       root, "01  /  DEVICE LINK", 3.6f,
-      {-15.0f, 4.5f}, {27.0f, 3.5f});
+      {-15.0f, 4.0f}, {27.0f, 3.5f});
   if (pairingTitle) TrackMainMenuObject(pairingTitle->get_gameObject());
 
   auto* pairingCaption = BSML::Lite::CreateText(
       root, "PAIRING CODE", 2.55f,
-      {-15.0f, 1.1f}, {27.0f, 2.8f});
+      {-15.0f, 0.5f}, {27.0f, 2.8f});
   if (pairingCaption) TrackMainMenuObject(pairingCaption->get_gameObject());
 
   pairingCodeLabel = BSML::Lite::CreateText(
       root, pairingCode.empty() ? "-----" : pairingCode, 6.2f,
-      {-15.0f, -2.5f}, {27.0f, 4.2f});
+      {-15.0f, -3.2f}, {27.0f, 4.2f});
   if (pairingCodeLabel) TrackMainMenuObject(pairingCodeLabel->get_gameObject());
 
   overview = BSML::Lite::CreateText(
       root, "Generate a code to connect this installation to your RiftPulse account.",
-      2.25f, {-15.0f, -7.0f}, {27.0f, 4.4f});
+      1.85f, {-15.0f, -6.4f}, {27.0f, 2.3f});
   if (overview) TrackMainMenuObject(overview->get_gameObject());
 
   codeButton = BSML::Lite::CreateUIButton(
       root, "GENERATE SECURE CODE", "PracticeButton",
-      UnityEngine::Vector2({-15.0f, -11.9f}), UnityEngine::Vector2({25.5f, 4.0f}),
+      UnityEngine::Vector2({-15.0f, -10.0f}), UnityEngine::Vector2({25.5f, 4.0f}),
       []() { GeneratePairingCode(); });
   if (codeButton) TrackMainMenuObject(codeButton->get_gameObject());
 
   checkButton = BSML::Lite::CreateUIButton(
       root, "CHECK LINK STATUS", "PracticeButton",
-      UnityEngine::Vector2({-15.0f, -16.2f}), UnityEngine::Vector2({25.5f, 4.0f}),
+      UnityEngine::Vector2({-15.0f, -14.0f}), UnityEngine::Vector2({25.5f, 4.0f}),
       []() { CheckPairingStatus(); });
   if (checkButton) TrackMainMenuObject(checkButton->get_gameObject());
 
@@ -992,56 +1065,56 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
 
   auto* chatDescription = BSML::Lite::CreateText(
       root, "Combined platform chat and supported stream events.",
-      2.3f, {15.0f, 0.8f}, {26.0f, 3.2f});
+      2.5f, {15.0f, 0.0f}, {26.0f, 3.2f});
   if (chatDescription) TrackMainMenuObject(chatDescription->get_gameObject());
 
   auto* customizePanelButton = BSML::Lite::CreateUIButton(
-      root, "CHAT DISPLAY LAB", "PracticeButton",
-      UnityEngine::Vector2({15.0f, -3.3f}), UnityEngine::Vector2({25.5f, 3.8f}),
+      root, "OPEN CHAT DISPLAY LAB", "PracticeButton",
+      UnityEngine::Vector2({15.0f, -4.5f}), UnityEngine::Vector2({25.5f, 3.4f}),
       []() { ShowChatPanelSettingsModal(); });
   if (customizePanelButton) TrackMainMenuObject(customizePanelButton->get_gameObject());
 
   chatButton = BSML::Lite::CreateUIButton(
       root, "CHAT MODULE: LOCKED", "PracticeButton",
-      UnityEngine::Vector2({15.0f, -7.4f}), UnityEngine::Vector2({25.5f, 3.8f}),
+      UnityEngine::Vector2({15.0f, -8.0f}), UnityEngine::Vector2({25.5f, 3.4f}),
       []() { ToggleChat(); });
   if (chatButton) TrackMainMenuObject(chatButton->get_gameObject());
 
   auto* bsrTitle = BSML::Lite::CreateText(
       root, "03  /  SONG REQUESTS", 3.3f,
-      {15.0f, -12.4f}, {26.0f, 3.2f});
+      {15.0f, -12.2f}, {26.0f, 3.2f});
   if (bsrTitle) TrackMainMenuObject(bsrTitle->get_gameObject());
 
   auto* bsrDescription = BSML::Lite::CreateText(
       root, "Let viewers request songs through connected chats.",
-      2.3f, {15.0f, -15.7f}, {26.0f, 3.1f});
+      2.5f, {15.0f, -15.2f}, {26.0f, 3.1f});
   if (bsrDescription) TrackMainMenuObject(bsrDescription->get_gameObject());
 
   bsrButton = BSML::Lite::CreateUIButton(
       root, "BSR MODULE: LOCKED", "PracticeButton",
-      UnityEngine::Vector2({15.0f, -21.0f}), UnityEngine::Vector2({25.5f, 3.8f}),
+      UnityEngine::Vector2({15.0f, -19.0f}), UnityEngine::Vector2({25.5f, 3.4f}),
       []() { ToggleBsr(); });
   if (bsrButton) TrackMainMenuObject(bsrButton->get_gameObject());
 
   auto* displayTitle = BSML::Lite::CreateText(
       root, "04  /  SPATIAL DISPLAY", 3.2f,
-      {-12.8f, -30.8f}, {29.0f, 3.0f});
+      {-12.8f, -23.4f}, {29.0f, 2.6f});
   if (displayTitle) TrackMainMenuObject(displayTitle->get_gameObject());
 
   auto* displayDescription = BSML::Lite::CreateText(
       root, "Position and size your floating chat surface.",
-      2.2f, {-12.8f, -33.6f}, {29.0f, 2.6f});
+      2.2f, {-12.8f, -26.0f}, {29.0f, 2.2f});
   if (displayDescription) TrackMainMenuObject(displayDescription->get_gameObject());
 
   auto* configureDisplayButton = BSML::Lite::CreateUIButton(
       root, "DISPLAY SETTINGS", "PracticeButton",
-      UnityEngine::Vector2({15.0f, -31.3f}), UnityEngine::Vector2({24.0f, 3.8f}),
+      UnityEngine::Vector2({15.0f, -23.7f}), UnityEngine::Vector2({24.0f, 3.2f}),
       []() { ShowChatPanelSettingsModal(); });
   if (configureDisplayButton) TrackMainMenuObject(configureDisplayButton->get_gameObject());
 
   auto* recenterDisplayButton = BSML::Lite::CreateUIButton(
       root, "RE-CENTER CHAT PANEL", "PracticeButton",
-      UnityEngine::Vector2({15.0f, -35.4f}), UnityEngine::Vector2({24.0f, 3.8f}),
+      UnityEngine::Vector2({15.0f, -28.1f}), UnityEngine::Vector2({24.0f, 3.2f}),
       []() { ShowWorldChatPanel(); });
   if (recenterDisplayButton) TrackMainMenuObject(recenterDisplayButton->get_gameObject());
 
@@ -1078,6 +1151,9 @@ static UnityEngine::RectTransform* worldChatLockShackleRightRect = nullptr;
 static UnityEngine::RectTransform* worldChatLockShackleTopRect = nullptr;
 static UnityEngine::Sprite* worldChatWhiteSprite = nullptr;
 static UnityEngine::RectTransform* worldChatPlatformMarkRects[6] = {};
+static UnityEngine::RectTransform* worldChatSurfaceRect = nullptr;
+static UnityEngine::RectTransform* worldChatHeaderRect = nullptr;
+static UnityEngine::RectTransform* worldChatRailRect = nullptr;
 static bool worldChatLocked = false;
 static bool worldChatRequestInFlight = false;
 static bool worldChatNeedsReposition = false;
@@ -1085,6 +1161,9 @@ static bool worldChatModuleEnabled = true;
 static bool worldChatPairingPromptVisible = false;
 static float worldChatNextPoll = 0.0f;
 static float worldChatNextPlacementSave = 0.0f;
+static bool worldChatHasSavedPanelPose = false;
+static UnityEngine::Vector3 worldChatLastSavedPanelPosition;
+static UnityEngine::Quaternion worldChatLastSavedPanelRotation = UnityEngine::Quaternion(0.0f, 0.0f, 0.0f, 1.0f);
 
 static bool EnsureWorldChatDriver();
 
@@ -1113,9 +1192,33 @@ static void LoadWorldChatSettings() {
     worldChatSettings.height = std::clamp(height, 40.0f, 120.0f);
     float rx = 0.0f, ry = 0.0f, rz = 0.0f, rw = 1.0f;
     int hasRotation = 0;
-    if (input >> rx >> ry >> rz >> rw >> hasRotation) {
-      worldChatSettings.rotationOffset = UnityEngine::Quaternion(rx, ry, rz, rw);
-      worldChatSettings.hasRotationOffset = hasRotation == 1;
+    int coordinateFrame = 0;
+    if (input >> rx >> ry >> rz >> rw >> hasRotation >> coordinateFrame) {
+      if (coordinateFrame == 2) {
+        worldChatSettings.rotationOffset = UnityEngine::Quaternion(rx, ry, rz, rw);
+        worldChatSettings.hasRotationOffset = hasRotation == 1;
+      } else {
+        // Old rotation offsets were stored relative to pitched headset axes.
+        // Preserve X/Y/Z and dimensions, but let this update initialize a
+        // level, front-facing rotation. All new saves carry coordinate frame 2.
+        worldChatSettings.rotationOffset = UnityEngine::Quaternion(0.0f, 0.0f, 0.0f, 1.0f);
+        worldChatSettings.hasRotationOffset = false;
+        SaveWorldChatSettings();
+      }
+    } else {
+      worldChatSettings.rotationOffset = UnityEngine::Quaternion(0.0f, 0.0f, 0.0f, 1.0f);
+      worldChatSettings.hasRotationOffset = false;
+      SaveWorldChatSettings();
+    }
+    // Earlier Quest builds used this slightly off-centre value as their untouched
+    // default. Migrate that legacy default to the new centred front-facing position,
+    // but leave any other saved X/Y/Z values exactly as the user set them.
+    if (std::abs(worldChatSettings.x - 0.72f) < 0.0001f &&
+        std::abs(worldChatSettings.y + 0.12f) < 0.0001f &&
+        std::abs(worldChatSettings.z - 2.15f) < 0.0001f) {
+      worldChatSettings.x = 0.0f;
+      worldChatSettings.y = 0.0f;
+      SaveWorldChatSettings();
     }
   }
 }
@@ -1133,7 +1236,7 @@ static void SaveWorldChatSettings() {
            << worldChatSettings.height << " "
            << worldChatSettings.rotationOffset.x << " " << worldChatSettings.rotationOffset.y << " "
            << worldChatSettings.rotationOffset.z << " " << worldChatSettings.rotationOffset.w << " "
-           << (worldChatSettings.hasRotationOffset ? 1 : 0) << "\n";
+           << (worldChatSettings.hasRotationOffset ? 1 : 0) << " 2\n";
     output.flush();
     if (!output.good()) { unlink(temporaryPath.c_str()); return; }
   }
@@ -1203,34 +1306,79 @@ static UnityEngine::Quaternion GetInitialWorldChatPanelRotation(
   LoadWorldChatSettings();
   if (worldChatSettings.hasRotationOffset) {
     return UnityEngine::Quaternion::op_Multiply(
-        cameraTransform->get_rotation(), worldChatSettings.rotationOffset);
+        WorldChatHorizontalCameraRotation(cameraTransform), worldChatSettings.rotationOffset);
   }
   const auto cameraPosition = cameraTransform->get_position();
   return UnityEngine::Quaternion::LookRotation(
       UnityEngine::Vector3(cameraPosition.x - panelPosition.x,
                            cameraPosition.y - panelPosition.y,
                            cameraPosition.z - panelPosition.z),
-      cameraTransform->get_up());
+      UnityEngine::Vector3(0.0f, 1.0f, 0.0f));
+}
+
+static void ResetWorldChatPanelPoseBaseline() {
+  if (!worldChatPanel) {
+    worldChatHasSavedPanelPose = false;
+    return;
+  }
+  worldChatLastSavedPanelPosition = worldChatPanel->get_ScreenPosition();
+  worldChatLastSavedPanelRotation = worldChatPanel->get_ScreenRotation();
+  worldChatHasSavedPanelPose = true;
 }
 
 static void SaveWorldChatPlacement() {
-  if (!worldChatPanel) return;
+  if (!worldChatPanel) {
+    worldChatHasSavedPanelPose = false;
+    return;
+  }
   const auto position = worldChatPanel->get_ScreenPosition();
   const auto rotation = worldChatPanel->get_ScreenRotation();
-  auto camera = UnityEngine::Camera::get_main();
-  if (camera && camera->get_transform()) {
-    const auto referenceRotation = worldChatSettingsPoseCaptured
-        ? worldChatSettingsCameraRotation : camera->get_transform()->get_rotation();
-    SaveWorldChatRotationOffset(rotation, referenceRotation);
+  if (!worldChatHasSavedPanelPose) {
+    ResetWorldChatPanelPoseBaseline();
+    return;
   }
-  // Do not derive persisted X/Y/Z from the moving headset pose here. This runs
-  // periodically, and projecting a fixed world-space panel against a moving
-  // camera silently overwrote the user's saved slider values.
-  std::ofstream output(WorldChatPlacementPath(), std::ios::out | std::ios::trunc);
-  if (!output) return;
-  output << position.x << " " << position.y << " " << position.z << " "
-         << rotation.x << " " << rotation.y << " " << rotation.z << " " << rotation.w
-         << " " << 0;
+
+  const float dx = position.x - worldChatLastSavedPanelPosition.x;
+  const float dy = position.y - worldChatLastSavedPanelPosition.y;
+  const float dz = position.z - worldChatLastSavedPanelPosition.z;
+  const bool positionChanged = (dx * dx + dy * dy + dz * dz) >= 0.000025f; // 5 mm
+  float rotationDot =
+      rotation.x * worldChatLastSavedPanelRotation.x +
+      rotation.y * worldChatLastSavedPanelRotation.y +
+      rotation.z * worldChatLastSavedPanelRotation.z +
+      rotation.w * worldChatLastSavedPanelRotation.w;
+  if (rotationDot < 0.0f) rotationDot = -rotationDot;
+  const bool rotationChanged = (1.0f - rotationDot) >= 0.00002f;
+  if (!positionChanged && !rotationChanged) return;
+
+  const float now = UnityEngine::Time::get_realtimeSinceStartup();
+  if (now < worldChatNextPlacementSave) return;
+  auto camera = UnityEngine::Camera::get_main();
+  if (!camera || !camera->get_transform()) return;
+  auto cameraTransform = camera->get_transform();
+
+  // A FloatingScreen stays world-space while the player looks around. Persist
+  // headset-relative X/Y/Z only when the panel itself has moved (or rotated),
+  // never simply because the headset/camera moved.
+  const auto cameraPosition = cameraTransform->get_position();
+  const auto right = WorldChatHorizontalRight(cameraTransform);
+  const auto forward = WorldChatHorizontalForward(cameraTransform);
+  const float relativeX =
+      (position.x - cameraPosition.x) * right.x +
+      (position.z - cameraPosition.z) * right.z;
+  const float relativeY = position.y - cameraPosition.y;
+  const float relativeZ =
+      (position.x - cameraPosition.x) * forward.x +
+      (position.z - cameraPosition.z) * forward.z;
+  worldChatSettings.x = std::clamp(relativeX, -2.5f, 2.5f);
+  worldChatSettings.y = std::clamp(relativeY, -2.0f, 2.0f);
+  worldChatSettings.z = std::clamp(relativeZ, 0.8f, 4.5f);
+  SaveWorldChatRotationOffset(rotation, WorldChatHorizontalCameraRotation(cameraTransform));
+
+  worldChatLastSavedPanelPosition = position;
+  worldChatLastSavedPanelRotation = rotation;
+  worldChatHasSavedPanelPose = true;
+  worldChatNextPlacementSave = now + 0.25f;
 }
 
 static bool LoadWorldChatPlacement(UnityEngine::Vector3& position,
@@ -1250,12 +1398,11 @@ static bool LoadWorldChatPlacement(UnityEngine::Vector3& position,
     const auto deltaX = position.x - cameraPosition.x;
     const auto deltaY = position.y - cameraPosition.y;
     const auto deltaZ = position.z - cameraPosition.z;
-    const auto right = cameraTransform->get_right();
-    const auto up = cameraTransform->get_up();
-    const auto forward = cameraTransform->get_forward();
-    worldChatSettings.x = std::clamp(deltaX * right.x + deltaY * right.y + deltaZ * right.z, -2.5f, 2.5f);
-    worldChatSettings.y = std::clamp(deltaX * up.x + deltaY * up.y + deltaZ * up.z, -2.0f, 2.0f);
-    worldChatSettings.z = std::clamp(deltaX * forward.x + deltaY * forward.y + deltaZ * forward.z, 0.8f, 4.5f);
+    const auto right = WorldChatHorizontalRight(cameraTransform);
+    const auto forward = WorldChatHorizontalForward(cameraTransform);
+    worldChatSettings.x = std::clamp(deltaX * right.x + deltaZ * right.z, -2.5f, 2.5f);
+    worldChatSettings.y = std::clamp(deltaY, -2.0f, 2.0f);
+    worldChatSettings.z = std::clamp(deltaX * forward.x + deltaZ * forward.z, 0.8f, 4.5f);
     SaveWorldChatSettings();
   }
   return true;
@@ -1280,6 +1427,16 @@ static UnityEngine::Sprite* GetWorldChatWhiteSprite() {
     }
   }
   return worldChatWhiteSprite;
+}
+
+static void ApplyQuestDarkBackground(UnityEngine::GameObject* object,
+                                       UnityEngine::Color color) {
+  if (!object) return;
+  // Some BSML/Unity prefabs ship with a bright white root Image even when
+  // their child card/feed surface is custom-painted. Tint only the root image;
+  // child controls, slider tracks, and accent images retain their own styling.
+  auto* image = object->GetComponent<UnityEngine::UI::Image*>();
+  if (image) ApplyQuestImageTint(object, image, color);
 }
 
 static UnityEngine::UI::Image* CreateWorldChatLockPart(
@@ -1348,6 +1505,22 @@ static void ApplyWorldChatSettingsToPanel() {
   if (!worldChatPanel) return;
   worldChatPanel->set_ScreenSize(UnityEngine::Vector2(
       worldChatSettings.width, worldChatSettings.height));
+  if (worldChatSurfaceRect) {
+    worldChatSurfaceRect->set_sizeDelta(UnityEngine::Vector2(
+        worldChatSettings.width, worldChatSettings.height));
+  }
+  if (worldChatHeaderRect) {
+    worldChatHeaderRect->set_sizeDelta(UnityEngine::Vector2(
+        std::max(1.0f, worldChatSettings.width - 1.2f), 0.65f));
+    worldChatHeaderRect->set_anchoredPosition(UnityEngine::Vector2(
+        0.0f, worldChatSettings.height * 0.5f - 0.55f));
+  }
+  if (worldChatRailRect) {
+    worldChatRailRect->set_sizeDelta(UnityEngine::Vector2(
+        0.38f, std::max(1.0f, worldChatSettings.height - 1.8f)));
+    worldChatRailRect->set_anchoredPosition(UnityEngine::Vector2(
+        -worldChatSettings.width * 0.5f + 0.48f, -0.25f));
+  }
 
   auto camera = UnityEngine::Camera::get_main();
   UnityEngine::Vector3 cameraPosition;
@@ -1364,9 +1537,9 @@ static void ApplyWorldChatSettingsToPanel() {
   } else if (camera && camera->get_transform()) {
     auto cameraTransform = camera->get_transform();
     cameraPosition = cameraTransform->get_position();
-    up = cameraTransform->get_up();
-    right = cameraTransform->get_right();
-    forward = cameraTransform->get_forward();
+    up = UnityEngine::Vector3(0.0f, 1.0f, 0.0f);
+    right = WorldChatHorizontalRight(cameraTransform);
+    forward = WorldChatHorizontalForward(cameraTransform);
     havePose = true;
   }
   if (havePose) {
@@ -1380,7 +1553,7 @@ static void ApplyWorldChatSettingsToPanel() {
     auto currentRotation = worldChatPanel->get_ScreenRotation();
     const auto referenceRotation = worldChatSettingsPoseCaptured
         ? worldChatSettingsCameraRotation
-        : (camera && camera->get_transform() ? camera->get_transform()->get_rotation()
+        : (camera && camera->get_transform() ? WorldChatHorizontalCameraRotation(camera->get_transform())
                                             : UnityEngine::Quaternion::get_identity());
     SaveWorldChatRotationOffset(currentRotation, referenceRotation);
   }
@@ -1420,7 +1593,7 @@ static void ApplyWorldChatSettingsToPanel() {
   }
 
   ApplyWorldChatLockState();
-  SaveWorldChatPlacement();
+  ResetWorldChatPanelPoseBaseline();
 }
 
 static void SetWorldChatPanelSetting(int field, float value) {
@@ -1449,12 +1622,14 @@ static void ShowChatPanelSettingsModal() {
     if (camera && camera->get_transform()) {
       auto transform = camera->get_transform();
       worldChatSettingsCameraPosition = transform->get_position();
-      worldChatSettingsCameraRight = transform->get_right();
-      worldChatSettingsCameraUp = transform->get_up();
-      worldChatSettingsCameraForward = transform->get_forward();
-      worldChatSettingsCameraRotation = transform->get_rotation();
+      worldChatSettingsCameraRight = WorldChatHorizontalRight(transform);
+      worldChatSettingsCameraUp = UnityEngine::Vector3(0.0f, 1.0f, 0.0f);
+      worldChatSettingsCameraForward = WorldChatHorizontalForward(transform);
+      worldChatSettingsCameraRotation = WorldChatHorizontalCameraRotation(transform);
       worldChatSettingsPoseCaptured = true;
     }
+    ApplyQuestDarkBackground(worldChatSettingsModal->get_gameObject(),
+        UnityEngine::Color(0.018f, 0.028f, 0.060f, 0.98f));
     worldChatSettingsModal->Show();
     return;
   }
@@ -1463,16 +1638,18 @@ static void ShowChatPanelSettingsModal() {
   if (camera && camera->get_transform()) {
     auto transform = camera->get_transform();
     worldChatSettingsCameraPosition = transform->get_position();
-    worldChatSettingsCameraRight = transform->get_right();
-    worldChatSettingsCameraUp = transform->get_up();
-    worldChatSettingsCameraForward = transform->get_forward();
-    worldChatSettingsCameraRotation = transform->get_rotation();
+    worldChatSettingsCameraRight = WorldChatHorizontalRight(transform);
+    worldChatSettingsCameraUp = UnityEngine::Vector3(0.0f, 1.0f, 0.0f);
+    worldChatSettingsCameraForward = WorldChatHorizontalForward(transform);
+    worldChatSettingsCameraRotation = WorldChatHorizontalCameraRotation(transform);
     worldChatSettingsPoseCaptured = true;
   }
   worldChatSettingsModal = BSML::Lite::CreateModal(
       mainMenuRoot, UnityEngine::Vector2(0.0f, 0.0f), UnityEngine::Vector2(58.0f, 48.0f),
       []() { worldChatSettingsPoseCaptured = false; }, true);
   if (!worldChatSettingsModal) return;
+  ApplyQuestDarkBackground(worldChatSettingsModal->get_gameObject(),
+      UnityEngine::Color(0.018f, 0.028f, 0.060f, 0.98f));
   auto* container = BSML::Lite::CreateScrollableModalContainer(worldChatSettingsModal);
   if (!container) {
     worldChatSettingsModal->Hide();
@@ -1480,6 +1657,8 @@ static void ShowChatPanelSettingsModal() {
     worldChatSettingsPoseCaptured = false;
     return;
   }
+  ApplyQuestDarkBackground(container,
+      UnityEngine::Color(0.025f, 0.038f, 0.075f, 0.98f));
   auto* displayLabTitle = BSML::Lite::CreateText(container, "RIFTPULSE  /  DISPLAY LAB", 3.1f, {0.0f, 19.5f}, {52.0f, 3.8f});
   auto* displayLabSubtitle = BSML::Lite::CreateText(container, "POSITION  •  DISTANCE  •  SURFACE SIZE", 2.25f, {0.0f, 16.0f}, {52.0f, 2.8f});
   BSML::Lite::CreateSliderSetting(container, "LEFT / RIGHT  •  X", 0.05f,
@@ -1545,12 +1724,16 @@ static void DestroyWorldChatPanel(bool savePlacement) {
   worldChatPanel = nullptr;
   worldChatText = nullptr;
   worldChatHandleLabel = nullptr;
+  worldChatSurfaceRect = nullptr;
+  worldChatHeaderRect = nullptr;
+  worldChatRailRect = nullptr;
   for (auto& rect : worldChatPlatformMarkRects) rect = nullptr;
   worldChatLockButton = nullptr;
   worldChatLockBody = nullptr;
   worldChatLockShackleRightRect = nullptr;
   worldChatLockShackleTopRect = nullptr;
   worldChatPairingPromptVisible = false;
+  worldChatHasSavedPanelPose = false;
 }
 
 static void CreateQuestPlatformMark(UnityEngine::RectTransform* parent) {
@@ -1582,9 +1765,9 @@ static bool CreateWorldChatPanel() {
   if (!camera || !camera->get_transform()) return false;
   auto cameraTransform = camera->get_transform();
   const auto cameraPosition = cameraTransform->get_position();
-  const auto forward = cameraTransform->get_forward();
-  const auto right = cameraTransform->get_right();
-  const auto up = cameraTransform->get_up();
+  const auto forward = WorldChatHorizontalForward(cameraTransform);
+  const auto right = WorldChatHorizontalRight(cameraTransform);
+  const UnityEngine::Vector3 up(0.0f, 1.0f, 0.0f);
   UnityEngine::Vector3 panelPosition(
       cameraPosition.x + right.x * worldChatSettings.x + up.x * worldChatSettings.y + forward.x * worldChatSettings.z,
       cameraPosition.y + right.y * worldChatSettings.x + up.y * worldChatSettings.y + forward.y * worldChatSettings.z,
@@ -1596,13 +1779,42 @@ static bool CreateWorldChatPanel() {
   // object in the play scene, not a camera-parented HUD or screen overlay.
   worldChatPanel = BSML::FloatingScreen::CreateFloatingScreen(
       UnityEngine::Vector2(worldChatSettings.width, worldChatSettings.height),
-      true, panelPosition, panelRotation, 0.0f, true);
+      true, panelPosition, panelRotation, 0.0f, false);
   if (!worldChatPanel) return false;
   worldChatPanel->set_ShowHandle(true);
   worldChatPanel->set_HighlightHandle(true);
   UnityEngine::Object::DontDestroyOnLoad(worldChatPanel->get_gameObject());
+  ApplyQuestDarkBackground(worldChatPanel->get_gameObject(),
+      UnityEngine::Color(0.018f, 0.028f, 0.060f, 0.96f));
 
   auto root = worldChatPanel->get_rectTransform();
+  if (!root) {
+    DestroyWorldChatPanel(true);
+    return false;
+  }
+  // Build a RiftPulse-styled surface instead of BSML's default opaque white
+  // FloatingScreen background. Create it before text so it stays behind feed labels.
+  auto* chatSurface = CreateWorldChatLockPart(root, "RiftPulse Quest Chat Glass",
+      UnityEngine::Vector2(worldChatSettings.width, worldChatSettings.height),
+      UnityEngine::Vector2(0.0f, 0.0f));
+  if (chatSurface) {
+    chatSurface->set_color(UnityEngine::Color(0.018f, 0.028f, 0.060f, 0.96f));
+    worldChatSurfaceRect = chatSurface->GetComponent<UnityEngine::RectTransform*>();
+  }
+  auto* chatHeader = CreateWorldChatLockPart(root, "RiftPulse Quest Chat Violet Header",
+      UnityEngine::Vector2(std::max(1.0f, worldChatSettings.width - 1.2f), 0.65f),
+      UnityEngine::Vector2(0.0f, worldChatSettings.height * 0.5f - 0.55f));
+  if (chatHeader) {
+    chatHeader->set_color(UnityEngine::Color(0.48f, 0.27f, 0.92f, 0.98f));
+    worldChatHeaderRect = chatHeader->GetComponent<UnityEngine::RectTransform*>();
+  }
+  auto* chatRail = CreateWorldChatLockPart(root, "RiftPulse Quest Chat Cyan Rail",
+      UnityEngine::Vector2(0.38f, std::max(1.0f, worldChatSettings.height - 1.8f)),
+      UnityEngine::Vector2(-worldChatSettings.width * 0.5f + 0.48f, -0.25f));
+  if (chatRail) {
+    chatRail->set_color(UnityEngine::Color(0.08f, 0.78f, 0.92f, 0.95f));
+    worldChatRailRect = chatRail->GetComponent<UnityEngine::RectTransform*>();
+  }
   // Create the labels as TextMeshProUGUI children on the world-space canvas.
   // The older BSML::Lite::CreateText path produced menu-curved labels that
   // were not reliably rendered by the floating screen's world-space canvas.
@@ -1628,6 +1840,7 @@ static bool CreateWorldChatPanel() {
   worldChatHandleLabel->set_color(UnityEngine::Color(0.34f, 0.88f, 1.0f, 1.0f));
   CreateQuestPlatformMark(root);
   ApplyWorldChatLockState();
+  ResetWorldChatPanelPoseBaseline();
   return true;
 }
 
@@ -1776,10 +1989,9 @@ void RiftPulse::ChatPanelDriver::Update() {
   const float now = UnityEngine::Time::get_realtimeSinceStartup();
   // Persist the user's headset-relative position regularly, even while the
   // device is not paired or the feed is temporarily unavailable.
-  if (now >= worldChatNextPlacementSave) {
-    worldChatNextPlacementSave = now + 1.0f;
-    SaveWorldChatPlacement();
-  }
+  // Poll every frame for controller movement; persistence itself is throttled
+  // and only runs after the world-space panel pose actually changes.
+  SaveWorldChatPlacement();
 
   if (!isPaired) {
     if (worldChatPanel) worldChatPanel->get_gameObject()->SetActive(true);
@@ -1797,6 +2009,18 @@ void RiftPulse::ChatPanelDriver::Update() {
 }
 
 void RiftPulse::RequestChatPanelReposition() {
+  // Recenter is an explicit reset, not a reuse of a manually dragged/facing pose.
+  // Match the PCVR 0.3.1 behavior: centered X/Y, 2.15 m forward, face the headset.
+  LoadWorldChatSettings();
+  worldChatSettings.x = 0.0f;
+  worldChatSettings.y = 0.0f;
+  worldChatSettings.z = 2.15f;
+  worldChatSettings.rotationOffset = UnityEngine::Quaternion::get_identity();
+  worldChatSettings.hasRotationOffset = false;
+  worldChatSettingsPoseCaptured = false;
+  worldChatHasSavedPanelPose = false;
+  worldChatNextPlacementSave = 0.0f;
+  SaveWorldChatSettings();
   worldChatNeedsReposition = true;
 }
 
@@ -1841,10 +2065,10 @@ static void ChatPanelSettings_DidActivate(
   if (camera && camera->get_transform()) {
     auto transform = camera->get_transform();
     worldChatSettingsCameraPosition = transform->get_position();
-    worldChatSettingsCameraRight = transform->get_right();
-    worldChatSettingsCameraUp = transform->get_up();
-    worldChatSettingsCameraForward = transform->get_forward();
-    worldChatSettingsCameraRotation = transform->get_rotation();
+    worldChatSettingsCameraRight = WorldChatHorizontalRight(transform);
+    worldChatSettingsCameraUp = UnityEngine::Vector3(0.0f, 1.0f, 0.0f);
+    worldChatSettingsCameraForward = WorldChatHorizontalForward(transform);
+    worldChatSettingsCameraRotation = WorldChatHorizontalCameraRotation(transform);
     worldChatSettingsPoseCaptured = true;
   }
 
