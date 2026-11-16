@@ -948,3 +948,43 @@ body{
   .provider-health-row{grid-template-columns:34px minmax(0,1fr)}
   .provider-health-row .provider-reconnect-button{grid-column:1 / -1}
 }
+
+
+/* Getting Started is a real guided gate: only its current spotlight remains interactive. */
+.onboarding-layer{z-index:10010;pointer-events:none}
+.onboarding-layer .onboarding-scrim{
+  position:fixed;
+  inset:0;
+  z-index:1;
+  display:block;
+  background:rgba(5,15,12,.76);
+  pointer-events:auto;
+}
+.onboarding-layer .onboarding-arrow{z-index:10016}
+.onboarding-panel{z-index:10020}
+.modal-backdrop.onboarding-modal-open{z-index:10030}
+.onboarding-lock-note{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  margin-top:11px;
+  padding:8px 10px;
+  border:1px solid #607c6d;
+  border-radius:8px;
+  background:#2c473c;
+  color:#d6e7dc;
+  font-size:9px;
+  line-height:1.45;
+}
+.onboarding-lock-note svg{flex:0 0 auto;color:#b9ddce}
+
+.onboarding-error{
+  margin-top:9px;
+  padding:9px 10px;
+  border:1px solid #a75b57;
+  border-radius:8px;
+  background:#4c2d2a;
+  color:#ffe1dc;
+  font-size:10px;
+  line-height:1.5;
+}

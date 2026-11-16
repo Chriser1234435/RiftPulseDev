@@ -82,12 +82,12 @@ const initialEnabled: Record<ModuleKey, boolean> = { chat: true, "bsr-song-reque
 const onboardingSteps = [
   { title: "Welcome to RiftPulse", description: "This guide walks you through setup in a few clear steps. You can replay it any time from Support.", target: null },
   { title: "Install the Beat Saber mod", description: "Pick the build for your headset or PC: use the PCVR ZIP for Windows, or the Quest QMOD for standalone. Follow the four install steps on the matching download card.", target: "downloads" },
-  { title: "Connect your platforms", description: "Connect Twitch or YouTube with the sign-in button. For TikTok, enter your public username and save it. Saving the username does not start a LIVE connection.", target: "integrations" },
-  { title: "Start a LIVE check", description: "When you are ready, press Connect Live in Provider Health to check configured platforms once. Use a platform's Reconnect button for a separate check. Each button shows its cooldown.", target: "chat-feed" },
-  { title: "Chat & Events", description: "Recent messages and supported stream events appear here. Twitch EventSub can receive chat while your channel is offline; YouTube and TikTok reporting depends on their live connection.", target: "chat-feed" },
+  { title: "Connect your platforms", description: "This is the platform-setup step. The highlighted Integrations area is the only dashboard section enabled here: connect Twitch or YouTube, or enter and save your TikTok username. Saving a TikTok username does not start a LIVE connection.", target: "integrations" },
+  { title: "Start a LIVE check", description: "The highlighted Provider Health area is enabled for this step. When you are ready, press Connect Live to check configured platforms once, or use a platform's Reconnect button for a separate check. Each button shows its cooldown.", target: "chat-feed" },
+  { title: "Chat & Events", description: "This step is a read-only preview of incoming messages and supported stream events. Platform setup and provider controls are locked here, so you cannot open or edit TikTok settings while reviewing Chat & Events. Use Next to continue.", target: "chat-messages" },
   { title: "Pair your Beat Saber device", description: "Open RiftPulse in Beat Saber, choose Connect to website, and enter the five-digit code shown in-game. Your mod creates the code.", target: "devices" },
   { title: "Set up your modules", description: "Turn Chat and BSR Song Request on or off from the module cards. Open Configure to adjust settings and your song-request command.", target: "modules" },
-  { title: "Your guide is always here", description: "You're set. Open Support or press the question-mark button whenever you want to replay this guide.", target: "support" },
+  { title: "Your guide is always here", description: "You're set. Open Support or press the question-mark button whenever you want to replay this guide.", target: null },
 ] as const;
 
 function App() {
@@ -152,6 +152,7 @@ function App() {
   const [tourStep, setTourStep] = useState(0);
   const [tourCompleted, setTourCompleted] = useState(false);
   const [tourSaving, setTourSaving] = useState(false);
+  const [tourError, setTourError] = useState("");
   const [tourTargetRect, setTourTargetRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
 
   const refreshChat = useCallback(async (): Promise<number> => {
@@ -536,12 +537,14 @@ function App() {
       boxShadow: target.style.boxShadow,
       borderRadius: target.style.borderRadius,
       outline: target.style.outline,
+      pointerEvents: target.style.pointerEvents,
     };
     target.style.position = target.style.position || "relative";
-    target.style.zIndex = "10002";
-    target.style.boxShadow = "0 0 0 3px #b59aff, 0 0 34px #a78bfa66, 0 0 0 100vmax rgba(3,5,12,.76)";
+    target.style.zIndex = "10015";
+    target.style.pointerEvents = "auto";
+    target.style.boxShadow = "0 0 0 3px #b9ddce, 0 0 30px #83b6a366";
     target.style.borderRadius = target.style.borderRadius || "12px";
-    target.style.outline = "1px solid rgba(207,190,255,.75)";
+    target.style.outline = "1px solid rgba(185,221,206,.9)";
     let timer = 0;
     const update = () => {
       const rect = target.getBoundingClientRect();
@@ -559,8 +562,51 @@ function App() {
       target.style.boxShadow = previous.boxShadow;
       target.style.borderRadius = previous.borderRadius;
       target.style.outline = previous.outline;
+      target.style.pointerEvents = previous.pointerEvents;
     };
   }, [tourOpen, tourStep]);
+
+  useEffect(() => {
+    if (!tourOpen) return;
+    const panel = document.querySelector<HTMLElement>(".onboarding-panel");
+    const targetName = onboardingSteps[tourStep]?.target;
+    const target = targetName
+      ? document.querySelector<HTMLElement>(`[data-tour-target="${targetName}"]`)
+      : null;
+    const modalPanel = modal !== null ? document.querySelector<HTMLElement>(".modal-card") : null;
+    const allowed = [panel, target, modalPanel].filter((node): node is HTMLElement => !!node);
+    const isAllowed = (node: Element | null) => !!node && allowed.some(container => container === node || container.contains(node));
+    const active = document.activeElement as HTMLElement | null;
+    if (active && !isAllowed(active)) {
+      active.blur();
+      panel?.querySelector<HTMLElement>("button:not([disabled])")?.focus();
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const containers = modalPanel ? [modalPanel] : [panel, target].filter((node): node is HTMLElement => !!node);
+      const selector = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+      const focusable = containers.flatMap(container => Array.from(container.querySelectorAll<HTMLElement>(selector)))
+        .filter(node => !node.hasAttribute("hidden") && node.getAttribute("aria-hidden") !== "true");
+      if (!focusable.length) {
+        event.preventDefault();
+        return;
+      }
+      const current = focusable.indexOf(document.activeElement as HTMLElement);
+      const next = event.shiftKey
+        ? (current <= 0 ? focusable.length - 1 : current - 1)
+        : (current < 0 || current === focusable.length - 1 ? 0 : current + 1);
+      event.preventDefault();
+      focusable[next].focus();
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [tourOpen, tourStep, modal]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -777,12 +823,14 @@ function App() {
     setModal(null);
     setProfileOpen(false);
     setUpdatesOpen(false);
+    setTourError("");
     setTourStep(0);
     setTourOpen(true);
   };
 
   const finishTour = async () => {
     if (tourSaving) return;
+    setTourError("");
     setTourSaving(true);
     try {
       const response = await fetch("/api/v1/onboarding", {
@@ -796,7 +844,7 @@ function App() {
       setTourOpen(false);
       setTourStep(0);
     } catch (error) {
-      flash(error instanceof Error ? error.message : "Could not save your guide progress.");
+      setTourError(error instanceof Error ? error.message : "Could not save your guide progress. Check your connection and try again.");
     } finally {
       setTourSaving(false);
     }
@@ -1327,7 +1375,7 @@ function App() {
               <button className="outline-button" onClick={() => { void refreshChat(); void refreshProviderHealth(); }} disabled={chatLoading && healthLoading}><RefreshCw size={14} /> Refresh status</button>
             </div>
             <div className="chat-feed-panel">
-              <div className="chat-feed-main">
+              <div className="chat-feed-main" data-tour-target="chat-messages">
                 {chatLoading ? <div className="chat-empty"><RefreshCw size={18} className="spin" /><span>Loading recent chat…</span></div>
                   : chatError ? <div className="chat-empty"><CircleHelp size={20} /><div><b>Chat history unavailable</b><p>Check the local API and try again.</p></div></div>
                   : chatMessages.length === 0 ? <div className="chat-empty"><div className="chat-empty-icon"><MessageCircle size={21} /></div><div><b>No live messages yet</b><p>Provider connectors are not authorized yet, so no real messages are being received.</p></div></div>
@@ -1396,35 +1444,37 @@ function App() {
 
       {notice && <div className="toast"><Check size={16} />{notice}<button onClick={() => setNotice("")} aria-label="Dismiss"><X size={14} /></button></div>}
 
-      {tourOpen && <div className="onboarding-layer">
-        <div className="onboarding-scrim" aria-hidden="true" />
-        {tourTargetRect && <div className="onboarding-arrow" aria-hidden="true" style={{
-          left: Math.max(12, Math.min(tourTargetRect.left + tourTargetRect.width / 2 - 18, window.innerWidth - 48)),
-          top: Math.max(8, tourTargetRect.top - 46),
-        }}><ArrowDown size={34} strokeWidth={2.6} /></div>}
+      {tourOpen && <>
+        <div className="onboarding-layer">
+          <div className="onboarding-scrim" aria-hidden="true" />
+          {tourTargetRect && <div className="onboarding-arrow" aria-hidden="true" style={{
+            left: Math.max(12, Math.min(tourTargetRect.left + tourTargetRect.width / 2 - 18, window.innerWidth - 48)),
+            top: Math.max(8, tourTargetRect.top - 46),
+          }}><ArrowDown size={34} strokeWidth={2.6} /></div>}
+        </div>
         <section className="onboarding-panel" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" aria-describedby="onboarding-description">
           <div className="onboarding-topline">
             <div className="onboarding-brand"><span className="onboarding-guide-icon"><ArrowDownRight size={19} /></span><span><b>RIFTPULSE GUIDE</b><small>GETTING STARTED</small></span></div>
             <span className="onboarding-counter">{String(tourStep + 1).padStart(2, "0")} <i>/</i> {String(onboardingSteps.length).padStart(2, "0")}</span>
-            <button className="icon-button onboarding-close" aria-label="Close guide" title="Close guide" disabled={tourSaving} onClick={() => void finishTour()}><X size={17} /></button>
           </div>
           <div className="onboarding-progress"><span style={{ width: ((tourStep + 1) / onboardingSteps.length * 100) + "%" }} /></div>
           <div className="onboarding-copy">
             <div className="onboarding-step-label">{tourStep === 0 ? "LET'S GET YOU SET UP" : "STEP " + String(tourStep).padStart(2, "0")}</div>
             <h2 id="onboarding-title">{onboardingSteps[tourStep].title}</h2>
             <p id="onboarding-description">{onboardingSteps[tourStep].description}</p>
+            <div className="onboarding-lock-note"><LockKeyhole size={13} /> Only the highlighted area and this guide are enabled.</div>
+            {tourError && <div className="onboarding-error" role="alert">{tourError}</div>}
           </div>
           <div className="onboarding-actions">
-            <button className="onboarding-skip" disabled={tourSaving} onClick={() => void finishTour()}>Skip guide</button>
             <div className="onboarding-nav">
               {tourStep > 0 && <button className="onboarding-back" disabled={tourSaving} onClick={useTourBack}>Back</button>}
-              <button className="primary-button onboarding-next" disabled={tourSaving} onClick={advanceTour}>{tourSaving ? <><RefreshCw size={15} className="spin" /> Saving…</> : tourStep === onboardingSteps.length - 1 ? <>Finish <Check size={15} /></> : <>Next <ArrowRight size={15} /></>}</button>
+              <button className="primary-button onboarding-next" disabled={tourSaving} onClick={advanceTour}>{tourSaving ? <><RefreshCw size={15} className="spin" /> Saving…</> : tourStep === onboardingSteps.length - 1 ? <>Finish setup <Check size={15} /></> : <>Next <ArrowRight size={15} /></>}</button>
             </div>
           </div>
         </section>
-      </div>}
+      </>}
 
-      {modal && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setModal(null); }}>
+      {modal && <div className={"modal-backdrop" + (tourOpen ? " onboarding-modal-open" : "")} onMouseDown={e => { if (e.target === e.currentTarget) setModal(null); }}>
         <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
           <button className="modal-close icon-button" onClick={() => setModal(null)} aria-label="Close"><X size={18} /></button>
           {modal === "auth" && <><div className="modal-icon purple-modal"><LockKeyhole size={22} /></div><div className="modal-eyebrow">YOUR RIFTPULSE ACCOUNT</div><h2 id="modal-title">{authMode === "signup" ? "Create your account." : "Welcome back."}</h2><p className="modal-copy">Sign in to save module settings and manage your devices. This isolated development preview uses temporary test accounts without email verification; do not reuse a password from another service.</p><form onSubmit={submitAuth} className="auth-form">{authMode === "signup" && <div className="field-group"><label htmlFor="auth-name">Display name</label><input id="auth-name" required minLength={2} maxLength={80} autoComplete="name" value={authName} onChange={e => setAuthName(e.target.value)} placeholder="Your streamer name" /></div>}<div className="field-group"><label htmlFor="auth-email">Email address</label><input id="auth-email" type="email" required maxLength={254} autoComplete="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} placeholder="you@example.com" /></div><div className="field-group"><label htmlFor="auth-password">Password</label><input id="auth-password" type="password" required minLength={8} maxLength={128} autoComplete={authMode === "signup" ? "new-password" : "current-password"} value={authPassword} onChange={e => setAuthPassword(e.target.value)} placeholder="At least 8 characters" /></div>{authError && <div className="inline-error"><LockKeyhole size={15} />{authError}</div>}<button className="primary-button modal-submit" type="submit" disabled={authBusy}>{authBusy ? <><RefreshCw size={16} className="spin" /> Please wait…</> : <>{authMode === "signup" ? "Create account" : "Sign in"} <ArrowUpRight size={15} /></>}</button></form><p className="auth-switch">{authMode === "signup" ? "Already have an account?" : "New to RiftPulse?"} <button onClick={() => { setAuthMode(authMode === "signup" ? "signin" : "signup"); setAuthError(""); }}>{authMode === "signup" ? "Sign in" : "Create an account"}</button></p><p className="modal-footnote">Development preview only. Test accounts are temporary; never reuse a password from another service.</p></>}
