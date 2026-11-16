@@ -1,33 +1,48 @@
 <bg>
-  <vertical child-expand-height="false" spacing="5" pad-left="8" pad-right="8" pad-top="6" pad-bottom="6">
-    <text text="RIFTPULSE" font-size="8" align="Center"/>
-    <text text="STREAM CONTROL CENTER  •  BEAT SABER" font-size="3.4" align="Center"/>
-    <text text="Connect your stream, manage modules, and position your live chat." font-size="2.8" align="Center"/>
-    <vertical bg="round-rect-panel" child-expand-height="false" spacing="4" pad-left="6" pad-right="6" pad-top="5" pad-bottom="5">
-      <text text="DEVICE CONNECTION" font-size="4.2" align="Center"/>
-      <text text="PAIRING CODE" font-size="3.2" align="Center"/>
-      <text id="pairingCodeText" text="-----" font-size="7" align="Center"/>
-      <text id="statusText" text="Connect your Beat Saber installation to your RiftPulse account." font-size="2.8" align="Center"/>
-      <button id="connectButton" text="GENERATE PAIRING CODE" on-click="connect-click"/>
-      <text text="Enter the five-digit code at app.riftpulse.me to link this installation." font-size="2.6" align="Center"/>
-      <text id="modulePreviewStatus" text="Module settings sync after pairing." font-size="2.7" align="Center"/>
-    </vertical>
-    <text text="STREAM MODULES" font-size="4.5" align="Center"/>
-    <horizontal bg="round-rect-panel" pad-left="6" pad-right="6" pad-top="5" pad-bottom="5">
-      <vertical child-expand-height="false" spacing="4">
-        <text text="LIVE CHAT" font-size="4" align="Center"/>
-        <text text="Combined chat and supported live events from connected platforms." font-size="2.8" align="Center"/>
-        <button id="customizeChatPanelButton" text="CONFIGURE CHAT PANEL" on-click="open-chat-settings"/>
-        <button id="chatToggleButton" text="CHAT MODULE: OFF" on-click="toggle-chat"/>
-        <button text="BRING CHAT PANEL INTO VIEW" on-click="move-chat-panel"/>
+  <vertical child-expand-height="false" spacing="3" pad-left="7" pad-right="7" pad-top="5" pad-bottom="5">
+    <horizontal bg="round-rect-panel" child-expand-height="false" spacing="4" pad-left="7" pad-right="7" pad-top="4" pad-bottom="4">
+      <vertical child-expand-height="false" spacing="0">
+        <text text="RIFTPULSE" font-size="7.2" align="Left"/>
+        <text text="NEXUS  /  STREAM COMMAND" font-size="2.8" align="Left"/>
+      </vertical>
+      <vertical child-expand-height="false" spacing="1">
+        <text text="BEAT SABER  •  LIVE CONTROL" font-size="3.2" align="Right"/>
+        <text text="YOUR STREAM. ONE CONTROL SURFACE." font-size="2.7" align="Right"/>
       </vertical>
     </horizontal>
-    <horizontal bg="round-rect-panel" pad-left="6" pad-right="6" pad-top="5" pad-bottom="5">
-      <vertical child-expand-height="false" spacing="4">
-        <text text="BEAT SABER SONG REQUEST" font-size="3.8" align="Center"/>
-        <text text="Let viewers request songs through supported live chats." font-size="2.8" align="Center"/>
-        <button id="bsrToggleButton" text="BSR MODULE: OFF" on-click="toggle-bsr"/>
+    <horizontal child-expand-height="false" spacing="4">
+      <vertical bg="round-rect-panel" child-expand-height="false" spacing="3" pad-left="6" pad-right="6" pad-top="4" pad-bottom="4">
+        <text text="01  /  DEVICE LINK" font-size="4.1" align="Left"/>
+        <text text="PAIRING CODE" font-size="2.8" align="Center"/>
+        <text id="pairingCodeText" text="-----" font-size="8" align="Center"/>
+        <text id="statusText" text="Generate a code to connect this installation to your RiftPulse account." font-size="2.7" align="Center"/>
+        <button id="connectButton" text="GENERATE SECURE CODE" on-click="connect-click"/>
+        <text text="Enter the five-digit code at app.riftpulse.me." font-size="2.5" align="Center"/>
+      </vertical>
+      <vertical child-expand-height="false" spacing="3">
+        <vertical bg="round-rect-panel" child-expand-height="false" spacing="2" pad-left="5" pad-right="5" pad-top="4" pad-bottom="4">
+          <text text="02  /  LIVE CHAT" font-size="3.8" align="Left"/>
+          <text text="Combined platform chat and supported stream events." font-size="2.6" align="Left"/>
+          <button id="customizeChatPanelButton" text="OPEN CHAT DISPLAY LAB" on-click="open-chat-settings"/>
+          <button id="chatToggleButton" text="CHAT MODULE: OFF" on-click="toggle-chat"/>
+        </vertical>
+        <vertical bg="round-rect-panel" child-expand-height="false" spacing="2" pad-left="5" pad-right="5" pad-top="4" pad-bottom="4">
+          <text text="03  /  SONG REQUESTS" font-size="3.8" align="Left"/>
+          <text text="Let viewers request songs through connected chats." font-size="2.6" align="Left"/>
+          <button id="bsrToggleButton" text="SONG REQUESTS: OFF" on-click="toggle-bsr"/>
+        </vertical>
       </vertical>
     </horizontal>
+    <horizontal bg="round-rect-panel" child-expand-height="false" spacing="4" pad-left="6" pad-right="6" pad-top="3" pad-bottom="3">
+      <vertical child-expand-height="false" spacing="1">
+        <text text="04  /  SPATIAL DISPLAY" font-size="3.6" align="Left"/>
+        <text text="Position and size your in-game floating chat surface." font-size="2.6" align="Left"/>
+      </vertical>
+      <vertical child-expand-height="false" spacing="2">
+        <button text="DISPLAY SETTINGS" on-click="open-chat-settings"/>
+        <button text="RE-CENTER CHAT PANEL" on-click="move-chat-panel"/>
+      </vertical>
+    </horizontal>
+    <text id="modulePreviewStatus" text="Pair this device to sync modules and display preferences." font-size="2.7" align="Center"/>
   </vertical>
 </bg>

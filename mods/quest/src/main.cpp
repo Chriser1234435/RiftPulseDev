@@ -1,4 +1,4 @@
-#include "main.hpp"
+﻿#include "main.hpp"
 #include "RiftPulseChatPanel.hpp"
 #include "bsml/shared/BSML/FloatingScreen/FloatingScreen.hpp"
 #include "UnityEngine/PrimitiveType.hpp"
@@ -83,7 +83,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.2.0";
+static constexpr const char* MOD_VERSION = "0.3.0";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -701,7 +701,7 @@ static void ResumePairing() {
   pairingCode = savedCode;
   RefreshPairingCodeLabel();
   challengeId = savedChallengeId;
-  if (codeButton) BSML::Lite::SetButtonText(codeButton, "GENERATE PAIRING CODE");
+  if (codeButton) BSML::Lite::SetButtonText(codeButton, "GENERATE SECURE CODE");
 
   requestInFlight = true;
   SetStatus("Restoring this headset's pairing with RiftPulse...");
@@ -714,8 +714,8 @@ static void ResumePairing() {
           RefreshPairingCodeLabel();
           isPaired = false;
           ClearPairingState();
-          if (codeButton) BSML::Lite::SetButtonText(codeButton, "GENERATE PAIRING CODE");
-          if (checkButton) BSML::Lite::SetButtonText(checkButton, "CHECK PAIRING STATUS");
+          if (codeButton) BSML::Lite::SetButtonText(codeButton, "GENERATE SECURE CODE");
+          if (checkButton) BSML::Lite::SetButtonText(checkButton, "CHECK LINK STATUS");
           if (chatButton) BSML::Lite::SetButtonText(chatButton, "CHAT MODULE: LOCKED");
           if (bsrButton) BSML::Lite::SetButtonText(bsrButton, "BSR MODULE: LOCKED");
           SetStatus("No active pairing session was found. Generate a new five-digit code to connect this headset.");
@@ -743,7 +743,7 @@ static void ResumePairing() {
           LoadModuleSettings();
         } else {
           isPaired = false;
-          if (checkButton) BSML::Lite::SetButtonText(checkButton, "CHECK PAIRING STATUS");
+          if (checkButton) BSML::Lite::SetButtonText(checkButton, "CHECK LINK STATUS");
           SetStatus("PAIRING SESSION RESTORED\n\nYour five-digit code is ready. Enter it on app.riftpulse.me, then check pairing status.");
         }
       })) {
@@ -788,7 +788,7 @@ static void CheckPairingStatus() {
           pairingCode.clear();
           RefreshPairingCodeLabel();
           ClearPairingState();
-          if (codeButton) BSML::Lite::SetButtonText(codeButton, "GENERATE PAIRING CODE");
+          if (codeButton) BSML::Lite::SetButtonText(codeButton, "GENERATE SECURE CODE");
           SetStatus("This pairing code expired. Generate a new code to try again.");
         } else if (state == "pending") {
           SetStatus("Waiting for website confirmation. Enter the five-digit code on RiftPulse, then check again.");
@@ -807,7 +807,7 @@ static void GeneratePairingCode() {
   requestInFlight = true;
   challengeId.clear();
   isPaired = false;
-  if (checkButton) BSML::Lite::SetButtonText(checkButton, "CHECK PAIRING STATUS");
+  if (checkButton) BSML::Lite::SetButtonText(checkButton, "CHECK LINK STATUS");
   if (chatButton) BSML::Lite::SetButtonText(chatButton, "CHAT MODULE: LOCKED");
   if (bsrButton) BSML::Lite::SetButtonText(bsrButton, "BSR MODULE: LOCKED");
 
@@ -826,7 +826,7 @@ static void GeneratePairingCode() {
   }
   challengeId.clear();
   SavePairingState(pairingCode, {});
-  if (codeButton) BSML::Lite::SetButtonText(codeButton, "GENERATE PAIRING CODE");
+  if (codeButton) BSML::Lite::SetButtonText(codeButton, "GENERATE SECURE CODE");
   SetStatus("Registering your five-digit code with RiftPulse...");
 
   const auto code = pairingCode;
@@ -852,7 +852,7 @@ static void GeneratePairingCode() {
         }
         SavePairingState(code, challengeId);
         SetStatus("PAIRING CODE REGISTERED\n\nEnter the five-digit code shown above on the RiftPulse website. Then press CHECK PAIRING STATUS.");
-        if (checkButton) BSML::Lite::SetButtonText(checkButton, "CHECK PAIRING STATUS");
+        if (checkButton) BSML::Lite::SetButtonText(checkButton, "CHECK LINK STATUS");
       })) {
     requestInFlight = false;
     const std::string detail = requestDiagnostic.empty()
@@ -898,12 +898,17 @@ static void CreateQuestMenuCardPart(
 static void CreateQuestMenuCard(
     UnityEngine::Transform* parent, const std::string& name,
     UnityEngine::Vector2 center, UnityEngine::Vector2 size) {
-  CreateQuestMenuCardPart(parent, name + " Background", size, center,
-      UnityEngine::Color(0.035f, 0.055f, 0.11f, 0.84f));
-  CreateQuestMenuCardPart(parent, name + " Purple Accent",
-      UnityEngine::Vector2(std::max(1.0f, size.x - 1.6f), 0.42f),
-      UnityEngine::Vector2(center.x, center.y + size.y * 0.5f - 0.55f),
-      UnityEngine::Color(0.42f, 0.24f, 0.78f, 0.96f));
+  // RiftPulse Nexus: layered midnight surfaces, violet top edge, cyan signal rail.
+  CreateQuestMenuCardPart(parent, name + " Glass Surface", size, center,
+      UnityEngine::Color(0.018f, 0.028f, 0.060f, 0.94f));
+  CreateQuestMenuCardPart(parent, name + " Violet Header",
+      UnityEngine::Vector2(std::max(1.0f, size.x - 1.0f), 0.48f),
+      UnityEngine::Vector2(center.x, center.y + size.y * 0.5f - 0.48f),
+      UnityEngine::Color(0.48f, 0.27f, 0.92f, 0.98f));
+  CreateQuestMenuCardPart(parent, name + " Cyan Signal Rail",
+      UnityEngine::Vector2(0.34f, std::max(1.0f, size.y - 1.8f)),
+      UnityEngine::Vector2(center.x - size.x * 0.5f + 0.42f, center.y - 0.42f),
+      UnityEngine::Color(0.08f, 0.78f, 0.92f, 0.95f));
 }
 
 static void TrackMainMenuObject(UnityEngine::GameObject* object) {
@@ -920,96 +925,125 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
   mainMenuObjects.clear();
   LoadWorldChatSettings();
 
-  // Quest now mirrors the PCVR BSML page with separate pairing, Chat, and BSR cards.
-  CreateQuestMenuCard(root, "RiftPulse Pairing Card",
-      UnityEngine::Vector2(0.0f, -2.5f), UnityEngine::Vector2(58.0f, 28.0f));
-  CreateQuestMenuCard(root, "RiftPulse Chat Module Card",
-      UnityEngine::Vector2(0.0f, -25.5f), UnityEngine::Vector2(58.0f, 20.0f));
-  CreateQuestMenuCard(root, "RiftPulse Song Request Card",
-      UnityEngine::Vector2(0.0f, -40.0f), UnityEngine::Vector2(58.0f, 9.5f));
+  // Shared PCVR / Quest design blueprint: brand header, device-link rail,
+  // paired module tiles, then a full-width spatial-display control deck.
+  CreateQuestMenuCard(root, "RiftPulse Nexus Main Frame",
+      UnityEngine::Vector2(0.0f, -9.5f), UnityEngine::Vector2(64.0f, 59.0f));
+  CreateQuestMenuCard(root, "RiftPulse Device Link",
+      UnityEngine::Vector2(-15.0f, -5.6f), UnityEngine::Vector2(30.0f, 26.0f));
+  CreateQuestMenuCard(root, "RiftPulse Live Chat",
+      UnityEngine::Vector2(15.0f, -1.0f), UnityEngine::Vector2(29.0f, 17.0f));
+  CreateQuestMenuCard(root, "RiftPulse Song Requests",
+      UnityEngine::Vector2(15.0f, -18.5f), UnityEngine::Vector2(29.0f, 17.0f));
+  CreateQuestMenuCard(root, "RiftPulse Spatial Display",
+      UnityEngine::Vector2(0.0f, -33.4f), UnityEngine::Vector2(59.0f, 9.6f));
 
   heading = BSML::Lite::CreateText(
-      root, "RIFTPULSE", 4.0f,
-      {0.0f, 15.5f}, {58.0f, 7.0f});
+      root, "RIFTPULSE", 5.2f,
+      {0.0f, 17.0f}, {58.0f, 6.0f});
   if (heading) TrackMainMenuObject(heading->get_gameObject());
 
   instructions = BSML::Lite::CreateText(
-      root, "STREAM CONTROL CENTER  /  BEAT SABER",
-      2.4f, {0.0f, 9.0f}, {58.0f, 5.0f});
+      root, "NEXUS  /  STREAM COMMAND", 2.8f,
+      {0.0f, 12.6f}, {58.0f, 3.0f});
   if (instructions) TrackMainMenuObject(instructions->get_gameObject());
 
+  auto* tagline = BSML::Lite::CreateText(
+      root, "YOUR STREAM. ONE CONTROL SURFACE.", 2.35f,
+      {0.0f, 9.7f}, {58.0f, 2.8f});
+  if (tagline) TrackMainMenuObject(tagline->get_gameObject());
+
   auto* pairingTitle = BSML::Lite::CreateText(
-      root, "PAIRING CODE", 3.8f, {0.0f, 7.0f}, {58.0f, 3.5f});
+      root, "01  /  DEVICE LINK", 3.6f,
+      {-15.0f, 4.5f}, {27.0f, 3.5f});
   if (pairingTitle) TrackMainMenuObject(pairingTitle->get_gameObject());
 
+  auto* pairingCaption = BSML::Lite::CreateText(
+      root, "PAIRING CODE", 2.55f,
+      {-15.0f, 1.1f}, {27.0f, 2.8f});
+  if (pairingCaption) TrackMainMenuObject(pairingCaption->get_gameObject());
+
   pairingCodeLabel = BSML::Lite::CreateText(
-      root, pairingCode.empty() ? "-----" : pairingCode, 6.0f,
-      {0.0f, 3.5f}, {58.0f, 4.5f});
+      root, pairingCode.empty() ? "-----" : pairingCode, 6.2f,
+      {-15.0f, -2.5f}, {27.0f, 4.2f});
   if (pairingCodeLabel) TrackMainMenuObject(pairingCodeLabel->get_gameObject());
 
   overview = BSML::Lite::CreateText(
-      root, "Enter a five-digit code on app.riftpulse.me to link this headset.",
-      2.5f, {0.0f, -0.2f}, {58.0f, 6.0f});
+      root, "Generate a code to connect this installation to your RiftPulse account.",
+      2.25f, {-15.0f, -7.0f}, {27.0f, 4.4f});
   if (overview) TrackMainMenuObject(overview->get_gameObject());
 
-  auto* pairingHelp = BSML::Lite::CreateText(
-      root, "Link your headset, then check pairing status.", 2.5f,
-      {0.0f, -4.0f}, {58.0f, 3.2f});
-  if (pairingHelp) TrackMainMenuObject(pairingHelp->get_gameObject());
-
   codeButton = BSML::Lite::CreateUIButton(
-      root, "GENERATE PAIRING CODE", "PracticeButton",
-      UnityEngine::Vector2({0.0f, -8.3f}), UnityEngine::Vector2({42.0f, 4.8f}),
+      root, "GENERATE SECURE CODE", "PracticeButton",
+      UnityEngine::Vector2({-15.0f, -11.9f}), UnityEngine::Vector2({25.5f, 4.0f}),
       []() { GeneratePairingCode(); });
   if (codeButton) TrackMainMenuObject(codeButton->get_gameObject());
 
   checkButton = BSML::Lite::CreateUIButton(
-      root, "CHECK PAIRING STATUS", "PracticeButton",
-      UnityEngine::Vector2({0.0f, -13.2f}), UnityEngine::Vector2({42.0f, 4.8f}),
+      root, "CHECK LINK STATUS", "PracticeButton",
+      UnityEngine::Vector2({-15.0f, -16.2f}), UnityEngine::Vector2({25.5f, 4.0f}),
       []() { CheckPairingStatus(); });
   if (checkButton) TrackMainMenuObject(checkButton->get_gameObject());
 
   auto* chatTitle = BSML::Lite::CreateText(
-      root, "CHAT", 3.8f, {0.0f, -17.0f}, {58.0f, 3.5f});
+      root, "02  /  LIVE CHAT", 3.5f,
+      {15.0f, 4.0f}, {26.0f, 3.2f});
   if (chatTitle) TrackMainMenuObject(chatTitle->get_gameObject());
 
   auto* chatDescription = BSML::Lite::CreateText(
-      root, "Combined chat and supported live events from connected platforms.",
-      2.5f, {0.0f, -19.5f}, {58.0f, 3.4f});
+      root, "Combined platform chat and supported stream events.",
+      2.3f, {15.0f, 0.8f}, {26.0f, 3.2f});
   if (chatDescription) TrackMainMenuObject(chatDescription->get_gameObject());
 
   auto* customizePanelButton = BSML::Lite::CreateUIButton(
-      root, "CONFIGURE CHAT PANEL", "PracticeButton",
-      UnityEngine::Vector2({0.0f, -22.8f}), UnityEngine::Vector2({42.0f, 4.6f}),
+      root, "CHAT DISPLAY LAB", "PracticeButton",
+      UnityEngine::Vector2({15.0f, -3.3f}), UnityEngine::Vector2({25.5f, 3.8f}),
       []() { ShowChatPanelSettingsModal(); });
   if (customizePanelButton) TrackMainMenuObject(customizePanelButton->get_gameObject());
 
   chatButton = BSML::Lite::CreateUIButton(
       root, "CHAT MODULE: LOCKED", "PracticeButton",
-      UnityEngine::Vector2({0.0f, -27.8f}), UnityEngine::Vector2({42.0f, 4.6f}),
+      UnityEngine::Vector2({15.0f, -7.4f}), UnityEngine::Vector2({25.5f, 3.8f}),
       []() { ToggleChat(); });
   if (chatButton) TrackMainMenuObject(chatButton->get_gameObject());
 
-  auto* movePanelButton = BSML::Lite::CreateUIButton(
-      root, "BRING CHAT PANEL INTO VIEW", "PracticeButton",
-      UnityEngine::Vector2({0.0f, -32.8f}), UnityEngine::Vector2({42.0f, 4.6f}),
-      []() { ShowWorldChatPanel(); });
-  if (movePanelButton) TrackMainMenuObject(movePanelButton->get_gameObject());
-
   auto* bsrTitle = BSML::Lite::CreateText(
-      root, "BEAT SABER SONG REQUEST", 3.4f, {0.0f, -36.8f}, {58.0f, 3.0f});
+      root, "03  /  SONG REQUESTS", 3.3f,
+      {15.0f, -12.4f}, {26.0f, 3.2f});
   if (bsrTitle) TrackMainMenuObject(bsrTitle->get_gameObject());
 
   auto* bsrDescription = BSML::Lite::CreateText(
-      root, "Let viewers request songs from supported live chats.",
-      2.4f, {0.0f, -39.3f}, {58.0f, 3.0f});
+      root, "Let viewers request songs through connected chats.",
+      2.3f, {15.0f, -15.7f}, {26.0f, 3.1f});
   if (bsrDescription) TrackMainMenuObject(bsrDescription->get_gameObject());
 
   bsrButton = BSML::Lite::CreateUIButton(
       root, "BSR MODULE: LOCKED", "PracticeButton",
-      UnityEngine::Vector2({0.0f, -42.3f}), UnityEngine::Vector2({42.0f, 4.6f}),
+      UnityEngine::Vector2({15.0f, -21.0f}), UnityEngine::Vector2({25.5f, 3.8f}),
       []() { ToggleBsr(); });
   if (bsrButton) TrackMainMenuObject(bsrButton->get_gameObject());
+
+  auto* displayTitle = BSML::Lite::CreateText(
+      root, "04  /  SPATIAL DISPLAY", 3.2f,
+      {-12.8f, -30.8f}, {29.0f, 3.0f});
+  if (displayTitle) TrackMainMenuObject(displayTitle->get_gameObject());
+
+  auto* displayDescription = BSML::Lite::CreateText(
+      root, "Position and size your floating chat surface.",
+      2.2f, {-12.8f, -33.6f}, {29.0f, 2.6f});
+  if (displayDescription) TrackMainMenuObject(displayDescription->get_gameObject());
+
+  auto* configureDisplayButton = BSML::Lite::CreateUIButton(
+      root, "DISPLAY SETTINGS", "PracticeButton",
+      UnityEngine::Vector2({15.0f, -31.3f}), UnityEngine::Vector2({24.0f, 3.8f}),
+      []() { ShowChatPanelSettingsModal(); });
+  if (configureDisplayButton) TrackMainMenuObject(configureDisplayButton->get_gameObject());
+
+  auto* recenterDisplayButton = BSML::Lite::CreateUIButton(
+      root, "RE-CENTER CHAT PANEL", "PracticeButton",
+      UnityEngine::Vector2({15.0f, -35.4f}), UnityEngine::Vector2({24.0f, 3.8f}),
+      []() { ShowWorldChatPanel(); });
+  if (recenterDisplayButton) TrackMainMenuObject(recenterDisplayButton->get_gameObject());
 
   ResumePairing();
 }
@@ -1436,7 +1470,7 @@ static void ShowChatPanelSettingsModal() {
     worldChatSettingsPoseCaptured = true;
   }
   worldChatSettingsModal = BSML::Lite::CreateModal(
-      mainMenuRoot, UnityEngine::Vector2(0.0f, 0.0f), UnityEngine::Vector2(52.0f, 42.0f),
+      mainMenuRoot, UnityEngine::Vector2(0.0f, 0.0f), UnityEngine::Vector2(58.0f, 48.0f),
       []() { worldChatSettingsPoseCaptured = false; }, true);
   if (!worldChatSettingsModal) return;
   auto* container = BSML::Lite::CreateScrollableModalContainer(worldChatSettingsModal);
@@ -1446,19 +1480,21 @@ static void ShowChatPanelSettingsModal() {
     worldChatSettingsPoseCaptured = false;
     return;
   }
-  BSML::Lite::CreateSliderSetting(container, "X POSITION (METRES)", 0.05f,
+  auto* displayLabTitle = BSML::Lite::CreateText(container, "RIFTPULSE  /  DISPLAY LAB", 3.1f, {0.0f, 19.5f}, {52.0f, 3.8f});
+  auto* displayLabSubtitle = BSML::Lite::CreateText(container, "POSITION  •  DISTANCE  •  SURFACE SIZE", 2.25f, {0.0f, 16.0f}, {52.0f, 2.8f});
+  BSML::Lite::CreateSliderSetting(container, "LEFT / RIGHT  •  X", 0.05f,
       worldChatSettings.x, -2.5f, 2.5f,
       [](float value) { SetWorldChatPanelSetting(0, value); });
-  BSML::Lite::CreateSliderSetting(container, "Y POSITION (METRES)", 0.05f,
+  BSML::Lite::CreateSliderSetting(container, "UP / DOWN  •  Y", 0.05f,
       worldChatSettings.y, -2.0f, 2.0f,
       [](float value) { SetWorldChatPanelSetting(1, value); });
-  BSML::Lite::CreateSliderSetting(container, "Z DISTANCE (METRES)", 0.05f,
+  BSML::Lite::CreateSliderSetting(container, "VIEWING DISTANCE  •  Z", 0.05f,
       worldChatSettings.z, 0.8f, 4.5f,
       [](float value) { SetWorldChatPanelSetting(2, value); });
-  BSML::Lite::CreateSliderSetting(container, "PANEL WIDTH", 2.0f,
+  BSML::Lite::CreateSliderSetting(container, "SURFACE WIDTH", 2.0f,
       worldChatSettings.width, 60.0f, 180.0f,
       [](float value) { SetWorldChatPanelSetting(3, value); });
-  BSML::Lite::CreateSliderSetting(container, "PANEL HEIGHT", 2.0f,
+  BSML::Lite::CreateSliderSetting(container, "SURFACE HEIGHT", 2.0f,
       worldChatSettings.height, 40.0f, 120.0f,
       [](float value) { SetWorldChatPanelSetting(4, value); });
   worldChatSettingsModal->Show();
@@ -1815,19 +1851,21 @@ static void ChatPanelSettings_DidActivate(
   // BSML's scrollable settings container is centered in the submenu. Keep the
   // five panel controls together here rather than scattering them on the mod page.
   auto* container = BSML::Lite::CreateScrollableSettingsContainer(self);
-  BSML::Lite::CreateSliderSetting(container, "X POSITION (METRES)", 0.05f,
+  auto* displayLabTitle = BSML::Lite::CreateText(container, "RIFTPULSE  /  DISPLAY LAB", 3.1f, {0.0f, 19.5f}, {52.0f, 3.8f});
+  auto* displayLabSubtitle = BSML::Lite::CreateText(container, "POSITION  •  DISTANCE  •  SURFACE SIZE", 2.25f, {0.0f, 16.0f}, {52.0f, 2.8f});
+  BSML::Lite::CreateSliderSetting(container, "LEFT / RIGHT  •  X", 0.05f,
       worldChatSettings.x, -2.5f, 2.5f,
       [](float value) { SetWorldChatPanelSetting(0, value); });
-  BSML::Lite::CreateSliderSetting(container, "Y POSITION (METRES)", 0.05f,
+  BSML::Lite::CreateSliderSetting(container, "UP / DOWN  •  Y", 0.05f,
       worldChatSettings.y, -2.0f, 2.0f,
       [](float value) { SetWorldChatPanelSetting(1, value); });
-  BSML::Lite::CreateSliderSetting(container, "Z DISTANCE (METRES)", 0.05f,
+  BSML::Lite::CreateSliderSetting(container, "VIEWING DISTANCE  •  Z", 0.05f,
       worldChatSettings.z, 0.8f, 4.5f,
       [](float value) { SetWorldChatPanelSetting(2, value); });
-  BSML::Lite::CreateSliderSetting(container, "PANEL WIDTH", 2.0f,
+  BSML::Lite::CreateSliderSetting(container, "SURFACE WIDTH", 2.0f,
       worldChatSettings.width, 60.0f, 180.0f,
       [](float value) { SetWorldChatPanelSetting(3, value); });
-  BSML::Lite::CreateSliderSetting(container, "PANEL HEIGHT", 2.0f,
+  BSML::Lite::CreateSliderSetting(container, "SURFACE HEIGHT", 2.0f,
       worldChatSettings.height, 40.0f, 120.0f,
       [](float value) { SetWorldChatPanelSetting(4, value); });
 }

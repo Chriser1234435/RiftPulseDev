@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -20,7 +20,7 @@ namespace RiftPulse.Pcvr
     {
         private const string ApiBase = "https://app.riftpulse.me/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.2.0";
+        private const string ModVersion = "0.3.0";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 
@@ -134,8 +134,8 @@ namespace RiftPulse.Pcvr
         private void RefreshUi()
         {
             if (_pairingCodeText != null) _pairingCodeText.text = PairingCode;
-            if (_connectButtonText != null) _connectButtonText.text = _connecting ? "GENERATING CODE..." : "GENERATE PAIRING CODE";
-            if (_customizeChatPanelButtonText != null) _customizeChatPanelButtonText.text = "CONFIGURE CHAT PANEL";
+            if (_connectButtonText != null) _connectButtonText.text = _connecting ? "GENERATING CODE..." : "GENERATE SECURE CODE";
+            if (_customizeChatPanelButtonText != null) _customizeChatPanelButtonText.text = "OPEN CHAT DISPLAY LAB";
             if (_statusText != null) _statusText.text = StatusText;
             if (_chatToggleButtonText != null) _chatToggleButtonText.text = ChatToggleLabel;
             if (_bsrToggleButtonText != null) _bsrToggleButtonText.text = BsrToggleLabel;
@@ -298,7 +298,7 @@ namespace RiftPulse.Pcvr
         {
             if (_connecting) return;
             _connecting = true;
-            PairingCode = "• • • • •";
+            PairingCode = "â€¢ â€¢ â€¢ â€¢ â€¢";
             StatusText = "Generating a secure pairing code...";
             RefreshUi();
 

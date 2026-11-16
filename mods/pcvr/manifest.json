@@ -3,11 +3,11 @@
     "id":  "RiftPulse.Pcvr",
     "name":  "RiftPulse",
     "author":  "RiftPulse Team",
-    "version":  "0.2.0",
+    "version":  "0.3.0",
     "gameVersion":  "1.40.8",
     "description":  [
-                        "RiftPulse PCVR adapter for Beat Saber.",
-                        "Provides device pairing and a movable world-space chat panel for Twitch, YouTube, and TikTok LIVE."
+                        "RiftPulse PCVR adapter for Beat Saber with the new Nexus stream-command dashboard.",
+                        "Includes secure device pairing, dedicated Chat and Song Request controls, and the Display Lab for the floating live-chat panel."
                     ],
     "dependsOn":  {
                       "BSIPA":  "^4.2.0",
