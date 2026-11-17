@@ -130,7 +130,7 @@ type SongRequestQueueRow = {
   requesterName: string;
   beatsaverKey: string;
   songName: string | null;
-  status: "queued" | "playing" | "played" | "rejected" | "failed";
+  status: "queued" | "playing" | "downloaded" | "played" | "rejected" | "failed";
   resultCode: string | null;
   createdAt: string;
 };
@@ -644,13 +644,23 @@ export default {
       if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
       if (!env.DB) return jsonError(503, "database_unavailable", "Song-request storage is not configured.", requestId);
       const [setting, queue] = await Promise.all([
-        env.DB.prepare("SELECT enabled FROM module_settings WHERE account_id = ? AND module_key = 'bsr-song-request' LIMIT 1")
-          .bind(authContext.userId).first<{ enabled: number }>(),
+        env.DB.prepare("SELECT enabled, settings_json AS settingsJson FROM module_settings WHERE account_id = ? AND module_key = 'bsr-song-request' LIMIT 1")
+          .bind(authContext.userId).first<{ enabled: number; settingsJson: string }>(),
         listSongRequestQueue(env.DB, authContext.userId),
       ]);
       if (!queue.success) return jsonError(503, "song_request_store_unavailable", "Could not load the song-request queue.", requestId);
+      let settings: Record<string, unknown> = {};
+      try {
+        const parsed = setting?.settingsJson ? JSON.parse(setting.settingsJson) as unknown : {};
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) settings = parsed as Record<string, unknown>;
+      } catch { settings = {}; }
       return Response.json({
         enabled: setting ? setting.enabled === 1 : true,
+        settings: {
+          command: typeof settings.command === "string" ? settings.command : "!bsr",
+          requesterCooldownSeconds: typeof settings.requesterCooldownSeconds === "number" ? settings.requesterCooldownSeconds : 30,
+          queueLimit: typeof settings.queueLimit === "number" ? settings.queueLimit : 25,
+        },
         requests: queue.results ?? [],
       }, { headers: JSON_HEADERS });
     }
@@ -1793,6 +1803,110 @@ export default {
       return Response.json({ request: row, requests: queue.results ?? [] }, { headers: JSON_HEADERS });
     }
 
+    // Paired-device download relay. Quest reads the archive as base64 because its
+    // native HTTP wrapper exposes text tasks only; cap the response to protect RAM.
+    const deviceSongRequestArchiveMatch = url.pathname.match(/^\/api\/v1\/device\/song-requests\/([0-9a-f-]{36})\/archive$/i);
+    if (deviceSongRequestArchiveMatch && request.method === "GET") {
+      const authContext = await getDeviceAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Song-request storage is not configured.", requestId);
+      const row = await env.DB.prepare(
+        "SELECT beatsaver_key AS beatsaverKey, song_name AS songName FROM song_requests WHERE id = ? AND account_id = ? AND status IN ('queued', 'playing') LIMIT 1",
+      ).bind(deviceSongRequestArchiveMatch[1], authContext.userId).first<{ beatsaverKey: string; songName: string }>();
+      if (!row || !/^[a-fA-F0-9]{5,8}$/.test(row.beatsaverKey)) {
+        return jsonError(404, "song_request_not_found", "That active song request could not be found.", requestId);
+      }
+      try {
+        const metadataResponse = await fetch("https://api.beatsaver.com/maps/id/" + encodeURIComponent(row.beatsaverKey), {
+          headers: { accept: "application/json", "user-agent": "RiftPulse/1.0 Quest song request" },
+        });
+        if (!metadataResponse.ok) return jsonError(502, "beatsaver_metadata_unavailable", "BeatSaver could not provide this map's metadata.", requestId);
+        const metadata = await metadataResponse.json() as {
+          downloadURL?: unknown;
+          versions?: Array<{ downloadURL?: unknown; state?: unknown }>;
+        };
+        // BeatSaver's MapDetail model places downloadURL on each map version.
+        // Prefer the first published version; retain a legacy top-level fallback.
+        const publishedVersion = metadata.versions?.find(version =>
+          version.state === "Published" && typeof version.downloadURL === "string"
+        );
+        const fallbackVersion = metadata.versions?.find(version =>
+          typeof version.downloadURL === "string"
+        );
+        const archiveUrl = publishedVersion?.downloadURL ?? fallbackVersion?.downloadURL ?? metadata.downloadURL;
+        if (typeof archiveUrl !== "string") return jsonError(502, "beatsaver_download_missing", "BeatSaver did not provide a download URL.", requestId);
+        const downloadUrl = new URL(archiveUrl);
+        if (downloadUrl.protocol !== "https:" ||
+            !(downloadUrl.hostname === "cdn.beatsaver.com" || downloadUrl.hostname.endsWith(".beatsaver.com"))) {
+          return jsonError(502, "beatsaver_download_untrusted", "BeatSaver returned an untrusted download host.", requestId);
+        }
+        const archiveResponse = await fetch(downloadUrl.toString(), {
+          headers: { accept: "application/zip, application/octet-stream", "user-agent": "RiftPulse/1.0 Quest song request" },
+        });
+        if (!archiveResponse.ok) return jsonError(502, "beatsaver_archive_unavailable", "BeatSaver could not download this map.", requestId);
+        const archive = new Uint8Array(await archiveResponse.arrayBuffer());
+        if (archive.byteLength < 100 || archive.byteLength > 20 * 1024 * 1024) {
+          return jsonError(413, "beatsaver_archive_size", "This map archive is too large for the Quest in-game importer (20 MiB limit).", requestId);
+        }
+        let binary = "";
+        const chunkSize = 0x8000;
+        for (let offset = 0; offset < archive.length; offset += chunkSize) {
+          binary += String.fromCharCode(...archive.subarray(offset, Math.min(offset + chunkSize, archive.length)));
+        }
+        return Response.json({
+          beatsaverKey: row.beatsaverKey,
+          songName: row.songName,
+          archiveBase64: btoa(binary),
+          archiveBytes: archive.byteLength,
+        }, { headers: JSON_HEADERS });
+      } catch {
+        return jsonError(502, "beatsaver_download_failed", "Could not retrieve this BeatSaver map archive.", requestId);
+      }
+    }
+    // Paired-device actions for the in-game BSR queue. The account dashboard and
+    // headset use the same status transition rules; a device may only affect its
+    // own account's active queue.
+    const deviceSongRequestMatch = url.pathname.match(/^\/api\/v1\/device\/song-requests\/([0-9a-f-]{36})$/i);
+    if (deviceSongRequestMatch && request.method === "PATCH") {
+      const authContext = await getDeviceAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Song-request storage is not configured.", requestId);
+      if (!isJson(request)) return jsonError(415, "content_type_required", "Send a JSON request body.", requestId);
+      let body: unknown;
+      try { body = await readJson(request); }
+      catch { return jsonError(400, "invalid_json", "Request body must be valid JSON.", requestId); }
+      if (!body || typeof body !== "object" || Array.isArray(body)
+        || Object.keys(body).length !== 1
+        || !["playing", "rejected", "downloaded"].includes(String((body as Record<string, unknown>).status))) {
+        return jsonError(400, "invalid_song_request_status", "Choose playing, rejected, or downloaded.", requestId);
+      }
+      const status = (body as { status: "playing" | "rejected" | "downloaded" }).status;
+      const id = deviceSongRequestMatch[1];
+      const existing = await env.DB.prepare(
+        "SELECT id FROM song_requests WHERE id = ? AND account_id = ? AND status IN ('queued', 'playing') LIMIT 1",
+      ).bind(id, authContext.userId).first<{ id: string }>();
+      if (!existing) return jsonError(404, "song_request_not_found", "That song request is no longer in the active queue.", requestId);
+      const now = new Date().toISOString();
+      if (status === "playing") {
+        const finishedPrevious = await env.DB.prepare(
+          "UPDATE song_requests SET status = 'played', updated_at = ? WHERE account_id = ? AND status = 'playing' AND id <> ?",
+        ).bind(now, authContext.userId, id).run();
+        if (!finishedPrevious.success) return jsonError(503, "song_request_store_unavailable", "Could not advance the active song.", requestId);
+      }
+      const updated = await env.DB.prepare(
+        "UPDATE song_requests SET status = ?, updated_at = ? WHERE id = ? AND account_id = ? AND status IN ('queued', 'playing')",
+      ).bind(status, now, id, authContext.userId).run();
+      if (!updated.success || (updated.meta?.changes ?? 0) !== 1) {
+        return jsonError(503, "song_request_update_failed", "Could not update that song request.", requestId);
+      }
+      const row = await env.DB.prepare(
+        "SELECT id, provider, requester_name AS requesterName, beatsaver_key AS beatsaverKey, song_name AS songName, status, result_code AS resultCode, requested_at AS createdAt FROM song_requests WHERE id = ? AND account_id = ? LIMIT 1",
+      ).bind(id, authContext.userId).first<SongRequestQueueRow>();
+      if (row && status !== "downloaded") await publishSongRequest(env, authContext.userId, row);
+      const queue = await listSongRequestQueue(env.DB, authContext.userId);
+      if (!queue.success) return jsonError(503, "song_request_store_unavailable", "The request changed, but the queue could not be refreshed.", requestId);
+      return Response.json({ request: row, requests: queue.results ?? [] }, { headers: JSON_HEADERS });
+    }
     if (url.pathname === "/api/v1/chat/messages" && request.method === "GET") {
       const authContext = await getAuthContext(request, env);
       if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);

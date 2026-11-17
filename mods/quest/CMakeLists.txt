@@ -62,7 +62,7 @@ add_library(
 )
 
 # for inline hook
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE -llog)
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE -llog z)
 
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${INCLUDE_DIR})
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${SHARED_DIR})

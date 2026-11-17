@@ -31,6 +31,7 @@ namespace RiftPulse.Pcvr
             // signals that those instances are ready.
             MainMenuAwaiter.MainMenuInitializing -= OnMainMenuInitializing;
             RiftPulseChatPanel.Shutdown();
+            RiftPulseSongRequestPanel.Shutdown();
             MainMenuAwaiter.MainMenuInitializing += OnMainMenuInitializing;
             _logger?.Info("Waiting for BSML main-menu initialization.");
         }
@@ -79,6 +80,7 @@ namespace RiftPulse.Pcvr
             _enabled = false;
             MainMenuAwaiter.MainMenuInitializing -= OnMainMenuInitializing;
             RiftPulseChatPanel.Shutdown();
+            RiftPulseSongRequestPanel.Shutdown();
 
             try
             {

@@ -9,6 +9,13 @@ DECLARE_CLASS_CODEGEN(RiftPulse, ChatPanelDriver, UnityEngine::MonoBehaviour) {
   DECLARE_INSTANCE_METHOD(void, Update);
 };
 
+DECLARE_CLASS_CODEGEN(RiftPulse, BsrPanelDriver, UnityEngine::MonoBehaviour) {
+  DECLARE_DEFAULT_CTOR();
+  DECLARE_INSTANCE_METHOD(void, Update);
+};
+
 namespace RiftPulse {
 void RequestChatPanelReposition();
+void ShowBsrQueuePanel();
+void RecenterBsrQueuePanel();
 }

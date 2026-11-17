@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const migrations = ["0001_initial.sql", "0002_auth.sql", "0003_chat_foundation.sql", "0004_provider_oauth_states.sql", "0005_kick_pkce.sql", "0006_provider_events.sql", "0007_youtube_live_chat_cursor.sql", "0008_provider_settings.sql", "0009_device_credentials.sql", "0010_release_updates.sql", "0011_remove_kick_provider.sql", "0012_onboarding_preferences.sql", "0013_song_request_runtime.sql"].map(name =>
+const migrations = ["0001_initial.sql", "0002_auth.sql", "0003_chat_foundation.sql", "0004_provider_oauth_states.sql", "0005_kick_pkce.sql", "0006_provider_events.sql", "0007_youtube_live_chat_cursor.sql", "0008_provider_settings.sql", "0009_device_credentials.sql", "0010_release_updates.sql", "0011_remove_kick_provider.sql", "0012_onboarding_preferences.sql", "0013_song_request_runtime.sql", "0014_song_request_downloaded_status.sql"].map(name =>
   readFileSync(join(root, "migrations", name), "utf8")
 );
 
@@ -38,6 +38,10 @@ test("application, authentication, chat, OAuth-state, and provider-event migrati
       const schema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(table).sql;
       assert.doesNotMatch(schema, /kick/i, `Kick provider constraint remains in ${table}`);
     }
+    db.prepare(
+      "INSERT INTO song_requests (id, account_id, provider, requester_id, requester_name, raw_input, beatsaver_key, song_name, status, requested_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run("downloaded-request", "acct", "twitch", "viewer-1", "Viewer", "!bsr abc123", "abc123", "Example Song", "downloaded", "now", "now");
+    assert.equal(db.prepare("SELECT status FROM song_requests WHERE id = ?").get("downloaded-request").status, "downloaded");
     assert.throws(() => db.prepare("INSERT INTO provider_oauth_states (state_digest, account_id, provider, created_at, expires_at, consumed_at) VALUES (?, ?, ?, ?, ?, ?)")
       .run("state", "acct", "kick", "now", "later", null), /CHECK constraint failed/);
     assert.throws(() => db.prepare(
@@ -80,13 +84,14 @@ test("onboarding rollout opts in current sessions and existing inactive accounts
   const db = new DatabaseSync(join(temp, "onboarding.sqlite"));
   try {
     db.exec("PRAGMA foreign_keys = ON");
-    for (const sql of migrations.slice(0, -2)) db.exec(sql);
+    for (const sql of migrations.slice(0, -3)) db.exec(sql);
     const now = Date.now();
     const insertUser = db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 0, ?, ?)");
     insertUser.run("active-user", "Active", "active@riftpulse.invalid", now, now);
     insertUser.run("inactive-user", "Inactive", "inactive@riftpulse.invalid", now, now);
     db.prepare("INSERT INTO session (id, expiresAt, token, createdAt, updatedAt, userId) VALUES (?, ?, ?, ?, ?, ?)")
       .run("active-session", now + 60_000, "active-session-token", now, now, "active-user");
+    db.exec(migrations.at(-3));
     db.exec(migrations.at(-2));
     db.exec(migrations.at(-1));
     const active = JSON.parse(db.prepare("SELECT value_json FROM account_preferences WHERE account_id = ? AND preference_key = 'onboarding_v1'").get("active-user").value_json);

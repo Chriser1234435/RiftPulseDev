@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
     <LangVersion>latest</LangVersion>
@@ -6,12 +6,13 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AssemblyName>RiftPulse.Pcvr</AssemblyName>
     <RootNamespace>RiftPulse.Pcvr</RootNamespace>
-    <Version>0.3.6</Version>
+    <Version>0.3.7</Version>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Plugin.cs" />
     <Compile Include="RiftPulseFlowCoordinator.cs" />
     <Compile Include="RiftPulseChatPanel.cs" />
+    <Compile Include="RiftPulseSongRequestPanel.cs" />
     <EmbeddedResource Include="manifest.json">
       <LogicalName>RiftPulse.Pcvr.manifest.json</LogicalName>
     </EmbeddedResource>
@@ -20,6 +21,9 @@
     </EmbeddedResource>
     <EmbeddedResource Include="chatsettings.bsml">
       <LogicalName>RiftPulse.Pcvr.chatsettings.bsml</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="bsrsettings.bsml">
+      <LogicalName>RiftPulse.Pcvr.bsrsettings.bsml</LogicalName>
     </EmbeddedResource>
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net472" Version="1.0.3" PrivateAssets="All" />
     <Reference Include="IPA.Loader">
@@ -42,6 +46,7 @@
       <HintPath>C:\Users\chris\BSManager\BSInstances\1.40.8\Beat Saber_Data\Managed\Main.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="System.IO.Compression"><HintPath>C:\Windows\Microsoft.NET\Framework64\v4.0.30319\System.IO.Compression.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="System.Security">
       <HintPath>C:\Users\chris\BSManager\BSInstances\1.40.8\Beat Saber_Data\Managed\System.Security.dll</HintPath>
       <Private>false</Private>

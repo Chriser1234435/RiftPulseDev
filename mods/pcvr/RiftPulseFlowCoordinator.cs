@@ -20,7 +20,7 @@ namespace RiftPulse.Pcvr
     {
         private const string ApiBase = "https://app.riftpulse.me/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.3.6";
+        private const string ModVersion = "0.3.7";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 
@@ -280,6 +280,35 @@ namespace RiftPulse.Pcvr
             }
             catch (Exception) { if (_bsrQueueText != null) _bsrQueueText.text = "Could not reach the RiftPulse song queue."; }
         }
+        internal static string BsrCommand = "!bsr";
+        internal static float BsrRequesterCooldownSeconds = 30f;
+        internal static float BsrQueueLimit = 25f;
+
+        internal async Task SaveBsrConfiguration()
+        {
+            if (!_hasPairedThisSession) { ModulePreviewStatus = "Pair this installation before changing BSR settings."; RefreshUi(); return; }
+            var command = Regex.Replace(BsrCommand ?? "!bsr", "[^!a-zA-Z0-9_-]", "").ToLowerInvariant();
+            if (!Regex.IsMatch(command, "^![a-z0-9_-]{1,19}$")) command = "!bsr";
+            BsrCommand = command;
+            var cooldown = Math.Max(0, Math.Min(3600, (int)Math.Round(BsrRequesterCooldownSeconds)));
+            var limit = Math.Max(1, Math.Min(50, (int)Math.Round(BsrQueueLimit)));
+            var body = "{\"settings\":{\"command\":\""+command+"\",\"requesterCooldownSeconds\":"+cooldown+",\"queueLimit\":"+limit+"}}";
+            try
+            {
+                using (var request = new HttpRequestMessage(new HttpMethod("PATCH"), ApiBase + "/device/settings/modules/bsr-song-request"))
+                {
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", LoadOrCreateDeviceCredential());
+                    request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                    using (var response = await Http.SendAsync(request))
+                    {
+                        if (!response.IsSuccessStatusCode) throw new InvalidOperationException("HTTP " + (int)response.StatusCode);
+                    }
+                }
+                ModulePreviewStatus = "BSR settings saved to your RiftPulse account.";
+            }
+            catch (Exception) { ModulePreviewStatus = "Could not save BSR settings. Check your connection and pairing."; }
+            RefreshUi();
+        }
         private async Task SaveModuleSetting(string moduleKey, bool enabled)
         {
             try
@@ -337,7 +366,12 @@ namespace RiftPulse.Pcvr
                         var chatMatch = Regex.Match(payload, "\\\"chat\\\"\\s*:\\s*\\{[^}]*\\\"enabled\\\"\\s*:\\s*(true|false)", RegexOptions.Singleline);
                         var bsrMatch = Regex.Match(payload, "\\\"bsr-song-request\\\"\\s*:\\s*\\{[^}]*\\\"enabled\\\"\\s*:\\s*(true|false)", RegexOptions.Singleline);
                         if (chatMatch.Success) _chatPreviewEnabled = chatMatch.Groups[1].Value == "true";
-                        if (bsrMatch.Success) _bsrPreviewEnabled = bsrMatch.Groups[1].Value == "true";
+                        if (bsrMatch.Success) _bsrPreviewEnabled = bsrMatch.Groups[1].Value == "true";                        var commandMatch = Regex.Match(payload, "\"bsr-song-request\"\\s*:\\s*\\{.*?\"settings\"\\s*:\\s*\\{.*?\"command\"\\s*:\\s*\"([^\\\"]+)\"", RegexOptions.Singleline);
+                        var cooldownMatch = Regex.Match(payload, "\"requesterCooldownSeconds\"\\s*:\\s*(\\d+)");
+                        var limitMatch = Regex.Match(payload, "\"queueLimit\"\\s*:\\s*(\\d+)");
+                        if (commandMatch.Success) BsrCommand = commandMatch.Groups[1].Value;
+                        if (cooldownMatch.Success) BsrRequesterCooldownSeconds = Math.Max(0, Math.Min(3600, int.Parse(cooldownMatch.Groups[1].Value)));
+                        if (limitMatch.Success) BsrQueueLimit = Math.Max(1, Math.Min(50, int.Parse(limitMatch.Groups[1].Value)));
                         ChatToggleLabel = _chatPreviewEnabled ? "CHAT MODULE: ON (ACCOUNT SYNCED)" : "CHAT MODULE: OFF (ACCOUNT SYNCED)";
                         BsrToggleLabel = _bsrPreviewEnabled ? "BSR MODULE: ON (ACCOUNT SYNCED)" : "BSR MODULE: OFF (ACCOUNT SYNCED)";
                         ModulePreviewStatus = "Module settings synced. Song requests are ready when BSR is enabled.";
@@ -460,11 +494,31 @@ namespace RiftPulse.Pcvr
             ModulePreviewStatus = "Chat panel re-centered in front of you. Fine-tune it in Display Settings.";
             RefreshUi();
         }
+        [UIAction("open-bsr-settings")]
+        public void OpenBsrSettings() { RiftPulseFlowCoordinator.ShowBsrSettings(); }
+
+        [UIAction("open-bsr-panel")]
+        public void OpenBsrPanel()
+        {
+            RiftPulseSongRequestPanel.Initialize();
+            RiftPulseSongRequestPanel.Show();
+            ModulePreviewStatus = "Song request queue opened. Select a request to approve or remove it.";
+            RefreshUi();
+        }
+        [UIAction("recenter-bsr-panel")]
+        public void RecenterBsrPanel()
+        {
+            RiftPulseSongRequestPanel.Recenter();
+            ModulePreviewStatus = "Song request panel re-centered in front of you.";
+            RefreshUi();
+        }
+
         [UIAction("open-chat-settings")]
         public void OpenChatPanelSettings()
         {
             RiftPulseFlowCoordinator.ShowChatPanelSettings();
         }
+
         private static string LoadOrCreateDeviceId()
         {
             var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RiftPulse");
@@ -582,13 +636,66 @@ namespace RiftPulse.Pcvr
         }
     }
 
+    [ViewDefinition("RiftPulse.Pcvr.bsrsettings.bsml")]
+    public sealed class RiftPulseBsrSettingsViewController : BSMLAutomaticViewController
+    {
+        [UIValue("bsr-command")]
+        public string RequestCommand
+        {
+            get => RiftPulsePairingViewController.BsrCommand;
+            set => RiftPulsePairingViewController.BsrCommand = value ?? "";
+        }
+
+        [UIValue("bsr-cooldown")]
+        public float RequesterCooldown
+        {
+            get => RiftPulsePairingViewController.BsrRequesterCooldownSeconds;
+            set => RiftPulsePairingViewController.BsrRequesterCooldownSeconds = value;
+        }
+
+        [UIValue("bsr-queue-limit")]
+        public float QueueLimit
+        {
+            get => RiftPulsePairingViewController.BsrQueueLimit;
+            set => RiftPulsePairingViewController.BsrQueueLimit = value;
+        }
+
+        [UIAction("save-bsr-settings")]
+        public async void SaveClicked()
+        {
+            var active = RiftPulseFlowCoordinator.ActivePairingView;
+            if (active != null) await active.SaveBsrConfiguration();
+        }
+
+    }
+
+    public sealed class RiftPulseBsrSettingsFlowCoordinator : FlowCoordinator
+    {
+        private readonly RiftPulseBsrSettingsViewController _settingsView =
+            BeatSaberUI.CreateViewController<RiftPulseBsrSettingsViewController>();
+
+        protected override void DidActivate(bool firstActivation, bool addedToHierarchy, bool screenSystemEnabling)
+        {
+            if (firstActivation) { SetTitle("Song Request Settings"); showBackButton = true; }
+            if (addedToHierarchy) ProvideInitialViewControllers(_settingsView);
+        }
+
+        protected override void BackButtonWasPressed(ViewController topViewController)
+        {
+            RiftPulseFlowCoordinator.CloseBsrSettings(this);
+        }
+    }
     public sealed class RiftPulseFlowCoordinator : FlowCoordinator
     {
         private static RiftPulseFlowCoordinator? _activeInstance;
+
+        internal static RiftPulsePairingViewController? ActivePairingView => _activeInstance?._pairingView;
         private readonly RiftPulsePairingViewController _pairingView =
             BeatSaberUI.CreateViewController<RiftPulsePairingViewController>();
         private readonly RiftPulseChatSettingsFlowCoordinator _chatSettingsCoordinator =
             BeatSaberUI.CreateFlowCoordinator<RiftPulseChatSettingsFlowCoordinator>();
+        private readonly RiftPulseBsrSettingsFlowCoordinator _bsrSettingsCoordinator =
+            BeatSaberUI.CreateFlowCoordinator<RiftPulseBsrSettingsFlowCoordinator>();
 
         internal static void ShowChatPanelSettings()
         {
@@ -597,6 +704,18 @@ namespace RiftPulse.Pcvr
         }
 
         internal static void CloseChatPanelSettings(RiftPulseChatSettingsFlowCoordinator settings)
+        {
+            if (_activeInstance == null) return;
+            _activeInstance.DismissFlowCoordinator(settings);
+        }
+
+        internal static void ShowBsrSettings()
+        {
+            if (_activeInstance == null) return;
+            _activeInstance.PresentFlowCoordinator(_activeInstance._bsrSettingsCoordinator);
+        }
+
+        internal static void CloseBsrSettings(RiftPulseBsrSettingsFlowCoordinator settings)
         {
             if (_activeInstance == null) return;
             _activeInstance.DismissFlowCoordinator(settings);

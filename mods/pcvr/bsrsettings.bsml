@@ -1,0 +1,24 @@
+<bg>
+  <vertical child-expand-height="false" spacing="3" pad-left="7" pad-right="7" pad-top="5" pad-bottom="5">
+    <horizontal bg="round-rect-panel" child-expand-height="false" spacing="3" pad-left="6" pad-right="6" pad-top="4" pad-bottom="4">
+      <vertical child-expand-height="false" spacing="0">
+        <text text="RIFTPULSE" font-size="5.5" align="Left"/>
+        <text text="SONG REQUESTS  /  BSR" font-size="2.8" align="Left"/>
+      </vertical>
+      <text text="LIVE QUEUE CONTROLS" font-size="3.2" align="Right"/>
+    </horizontal>
+    <text text="These settings sync to your RiftPulse account and apply to connected chat providers." font-size="2.8" align="Center"/>
+    <vertical bg="round-rect-panel" child-expand-height="false" spacing="3" pad-left="6" pad-right="6" pad-top="4" pad-bottom="4">
+      <text text="VIEWER COMMAND" font-size="3.5" align="Left"/>
+      <string-setting text="CHAT COMMAND" value="bsr-command" bind-value="true" apply-on-change="true"/>
+      <text text="Example: !bsr 5d7a" font-size="2.6" align="Center"/>
+    </vertical>
+    <vertical bg="round-rect-panel" child-expand-height="false" spacing="3" pad-left="6" pad-right="6" pad-top="4" pad-bottom="4">
+      <text text="QUEUE PROTECTION" font-size="3.5" align="Left"/>
+      <slider-setting text="REQUESTER COOLDOWN  /  SECONDS" value="bsr-cooldown" bind-value="true" min="0" max="3600" increment="5" show-buttons="true" apply-on-change="true"/>
+      <slider-setting text="MAXIMUM QUEUE SIZE" value="bsr-queue-limit" bind-value="true" min="1" max="50" increment="1" show-buttons="true" apply-on-change="true"/>
+      <button text="SAVE BSR SETTINGS" on-click="save-bsr-settings"/>
+    </vertical>
+    <text text="A zero-second cooldown disables requester cooldown. Queue size is limited to 1–50 songs." font-size="2.7" align="Center"/>
+  </vertical>
+</bg>

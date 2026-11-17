@@ -281,11 +281,16 @@ static void BuildRiftPulseMenuPcvrLayout(UnityEngine::Transform* root) {
             songCard, "SONG REQUESTS: LOCKED", 36.2f, 3.3f,
             []() { ToggleBsr(); });
         songQueueLabel = CreateQuestLayoutText(
-            songCard, "Pair your headset to view the song queue.",
-            1.75f, 35.5f, 4.3f);
+            songCard, "Live queue  /  waiting for requests",
+            1.85f, 35.5f, 2.5f);
         CreateQuestLayoutButton(
-            songCard, "REFRESH SONG QUEUE", 36.2f, 2.7f,
-            []() { RefreshSongRequestQueue(); });
+            songCard, "CONFIGURE BSR", 36.2f, 2.8f,
+            []() { ShowBsrSettingsModal(); });
+        CreateQuestLayoutButton(
+            songCard, "OPEN REQUEST QUEUE", 36.2f, 2.8f,
+            []() { RiftPulse::ShowBsrQueuePanel(); });        CreateQuestLayoutButton(
+            songCard, "RECENTER REQUEST PANEL", 36.2f, 2.8f,
+            []() { RiftPulse::RecenterBsrQueuePanel(); });
       }
     }
   }

@@ -13,7 +13,7 @@ type User = { id: string; name: string; email: string };
 type ReleaseUpdate = { id: string; title: string; category: "website" | "mod" | "both"; version: string | null; summary: string; changes: string[]; publishedAt: string; isRead: boolean };
 type Device = { id: string; platform: "pcvr" | "quest"; gameVersion: string; modVersion: string; label: string | null; createdAt: string; lastSeenAt: string | null };
 type ChatMessage = { id: string; provider: ProviderKey; senderName: string; text: string; receivedAt: string; recordType?: "chat" | "event"; eventKind?: string | null; badges: { moderator: boolean; subscriber: boolean; verified: boolean } };
-type SongRequestItem = { id: string; provider: ProviderKey; requesterName: string; beatsaverKey: string; songName: string | null; status: "queued" | "playing" | "played" | "rejected" | "failed"; resultCode: string | null; createdAt: string };
+type SongRequestItem = { id: string; provider: ProviderKey; requesterName: string; beatsaverKey: string; songName: string | null; status: "queued" | "playing" | "downloaded" | "played" | "rejected" | "failed"; resultCode: string | null; createdAt: string };
 type ProviderState = "connected" | "disconnected" | "degraded" | "error" | "unsupported";
 type ProviderHealth = { provider: ProviderKey; state: ProviderState; viewerCount: number | null; detailCode: string | null; observedAt?: string };
 type ProviderConnection = { status: string; displayName: string | null; connectedAt: string | null; configured: boolean; detailCode: string | null };
@@ -1424,10 +1424,10 @@ function App() {
           </section>
 
           <section className="section-block downloads-block" id="downloads" data-tour-target="downloads">
-            <div className="section-heading"><div><div className="section-overline">LATEST MOD BUILDS</div><h3>Beat Saber downloads <span className="subtle-count">02</span></h3><p>Choose your Beat Saber 1.40.8 version and follow the matching install steps.</p></div><span className="settings-badge">PCVR v0.3.6 / Quest v0.3.13 Alpha</span></div>
+            <div className="section-heading"><div><div className="section-overline">LATEST MOD BUILDS</div><h3>Beat Saber downloads <span className="subtle-count">02</span></h3><p>Choose your Beat Saber 1.40.8 version and follow the matching install steps.</p></div><span className="settings-badge">PCVR v0.3.7 / Quest v0.3.14 Alpha</span></div>
             <div className="downloads-grid">
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR</b><small>Windows / Beat Saber 1.40.8 (PCVR)</small></div><span className="download-state">v0.3.6 | ZIP BUILT</span></div>
+                <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR</b><small>Windows / Beat Saber 1.40.8 (PCVR)</small></div><span className="download-state">v0.3.7 | ZIP BUILT</span></div>
                 <p className="download-step-title">Install PCVR</p>
                 <ol className="download-steps">
                   <li>Download the PCVR ZIP.</li>
@@ -1436,10 +1436,10 @@ function App() {
                   <li>Start Beat Saber once to complete the installation.</li>
                 </ol>
                 <p className="download-platform-note">PCVR only · Windows ZIP · Beat Saber 1.40.8</p>
-                <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr-0.3.6.zip" download><Download size={15} /> Download PCVR ZIP</a>
+                <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr-0.3.7.zip" download><Download size={15} /> Download PCVR ZIP</a>
               </article>
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest Standalone</b><small>Meta Quest headset / Beat Saber 1.40.8</small></div><span className="download-state">v0.3.13 Alpha | QMOD BUILT</span></div>
+                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest Standalone</b><small>Meta Quest headset / Beat Saber 1.40.8</small></div><span className="download-state">v0.3.14 Alpha | QMOD BUILT</span></div>
                 <p className="download-step-title">Install Quest Standalone</p>
                 <ol className="download-steps">
                   <li>Make sure the headset has standalone Beat Saber 1.40.8 installed.</li>
@@ -1448,7 +1448,7 @@ function App() {
                   <li>Start Beat Saber once to complete the installation.</li>
                 </ol>
                 <p className="download-platform-note">Quest Standalone only · QMOD · Beat Saber 1.40.8</p>
-                <a className="primary-button download-link" href="/downloads/RiftPulse-Quest-0.3.13-Alpha.qmod" download="RiftPulse-Quest-0.3.13-Alpha.qmod"><Download size={15} /> Download Quest QMOD</a>
+                <a className="primary-button download-link" href="/downloads/RiftPulse-Quest-0.3.14-Alpha.qmod" download="RiftPulse-Quest-0.3.14-Alpha.qmod"><Download size={15} /> Download Quest QMOD</a>
               </article>
             </div>
 
@@ -1596,7 +1596,7 @@ function App() {
               <div className="field-group"><label htmlFor="bsr-cooldown">Requester cooldown (seconds)</label><input id="bsr-cooldown" type="number" min="0" max="3600" step="5" value={requesterCooldownSeconds} onChange={e => setRequesterCooldownSeconds(Math.max(0, Math.min(3600, Number(e.target.value))))} /><small>Set to 0 to disable per-viewer cooldown.</small></div>
               <div className="field-group"><label htmlFor="bsr-queue-limit">Maximum queue size</label><input id="bsr-queue-limit" type="number" min="1" max="50" step="1" value={queueLimit} onChange={e => setQueueLimit(Math.max(1, Math.min(50, Number(e.target.value))))} /><small>Active requests allowed at once (1–50).</small></div>
             </div>
-            <div className="settings-option"><div><b>Reduced motion</b><small>Respect your device's motion preference.</small></div><span className="settings-badge">PCVR v0.3.6 / Quest v0.3.13 Alpha</span></div>
+            <div className="settings-option"><div><b>Reduced motion</b><small>Respect your device's motion preference.</small></div><span className="settings-badge">PCVR v0.3.7 / Quest v0.3.14 Alpha</span></div>
             <button className="primary-button modal-submit" onClick={() => void saveSettings()}>Save settings to account <Check size={15} /></button>
           </>}
           {modal === "help" && <><div className="modal-icon purple-modal"><Headphones size={22} /></div><div className="modal-eyebrow">RIFTPULSE GUIDE</div><h2 id="modal-title">Ready when you are.</h2><p className="modal-copy">RiftPulse connects your livestream community with Beat Saber. V1 is focused on two modules: in-game Chat and BSR Song Request.</p><div className="help-list"><div><MessageCircle size={18} /><span><b>Chat</b><small>Bring supported live messages into your game.</small></span></div><div><Music2 size={18} /><span><b>BSR Song Request</b><small>Queue viewer song requests with configurable commands.</small></span></div><div><Gamepad2 size={18} /><span><b>Pair your game</b><small>Use the in-game five-digit pairing flow once the mod is installed.</small></span></div></div><button className="primary-button modal-submit" onClick={() => { setModal(null); startPairing(); setModal("pair"); }}>Connect a device <ArrowUpRight size={15} /></button></>}

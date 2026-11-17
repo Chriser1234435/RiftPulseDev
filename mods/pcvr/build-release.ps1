@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$version = '0.3.6'
+$version = '0.3.7'
 $project = Join-Path $root 'mods\pcvr\RiftPulse.Pcvr.csproj'
 $manifestPath = Join-Path $root 'mods\pcvr\manifest.json'
 $built = Join-Path $root 'mods\pcvr\bin\Release\net472\RiftPulse.Pcvr.dll'
@@ -32,7 +32,7 @@ foreach ($componentId in @('pairingCodeText', 'statusText', 'connectButton', 'cu
         throw "Controller has no UIComponent binding for: $componentId"
     }
 }
-foreach ($actionId in @('connect-click', 'toggle-chat', 'toggle-bsr', 'move-chat-panel', 'open-chat-settings', 'refresh-bsr-queue')) {
+foreach ($actionId in @('connect-click', 'toggle-chat', 'toggle-bsr', 'move-chat-panel', 'open-chat-settings', 'refresh-bsr-queue', 'open-bsr-settings', 'open-bsr-panel', 'recenter-bsr-panel')) {
     if ($bsmlText -notmatch ('on-click="' + [regex]::Escape($actionId) + '"')) {
         throw "BSML click action missing: $actionId"
     }
@@ -57,6 +57,21 @@ foreach ($settingValue in @('panel-x', 'panel-y', 'panel-z', 'panel-width', 'pan
 if ($chatSettingsText -notmatch 'show-buttons="true"' -or $chatSettingsText -notmatch 'bind-value="true"') {
     throw 'Chat settings sliders must expose arrow buttons and bind values.'
 }
+$bsrSettingsBsmlPath = Join-Path $root 'mods\pcvr\bsrsettings.bsml'
+$bsrSettingsText = Get-Content $bsrSettingsBsmlPath -Raw
+foreach ($settingValue in @('bsr-command', 'bsr-cooldown', 'bsr-queue-limit')) {
+    if ($bsrSettingsText -notmatch ('value="' + [regex]::Escape($settingValue) + '"')) {
+        throw "BSR settings input missing value binding: $settingValue"
+    }
+    if ($controllerText -notmatch ('UIValue\("' + [regex]::Escape($settingValue) + '"\)')) {
+        throw "BSR settings controller missing UIValue: $settingValue"
+    }
+}
+if ($bsrSettingsText -notmatch 'on-click="save-bsr-settings"' -or
+    $controllerText -notmatch 'UIAction\("save-bsr-settings"\)') {
+    throw 'BSR settings save action is not wired.'
+}
+
 if ($bsmlText -match '\{(pairing-code|status-text|chat-toggle-label|bsr-toggle-label|module-preview-status)\}') {
     throw 'BSML contains unsupported property interpolation placeholders.'
 }
@@ -71,6 +86,9 @@ if (-not ($resources -contains 'RiftPulse.Pcvr.manifest.json')) {
 }
 if (-not ($resources -contains 'RiftPulse.Pcvr.pairing.bsml')) {
     throw "Embedded pairing BSML missing. Found: $($resources -join ', ')"
+}
+if (-not ($resources -contains 'RiftPulse.Pcvr.bsrsettings.bsml')) {
+    throw "Embedded BSR settings BSML missing."
 }
 if (-not ($resources -contains 'RiftPulse.Pcvr.chatsettings.bsml')) {
     throw "Embedded chat settings BSML missing. Found: $($resources -join ', ')"

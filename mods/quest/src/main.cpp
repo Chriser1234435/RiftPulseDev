@@ -37,6 +37,7 @@
 #include <regex>
 #include "bsml/shared/BSML.hpp"
 #include "bsml/shared/BSML-Lite.hpp"
+#include "bsml/shared/BSML-Lite/Creation/Settings.hpp"
 #include "HMUI/CurvedTextMeshPro.hpp"
 #include "UnityEngine/Application.hpp"
 #include "System/Action_1.hpp"
@@ -80,6 +81,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <cerrno>
+#include <zlib.h>
 
 using HttpResponseTask = System::Threading::Tasks::Task_1<System::Net::Http::HttpResponseMessage*>*;
 using HttpTextTask = System::Threading::Tasks::Task_1<StringW>*;
@@ -90,7 +93,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.3.13";
+static constexpr const char* MOD_VERSION = "0.3.14";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -104,6 +107,10 @@ static UnityEngine::UI::Button* bsrButton = nullptr;
 static HMUI::CurvedTextMeshPro* songQueueLabel = nullptr;
 static UnityEngine::Transform* mainMenuRoot = nullptr;
 static BSML::ModalView* worldChatSettingsModal = nullptr;
+static BSML::ModalView* bsrSettingsModal = nullptr;
+static std::string bsrCommand = "!bsr";
+static float bsrRequesterCooldownSeconds = 30.0f;
+static float bsrQueueLimit = 25.0f;
 static std::vector<UnityEngine::GameObject*> mainMenuObjects;
 
 static std::string deviceId;
@@ -139,6 +146,7 @@ static void LoadWorldChatSettings();
 static void SaveWorldChatSettings();
 static void SetWorldChatPanelSetting(int field, float value);
 static void ShowChatPanelSettingsModal();
+static void ApplyQuestDarkBackground(UnityEngine::GameObject* object, UnityEngine::Color color);
 
 // Keep the panel at eye level regardless of HMD pitch. Z follows headset yaw,
 // while Y is world vertical; looking down must never drive the panel into the floor.
@@ -637,6 +645,12 @@ static std::string JsonString(const std::string& json, const std::string& key) {
   return json.substr(position + 1, end - position - 1);
 }
 
+static float JsonNumber(const std::string& json, const std::string& key, float fallback) {
+  const std::regex expression("\"" + key + "\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?)");
+  std::smatch match;
+  if (!std::regex_search(json, match, expression) || match.size() < 2) return fallback;
+  try { return std::stof(match[1].str()); } catch (...) { return fallback; }
+}
 static bool JsonModuleEnabled(const std::string& json, const std::string& module,
                               bool fallback) {
   const std::string marker = "\"" + module + "\"";
@@ -657,6 +671,9 @@ static bool JsonModuleEnabled(const std::string& json, const std::string& module
 
 
 static void RefreshSongRequestQueue();
+static void ShowBsrSettingsModal();
+static void ShowBsrQueuePanel();
+static void SaveBsrSettings();
 
 static void RefreshModuleButtons() {
   if (chatButton) {
@@ -687,6 +704,10 @@ static void LoadModuleSettings() {
         }
         chatEnabled = JsonModuleEnabled(body, "chat", true);
         bsrEnabled = JsonModuleEnabled(body, "bsr-song-request", true);
+        bsrCommand = JsonString(body, "command");
+        if (bsrCommand.empty()) bsrCommand = "!bsr";
+        bsrRequesterCooldownSeconds = std::clamp(JsonNumber(body, "requesterCooldownSeconds", 30.0f), 0.0f, 3600.0f);
+        bsrQueueLimit = std::clamp(JsonNumber(body, "queueLimit", 25.0f), 1.0f, 50.0f);
         RefreshModuleButtons();
         SetStatus("RIFTPULSE ACCOUNT LINKED\n\nCHAT AND BSR SETTINGS LOADED\n\nUse the module buttons to save changes.");
         RefreshSongRequestQueue();
@@ -830,6 +851,83 @@ static void ToggleChat() {
   SaveModuleSetting("chat", chatEnabled);
 }
 
+static void SaveBsrSettings() {
+  RecoverStaleHttpRequest();
+  if (!isPaired || requestInFlight) {
+    SetStatus("Pair this headset and wait for the current request before saving BSR settings.");
+    return;
+  }
+  std::string normalizedCommand;
+  normalizedCommand.reserve(20);
+  for (const unsigned char ch : bsrCommand) {
+    if (std::isalnum(ch) || ch == '_' || ch == '-') {
+      normalizedCommand.push_back(static_cast<char>(std::tolower(ch)));
+      if (normalizedCommand.size() >= 19) break;
+    }
+  }
+  if (normalizedCommand.empty()) bsrCommand = "!bsr";
+  else bsrCommand = "!" + normalizedCommand;
+  const int cooldown = static_cast<int>(std::clamp(std::round(bsrRequesterCooldownSeconds), 0.0f, 3600.0f));
+  const int limit = static_cast<int>(std::clamp(std::round(bsrQueueLimit), 1.0f, 50.0f));
+  const std::string body = "{\"settings\":{\"command\":\"" + bsrCommand +
+      "\",\"requesterCooldownSeconds\":" + std::to_string(cooldown) +
+      ",\"queueLimit\":" + std::to_string(limit) + "}}";
+  requestInFlight = true;
+  auto* request = CreateHttpRequest("PATCH",
+      std::string(API_BASE) + "/device/settings/modules/bsr-song-request",
+      body, deviceCredential);
+  if (!request || !SendAsync(request, [](int64_t status, const std::string& response) {
+        requestInFlight = false;
+        if (status < 200 || status >= 300) {
+          SetStatus("BSR settings could not be saved. Check the device connection and try again.");
+          return;
+        }
+        SetStatus("BSR command, cooldown, and queue size saved to your RiftPulse account.");
+        if (bsrSettingsModal) bsrSettingsModal->Hide();
+      })) {
+    requestInFlight = false;
+    SetStatus("Could not start the BSR settings save request.");
+  }
+}
+
+static void ShowBsrSettingsModal() {
+  if (!mainMenuRoot) return;
+  if (bsrSettingsModal) {
+    ApplyQuestDarkBackground(bsrSettingsModal->get_gameObject(),
+        UnityEngine::Color(0.018f, 0.028f, 0.060f, 0.98f));
+    bsrSettingsModal->Show();
+    return;
+  }
+  bsrSettingsModal = BSML::Lite::CreateModal(
+      mainMenuRoot, UnityEngine::Vector2(0.0f, 0.0f), UnityEngine::Vector2(58.0f, 47.0f),
+      []() {}, true);
+  if (!bsrSettingsModal) return;
+  ApplyQuestDarkBackground(bsrSettingsModal->get_gameObject(),
+      UnityEngine::Color(0.018f, 0.028f, 0.060f, 0.98f));
+  auto* container = BSML::Lite::CreateScrollableModalContainer(bsrSettingsModal);
+  if (!container) { bsrSettingsModal->Hide(); bsrSettingsModal = nullptr; return; }
+  ApplyQuestDarkBackground(container, UnityEngine::Color(0.025f, 0.038f, 0.075f, 0.98f));
+  BSML::Lite::CreateText(container, "RIFTPULSE  /  BSR SETTINGS", 3.0f, {0.0f, 19.0f}, {52.0f, 3.8f});
+  BSML::Lite::CreateText(container, "VIEWER COMMAND AND QUEUE PROTECTION", 2.2f, {0.0f, 15.7f}, {52.0f, 2.8f});
+  BSML::Lite::CreateStringSetting(container, "CHAT COMMAND", StringW(bsrCommand),
+      UnityEngine::Vector2(0.0f, 11.8f), [](StringW value) {
+        bsrCommand = static_cast<std::string>(value);
+      });
+  BSML::Lite::CreateSliderSetting(container, "REQUESTER COOLDOWN  /  SECONDS", 5.0f,
+      bsrRequesterCooldownSeconds, 0.0f, 3600.0f,
+      [](float value) { bsrRequesterCooldownSeconds = std::clamp(value, 0.0f, 3600.0f); });
+  BSML::Lite::CreateSliderSetting(container, "MAXIMUM QUEUE SIZE", 1.0f,
+      bsrQueueLimit, 1.0f, 50.0f,
+      [](float value) { bsrQueueLimit = std::clamp(value, 1.0f, 50.0f); });
+  BSML::Lite::CreateUIButton(container->get_transform(), "SAVE BSR SETTINGS", "PracticeButton",
+      UnityEngine::Vector2(0.0f, 0.0f), UnityEngine::Vector2(45.0f, 3.6f),
+      []() { SaveBsrSettings(); });
+  auto* bsrSettingsInfo = BSML::Lite::CreateText(container,
+      "Cooldown 0 disables the limit. Queue size is 1–50 requests. Settings sync to your account.",
+      2.1f, {0.0f, -18.0f}, {52.0f, 3.8f});
+  if (bsrSettingsInfo) bsrSettingsInfo->set_alignment(TMPro::TextAlignmentOptions::Center);
+  bsrSettingsModal->Show();
+}
 static void ToggleBsr() {
   RecoverStaleHttpRequest();
   if (requestInFlight) return;
@@ -1242,6 +1340,7 @@ MOD_EXTERN_FUNC void setup(CModInfo *info) noexcept {
 }
 
 DEFINE_TYPE(RiftPulse, ChatPanelDriver);
+DEFINE_TYPE(RiftPulse, BsrPanelDriver);
 
 static BSML::FloatingScreen* worldChatPanel = nullptr;
 static TMPro::TextMeshProUGUI* worldChatText = nullptr;
@@ -2144,6 +2243,8 @@ static void PollWorldChatPanel() {
     worldChatRequestInFlight = false;
   }
 }
+
+#include "bsr_panel.inc"
 
 void RiftPulse::ChatPanelDriver::Update() {
   // Keep the world-space chat panel available across the main menu and song

@@ -37,8 +37,11 @@
           <text text="03  /  SONG REQUESTS" font-size="3.8" align="Left"/>
           <text text="Let viewers request songs through connected chats." font-size="2.6" align="Left"/>
           <button id="bsrToggleButton" text="SONG REQUESTS: OFF" on-click="toggle-bsr"/>
-          <text id="bsrQueueText" text="Pair your device to view the queue." font-size="2.2" align="Left"/>
-          <button text="REFRESH SONG QUEUE" on-click="refresh-bsr-queue"/>
+          <text id="bsrQueueText" text="Loading your song request queue..." font-size="2.3" align="Center"/>
+          <button text="REFRESH QUEUE" on-click="refresh-bsr-queue"/>
+          <button text="CONFIGURE SONG REQUESTS" on-click="open-bsr-settings"/>
+          <button text="OPEN REQUEST QUEUE" on-click="open-bsr-panel"/>
+          <button text="RE-CENTER REQUEST PANEL" on-click="recenter-bsr-panel"/>
         </vertical>
       </vertical>
     </horizontal>

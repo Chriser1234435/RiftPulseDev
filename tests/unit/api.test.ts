@@ -59,6 +59,26 @@ class FakeStatement implements D1PreparedStatement {
       const [moduleKey] = this.values as [string];
       return ({ enabled: this.db.moduleSettings.get(moduleKey)?.enabled ?? 1 } as T);
     }
+    if (q.includes("select beatsaver_key as beatsaverkey, song_name as songname from song_requests")) {
+      const [id, accountId] = this.values as [string, string];
+      const row = this.db.songRequestRows.find(value => value.id === id);
+      return row && accountId === this.db.deviceAccountId && ["queued", "playing"].includes(row.status)
+        ? ({ beatsaverKey: row.beatsaverKey, songName: row.songName } as T) : null;
+    }    if (q.includes("select id from song_requests where id = ?")) {
+      const [id, accountId] = this.values as [string, string];
+      const row = this.db.songRequestRows.find(value => value.id === id);
+      return row && accountId === this.db.deviceAccountId && ["queued", "playing"].includes(row.status)
+        ? ({ id: row.id } as T) : null;
+    }
+    if (q.includes("select id, provider, requester_name as requestername")) {
+      const [id, accountId] = this.values as [string, string];
+      const row = this.db.songRequestRows.find(value => value.id === id);
+      return row && accountId === this.db.deviceAccountId ? ({
+        id: row.id, provider: row.provider, requesterName: row.requesterName,
+        beatsaverKey: row.beatsaverKey, songName: row.songName, status: row.status,
+        resultCode: row.resultCode, createdAt: row.createdAt,
+      } as T) : null;
+    }
     if (q.includes("select enabled, settings_json from module_settings")) {
       const [, moduleKey] = this.values as [string, string];
       return (this.db.moduleSettings.get(moduleKey) ?? null) as T | null;
@@ -78,6 +98,14 @@ class FakeStatement implements D1PreparedStatement {
     }
     if (q.startsWith("update pairing_challenges")) {
       return { success: true, meta: { changes: 0 } };
+    }
+    if (q.startsWith("update song_requests set status = ?")) {
+      const [status, _now, id, accountId] = this.values as [string, string, string, string];
+      const row = this.db.songRequestRows.find(value => value.id === id);
+      if (!row || accountId !== this.db.deviceAccountId || !["queued", "playing"].includes(row.status))
+        return { success: true, meta: { changes: 0 } };
+      row.status = status;
+      return { success: true, meta: { changes: 1 } };
     }
     if (q.startsWith("insert or ignore into module_settings")) {
       const [, accountId, moduleKey] = this.values as [string, string, string, string];
@@ -660,7 +688,7 @@ test("paired devices can read the active BSR queue only with a valid device cred
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential));
   bindings.DB.deviceCredentialDigest = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
   bindings.DB.songRequestRows.push({
-    id: "request-1", provider: "twitch", requesterName: "ViewerOne",
+    id: "550e8400-e29b-41d4-a716-446655440000", provider: "twitch", requesterName: "ViewerOne",
     beatsaverKey: "abc123", songName: "Example Song", status: "queued",
     resultCode: null, createdAt: "2026-11-17T15:00:00.000Z",
   });
@@ -674,8 +702,64 @@ test("paired devices can read the active BSR queue only with a valid device cred
   assert.equal(payload.requests.length, 1);
   assert.equal(payload.requests[0].beatsaverKey, "abc123");
   assert.equal(payload.requests[0].songName, "Example Song");
+  assert.equal(payload.settings.command, "!bsr");
+  assert.equal(payload.settings.requesterCooldownSeconds, 30);
+  assert.equal(payload.settings.queueLimit, 25);
+
+  const update = await call("/api/v1/device/song-requests/550e8400-e29b-41d4-a716-446655440000", {
+    method: "PATCH",
+    headers: { authorization: "Bearer " + credential, "content-type": "application/json" },
+    body: JSON.stringify({ status: "downloaded" }),
+  }, bindings);
+  assert.equal(update.status, 200, await update.clone().text());
+  assert.equal((await update.json()).request.status, "downloaded");
 });
 
+test("paired devices can retrieve a BeatSaver archive through the authenticated download relay", async () => {
+  const bindings = env();
+  const credential = "e".repeat(64);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential));
+  bindings.DB.deviceCredentialDigest = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  const requestId = "550e8400-e29b-41d4-a716-446655440000";
+  bindings.DB.songRequestRows.push({
+    id: requestId, provider: "twitch", requesterName: "ViewerOne",
+    beatsaverKey: "abc123", songName: "Example Song", status: "queued",
+    resultCode: null, createdAt: "2026-11-17T15:00:00.000Z",
+  });
+
+  const originalFetch = globalThis.fetch;
+  const archiveBytes = new Uint8Array(128).fill(7);
+  globalThis.fetch = async (input: RequestInfo | URL): Promise<Response> => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url === "https://api.beatsaver.com/maps/id/abc123") {
+      return new Response(JSON.stringify({
+        versions: [{ state: "Published", downloadURL: "https://cdn.beatsaver.com/example.zip" }],
+      }), { headers: { "content-type": "application/json" } });
+    }
+    if (url === "https://cdn.beatsaver.com/example.zip") {
+      return new Response(archiveBytes, { headers: { "content-type": "application/zip" } });
+    }
+    throw new Error("Unexpected external request: " + url);
+  };
+
+  try {
+    const path = "/api/v1/device/song-requests/" + requestId + "/archive";
+    const denied = await call(path);
+    assert.equal(denied.status, 401);
+
+    const response = await call(path, {
+      headers: { authorization: "Bearer " + credential },
+    }, bindings);
+    assert.equal(response.status, 200, await response.clone().text());
+    const payload = await response.json();
+    assert.equal(payload.beatsaverKey, "abc123");
+    assert.equal(payload.songName, "Example Song");
+    assert.equal(payload.archiveBytes, archiveBytes.byteLength);
+    assert.equal(atob(payload.archiveBase64), String.fromCharCode(...archiveBytes));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 test("browser BSR queue routes fail closed when account authentication is not configured", async () => {
   const listing = await call("/api/v1/song-requests");
   assert.equal(listing.status, 503);
