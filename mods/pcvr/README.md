@@ -1,22 +1,23 @@
-RiftPulse PCVR 0.3.2
-# RiftPulse PCVR alpha adapter 0.3.2
+# RiftPulse PCVR 0.3.8
 
-PCVR adapter for Beat Saber 1.40.8. Generates a five-digit pairing code, links the installation to your RiftPulse account, syncs Chat/BSR module preferences, and adds a movable world-space RiftPulse chat panel inside gameplay.
+PCVR plugin for Beat Saber 1.40.8. RiftPulse provides account pairing, live chat, viewer events, and the BSR song-request queue.
 
-## World-space chat panel
+## In-game Chat
 
-- A real 3D floating panel in the Beat Saber play space, not a camera HUD or flat screen overlay.
-- Grab and move the panel with the VR controller handle. X/Z follow the headset's level heading and Y is true vertical; headset-relative X/Y/Z and facing offset are saved locally.
-- Changing panel settings preserves its current facing instead of recalculating a reverse rotation.
-- Chat displays platform display names with a blue username marker: Twitch purple, YouTube red, and TikTok white.
-- New incoming messages sit at the bottom; oldest entries are trimmed from the top.
-- The RiftPulse in-game menu includes MOVE CHAT PANEL TO VIEW to reset it in front of your view.
-- Displays recent Twitch, YouTube, and TikTok LIVE messages and supported provider events.
-- Displays the combined viewer total when a fresh count is available.
-- Polls the paired-device chat feed while the Chat module is enabled.
+- Movable world-space panel with the same white controller grab handle used by BSR.
+- Saved placement and size controls.
+- Bold mixed-case chat text with local timestamp, a platform-color square, sender name, and message on one line.
+- Follow, membership, gift, bits, Super Chat, donation, like, share, raid, and member events use highlighted event labels.
+- Text scales up as the panel is reduced so the feed remains readable.
 
-## Alpha limitations
+## In-game BSR
 
-This build has compiled for PCVR, but a live in-headset test is still needed to confirm the panel size, grab-handle behavior, placement persistence, and performance in a running Beat Saber session. Incoming provider events depend on the relevant platform connector being active. ChatIntegrations command execution and BSR song-request fulfillment are separate workstreams.
+- Open **RiftPulse → Song Requests → Configure Song Requests** for the command, requester cooldown, queue limit, and display settings.
+- X/Y/Z position and width/height settings are saved locally. The sliders apply while the panel is open.
+- Open **Request Queue** to use the movable floating queue. Grab its white handle to reposition it.
+- Select a request and choose **YES / Download** to install it to the PCVR CustomLevels folder, or **NO / Remove** to remove it from the queue.
+- The queue can be scrolled and refreshes automatically while open.
 
-The BSIPA manifest is embedded in the DLL. The release ZIP contains Plugins/RiftPulse.Pcvr.dll and README.txt; there is intentionally no loose manifest. Extract the ZIP into the Beat Saber game root, not directly into the Plugins folder. This package is PCVR only and must not be installed on Quest Standalone.
+The BSIPA manifest and BSML views are embedded in `RiftPulse.Pcvr.dll`. The release ZIP contains `Plugins/RiftPulse.Pcvr.dll` and `README.txt`; it intentionally has no loose manifest. Extract the ZIP into the Beat Saber game root. This package is PCVR only and must not be installed on Quest Standalone.
+
+A live in-headset test is still required to confirm placement, grabbing, queue navigation, download/install, and readability at the smallest supported size.

@@ -40,17 +40,21 @@ namespace RiftPulse.Pcvr
         private TextMeshProUGUI? _detail;
         private TextMeshProUGUI? _status;
         private RectTransform? _queueContent;
+        private RectTransform? _queueViewport;
         private ScrollRect? _queueScroll;
         private readonly List<Button> _rowButtons = new List<Button>();
         private readonly List<SongRequest> _requests = new List<SongRequest>();
         private Button? _yesButton;
         private Button? _noButton;
+        private Button? _refreshButton;
         private int _selectedIndex = -1;
         private float _nextPollAt;
         private bool _polling;
         private bool _actionInProgress;
         private Vector3 _panelOffset = new Vector3(0f, 0f, 2.25f);
         private Quaternion _panelRotationOffset = Quaternion.identity;
+        private float _panelWidth = 142f;
+        private float _panelHeight = 88f;
         private Vector3 _lastPersistedPosition;
         private Quaternion _lastPersistedRotation = Quaternion.identity;
         private float _nextPoseSaveAt;
@@ -71,6 +75,36 @@ namespace RiftPulse.Pcvr
             var host = new GameObject("RiftPulse BSR Queue Driver");
             DontDestroyOnLoad(host);
             _instance = host.AddComponent<RiftPulseSongRequestPanel>();
+            _instance.LoadPanelPose();
+        }
+
+        public static float PanelX { get { Initialize(); return _instance != null ? _instance._panelOffset.x : 0f; } set { UpdatePanelPreference(panel => panel._panelOffset.x = Mathf.Clamp(value, -2.5f, 2.5f)); } }
+        public static float PanelY { get { Initialize(); return _instance != null ? _instance._panelOffset.y : 0f; } set { UpdatePanelPreference(panel => panel._panelOffset.y = Mathf.Clamp(value, -2f, 2f)); } }
+        public static float PanelZ { get { Initialize(); return _instance != null ? _instance._panelOffset.z : 2.25f; } set { UpdatePanelPreference(panel => panel._panelOffset.z = Mathf.Clamp(value, 0.8f, 4.5f)); } }
+        public static float PanelWidth { get { Initialize(); return _instance != null ? _instance._panelWidth : 142f; } set { UpdatePanelPreference(panel => panel._panelWidth = Mathf.Clamp(value, 104f, 180f)); } }
+        public static float PanelHeight { get { Initialize(); return _instance != null ? _instance._panelHeight : 88f; } set { UpdatePanelPreference(panel => panel._panelHeight = Mathf.Clamp(value, 68f, 120f)); } }
+
+        private static void UpdatePanelPreference(Action<RiftPulseSongRequestPanel> update)
+        {
+            Initialize();
+            var panel = _instance;
+            if (panel == null) return;
+            if (panel._panel != null) panel.PersistDraggedPose();
+            update(panel);
+            panel.SavePanelPose();
+            if (panel._panel == null) return;
+            var camera = Camera.main;
+            if (camera != null)
+            {
+                var cameraTransform = camera.transform;
+                var position = cameraTransform.position
+                    + RiftPulseChatPanelPreferences.HorizontalRight(cameraTransform) * panel._panelOffset.x
+                    + Vector3.up * panel._panelOffset.y
+                    + RiftPulseChatPanelPreferences.HorizontalForward(cameraTransform) * panel._panelOffset.z;
+                panel._panel.ScreenPosition = position;
+            }
+            panel.RelayoutPanel();
+            panel.RenderQueue();
         }
 
         public static void Shutdown()
@@ -125,6 +159,13 @@ namespace RiftPulse.Pcvr
                     if (!float.TryParse(values[i], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed[i])) return;
                 _panelOffset = new Vector3(parsed[0], parsed[1], parsed[2]);
                 _panelRotationOffset = new Quaternion(parsed[3], parsed[4], parsed[5], parsed[6]);
+                if (values.Length >= 9)
+                {
+                    if (float.TryParse(values[7], NumberStyles.Float, CultureInfo.InvariantCulture, out var width))
+                        _panelWidth = Mathf.Clamp(width, 104f, 180f);
+                    if (float.TryParse(values[8], NumberStyles.Float, CultureInfo.InvariantCulture, out var height))
+                        _panelHeight = Mathf.Clamp(height, 68f, 120f);
+                }
             }
             catch { _panelOffset = new Vector3(0f, 0f, 2.25f); _panelRotationOffset = Quaternion.identity; }
         }
@@ -140,7 +181,9 @@ namespace RiftPulse.Pcvr
                     _panelRotationOffset.x.ToString("R", CultureInfo.InvariantCulture),
                     _panelRotationOffset.y.ToString("R", CultureInfo.InvariantCulture),
                     _panelRotationOffset.z.ToString("R", CultureInfo.InvariantCulture),
-                    _panelRotationOffset.w.ToString("R", CultureInfo.InvariantCulture)
+                    _panelRotationOffset.w.ToString("R", CultureInfo.InvariantCulture),
+                    _panelWidth.ToString("R", CultureInfo.InvariantCulture),
+                    _panelHeight.ToString("R", CultureInfo.InvariantCulture)
                 }));
             }
             catch { }
@@ -182,7 +225,7 @@ namespace RiftPulse.Pcvr
             var rotation = Quaternion.Angle(_panelRotationOffset, Quaternion.identity) < 0.01f
                 ? Quaternion.LookRotation(transform.position - position, Vector3.up)
                 : cameraRotation * _panelRotationOffset;
-            _panel = FloatingScreen.CreateFloatingScreen(new Vector2(142f, 88f), true, position, rotation, 0f, true);
+            _panel = FloatingScreen.CreateFloatingScreen(new Vector2(_panelWidth, _panelHeight), true, position, rotation, 0f, true);
             if (_panel == null) return false;
             _panel.ShowHandle = true;
             _panel.HighlightHandle = true;
@@ -191,16 +234,17 @@ namespace RiftPulse.Pcvr
             var background = root.gameObject.GetComponent<Image>();
             if (background != null) background.color = new Color(0.018f, 0.028f, 0.060f, 0.97f);
 
-            _header = CreateText(root, "RIFTPULSE  /  SONG REQUESTS", new Vector2(0f, 38f), new Vector2(128f, 8f), 4.2f, TextAlignmentOptions.Center);
-            _status = CreateText(root, "Connecting to the live queue...", new Vector2(0f, -40f), new Vector2(125f, 4f), 2.0f, TextAlignmentOptions.Center);
-            _detail = CreateText(root, "♫  SELECT A REQUEST\n\nChoose a song to review it.", new Vector2(35f, 18f), new Vector2(58f, 30f), 2.8f, TextAlignmentOptions.TopLeft);
+            _header = CreateText(root, "RIFTPULSE  /  SONG REQUESTS", new Vector2(0f, _panelHeight * 0.5f - 5f), new Vector2(_panelWidth - 14f, 7f), 4.2f, TextAlignmentOptions.Center);
+            _status = CreateText(root, "Connecting to the live queue...", new Vector2(0f, -_panelHeight * 0.5f + 4f), new Vector2(_panelWidth - 14f, 4f), 2.0f, TextAlignmentOptions.Center);
+            _detail = CreateText(root, "♫  SELECT A REQUEST\n\nChoose a song to review it.", new Vector2(_panelWidth * 0.246f, _panelHeight * 0.2f), new Vector2(_panelWidth * 0.408f, _panelHeight * 0.34f), 2.8f, TextAlignmentOptions.TopLeft);
 
             CreateQueueScrollView(root);
-            _yesButton = CreateButton(root, "BSR Approve", "YES  /  DOWNLOAD", new Vector2(35f, -4f), new Vector2(48f, 9f), () => { _ = ApproveSelected(); });
-            _noButton = CreateButton(root, "BSR Reject", "NO  /  REMOVE", new Vector2(35f, -15f), new Vector2(48f, 8f), () => { _ = RejectSelected(); });
-            CreateButton(root, "BSR Refresh", "REFRESH QUEUE", new Vector2(35f, -27f), new Vector2(48f, 7f), () => { _ = RefreshQueue(); });
-            var hint = CreateText(root, "GRAB THE WHITE HANDLE TO MOVE", new Vector2(0f, -43f), new Vector2(70f, 3f), 1.55f, TextAlignmentOptions.Center);
+            _yesButton = CreateButton(root, "BSR Approve", "YES  /  DOWNLOAD", new Vector2(_panelWidth * 0.246f, -_panelHeight * 0.045f), new Vector2(_panelWidth * 0.338f, _panelHeight * 0.102f), () => { _ = ApproveSelected(); });
+            _noButton = CreateButton(root, "BSR Reject", "NO  /  REMOVE", new Vector2(_panelWidth * 0.246f, -_panelHeight * 0.17f), new Vector2(_panelWidth * 0.338f, _panelHeight * 0.09f), () => { _ = RejectSelected(); });
+            _refreshButton = CreateButton(root, "BSR Refresh", "REFRESH QUEUE", new Vector2(_panelWidth * 0.246f, -_panelHeight * 0.307f), new Vector2(_panelWidth * 0.338f, _panelHeight * 0.0795f), () => { _ = RefreshQueue(); });
+            var hint = CreateText(root, "DRAG TO MOVE", new Vector2(0f, -_panelHeight * 0.5f + 2.2f), new Vector2(70f, 3.5f), 1.65f, TextAlignmentOptions.Center);
             hint.color = new Color(0.34f, 0.88f, 1f, 1f);
+            ApplyGrabHandleStyle();
             _lastPersistedPosition = _panel.ScreenPosition;
             _lastPersistedRotation = _panel.ScreenRotation;
             RenderQueue();
@@ -216,8 +260,8 @@ namespace RiftPulse.Pcvr
             viewportRect.SetParent(root, false);
             viewportRect.anchorMin = viewportRect.anchorMax = new Vector2(0.5f, 0.5f);
             viewportRect.pivot = new Vector2(0.5f, 0.5f);
-            viewportRect.anchoredPosition = new Vector2(-34f, -1f);
-            viewportRect.sizeDelta = new Vector2(68f, 67f);
+            viewportRect.anchoredPosition = new Vector2(-_panelWidth * 0.24f, 0f);
+            viewportRect.sizeDelta = new Vector2(_panelWidth * 0.48f, _panelHeight * 0.76f);
             var viewportImage = viewportObject.GetComponent<Image>();
             viewportImage.color = new Color(0.025f, 0.04f, 0.075f, 1f);
             viewportImage.raycastTarget = true;
@@ -242,6 +286,7 @@ namespace RiftPulse.Pcvr
             layout.padding = new RectOffset(1, 1, 1, 1);
             var fitter = contentObject.GetComponent<ContentSizeFitter>();
             fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            _queueViewport = viewportRect;
             _queueScroll = viewportObject.GetComponent<ScrollRect>();
             _queueScroll.viewport = viewportRect;
             _queueScroll.content = contentRect;
@@ -262,13 +307,103 @@ namespace RiftPulse.Pcvr
             rect.anchoredPosition = position;
             rect.sizeDelta = size;
             var text = go.GetComponent<TextMeshProUGUI>();
+            var font = RiftPulseChatPanel.ResolvePanelFont();
+            if (font != null) text.font = font;
             text.text = value;
-            text.fontSize = fontSize;
+            text.fontStyle = FontStyles.Bold;
+            text.fontSize = fontSize * TextScale;
             text.color = new Color(0.92f, 0.95f, 1f, 1f);
             text.enableWordWrapping = true;
             text.alignment = alignment;
             text.richText = true;
             return text;
+        }
+
+        private float TextScale => Mathf.Clamp(1f / Mathf.Min(_panelWidth / 142f, _panelHeight / 88f), 1f, 1.5f);
+
+        private void ApplyGrabHandleStyle()
+        {
+            if (_panel == null) return;
+            _panel.ShowHandle = true;
+            _panel.HighlightHandle = true;
+            GameObject? handle = null;
+            for (var type = _panel.GetType(); type != null && handle == null; type = type.BaseType)
+            {
+                var field = type.GetField("handle", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+                handle = field?.GetValue(_panel) as GameObject;
+            }
+            if (handle == null) return;
+            handle.SetActive(true);
+            handle.transform.localPosition = new Vector3(0f, -_panelHeight * 0.5f + 2.2f, 0f);
+            handle.transform.localRotation = Quaternion.identity;
+            handle.transform.localScale = Vector3.one;
+            var renderer = handle.GetComponent<MeshRenderer>();
+            if (renderer != null) { renderer.enabled = true; renderer.material.color = Color.white; }
+            var collider = handle.GetComponent<BoxCollider>();
+            if (collider == null) collider = handle.AddComponent<BoxCollider>();
+            collider.center = Vector3.zero;
+            collider.size = new Vector3(Mathf.Clamp(_panelWidth * 0.34f, 24f, 42f), 4.5f, 4.5f);
+        }
+
+        private void RelayoutPanel()
+        {
+            if (_panel == null) return;
+            _panel.ScreenSize = new Vector2(_panelWidth, _panelHeight);
+            if (_header != null)
+            {
+                var rect = _header.GetComponent<RectTransform>();
+                rect.anchoredPosition = new Vector2(0f, _panelHeight * 0.5f - 5f);
+                rect.sizeDelta = new Vector2(_panelWidth - 14f, 7f);
+                _header.fontSize = 4.2f * TextScale;
+            }
+            if (_status != null)
+            {
+                var rect = _status.GetComponent<RectTransform>();
+                rect.anchoredPosition = new Vector2(0f, -_panelHeight * 0.5f + 4f);
+                rect.sizeDelta = new Vector2(_panelWidth - 14f, 4f);
+                _status.fontSize = 2.0f * TextScale;
+            }
+            if (_detail != null)
+            {
+                var rect = _detail.GetComponent<RectTransform>();
+                rect.anchoredPosition = new Vector2(_panelWidth * 0.246f, _panelHeight * 0.2f);
+                rect.sizeDelta = new Vector2(_panelWidth * 0.408f, _panelHeight * 0.34f);
+                _detail.fontSize = 2.8f * TextScale;
+            }
+            if (_queueViewport != null)
+            {
+                _queueViewport.anchoredPosition = new Vector2(-_panelWidth * 0.24f, 0f);
+                _queueViewport.sizeDelta = new Vector2(_panelWidth * 0.48f, _panelHeight * 0.76f);
+            }
+            SetButtonLayout(_yesButton, new Vector2(_panelWidth * 0.246f, -_panelHeight * 0.045f), new Vector2(_panelWidth * 0.338f, _panelHeight * 0.102f));
+            SetButtonLayout(_noButton, new Vector2(_panelWidth * 0.246f, -_panelHeight * 0.17f), new Vector2(_panelWidth * 0.338f, _panelHeight * 0.09f));
+            SetButtonLayout(_refreshButton, new Vector2(_panelWidth * 0.246f, -_panelHeight * 0.307f), new Vector2(_panelWidth * 0.338f, _panelHeight * 0.0795f));
+            ApplyGrabHandleStyle();
+            foreach (var row in _rowButtons)
+            {
+                if (row == null) continue;
+                var rowRect = row.GetComponent<RectTransform>();
+                rowRect.sizeDelta = new Vector2(_panelWidth * 0.465f, _panelHeight * 0.102f);
+                var label = row.GetComponentInChildren<TextMeshProUGUI>();
+                if (label != null) label.fontSize = 2.7f * TextScale;
+                var element = row.GetComponent<LayoutElement>();
+                if (element != null) { element.preferredWidth = _panelWidth * 0.465f; element.preferredHeight = _panelHeight * 0.102f; }
+            }
+            if (_queueContent != null) LayoutRebuilder.ForceRebuildLayoutImmediate(_queueContent);
+        }
+
+        private void SetButtonLayout(Button? button, Vector2 position, Vector2 size)
+        {
+            if (button == null) return;
+            var rect = button.GetComponent<RectTransform>();
+            rect.anchoredPosition = position;
+            rect.sizeDelta = size;
+            var label = button.GetComponentInChildren<TextMeshProUGUI>();
+            if (label != null)
+            {
+                label.fontSize = 2.7f * TextScale;
+                label.GetComponent<RectTransform>().sizeDelta = size - new Vector2(2f, 1f);
+            }
         }
 
         private Button CreateButton(Transform parent, string name, string label, Vector2 position, Vector2 size, Action action)
@@ -325,17 +460,17 @@ namespace RiftPulse.Pcvr
                 var selected = i == _selectedIndex;
                 var button = CreateButton(_queueContent!, "BSR Song Row " + i,
                     (selected ? "▶  " : "♫  ") + song + "  ·  " + item.Requester,
-                    Vector2.zero, new Vector2(66f, 9f),
+                    Vector2.zero, new Vector2(_panelWidth * 0.465f, _panelHeight * 0.102f),
                     () => SelectRequest(rowIndex));
                 var layout = button.GetComponent<LayoutElement>();
                 if (layout == null) layout = button.gameObject.AddComponent<LayoutElement>();
-                layout.preferredWidth = 66f;
-                layout.preferredHeight = 9f;
+                layout.preferredWidth = _panelWidth * 0.465f;
+                layout.preferredHeight = _panelHeight * 0.102f;
                 layout.flexibleWidth = 0f;
                 layout.flexibleHeight = 0f;
                 button.interactable = true;
                 var rowLabel = button.GetComponentInChildren<TextMeshProUGUI>();
-                if (rowLabel != null) rowLabel.enableWordWrapping = false;
+                if (rowLabel != null) { rowLabel.enableWordWrapping = false; rowLabel.fontSize = 2.7f * TextScale; rowLabel.fontStyle = FontStyles.Bold; }
                 var image = button.GetComponent<Image>();
                 if (image != null)
                     image.color = selected ? new Color(0.28f, 0.18f, 0.48f, 1f) : new Color(0.09f, 0.13f, 0.22f, 0.98f);
@@ -665,6 +800,12 @@ namespace RiftPulse.Pcvr
             _header = null;
             _detail = null;
             _status = null;
+            _queueContent = null;
+            _queueViewport = null;
+            _queueScroll = null;
+            _yesButton = null;
+            _noButton = null;
+            _refreshButton = null;
             _rowButtons.Clear();
         }
     }

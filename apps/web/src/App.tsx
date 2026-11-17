@@ -34,6 +34,22 @@ type ProviderEventPayload = {
   currency: string | null; message: string | null; receivedAt: string;
 };
 
+function chatEventLabel(kind: string | null | undefined): string {
+  switch (kind) {
+    case "follow": return "Follow";
+    case "subscription": return "Membership";
+    case "gift": return "Gift";
+    case "bits": return "Bits";
+    case "super_chat": return "Super Chat";
+    case "donation": return "Donation";
+    case "like": return "Like";
+    case "share": return "Share";
+    case "raid": return "Raid";
+    case "member_join": return "Member joined";
+    default: return kind ? kind.replace(/_/g, " ") : "Stream event";
+  }
+}
+
 function providerEventAsChatMessage(value: unknown): ChatMessage | null {
   if (!value || typeof value !== "object") return null;
   const event = value as Partial<ProviderEventPayload>;
@@ -1424,10 +1440,10 @@ function App() {
           </section>
 
           <section className="section-block downloads-block" id="downloads" data-tour-target="downloads">
-            <div className="section-heading"><div><div className="section-overline">LATEST MOD BUILDS</div><h3>Beat Saber downloads <span className="subtle-count">02</span></h3><p>Choose your Beat Saber 1.40.8 version and follow the matching install steps.</p></div><span className="settings-badge">PCVR v0.3.7 / Quest v0.3.14 Alpha</span></div>
+            <div className="section-heading"><div><div className="section-overline">LATEST MOD BUILDS</div><h3>Beat Saber downloads <span className="subtle-count">02</span></h3><p>Choose your Beat Saber 1.40.8 version and follow the matching install steps.</p></div><span className="settings-badge">PCVR v0.3.8 / Quest v0.3.15 Alpha</span></div>
             <div className="downloads-grid">
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR</b><small>Windows / Beat Saber 1.40.8 (PCVR)</small></div><span className="download-state">v0.3.7 | ZIP BUILT</span></div>
+                <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR</b><small>Windows / Beat Saber 1.40.8 (PCVR)</small></div><span className="download-state">v0.3.8 | ZIP BUILT</span></div>
                 <p className="download-step-title">Install PCVR</p>
                 <ol className="download-steps">
                   <li>Download the PCVR ZIP.</li>
@@ -1436,10 +1452,10 @@ function App() {
                   <li>Start Beat Saber once to complete the installation.</li>
                 </ol>
                 <p className="download-platform-note">PCVR only · Windows ZIP · Beat Saber 1.40.8</p>
-                <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr-0.3.7.zip" download><Download size={15} /> Download PCVR ZIP</a>
+                <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr-0.3.8.zip" download><Download size={15} /> Download PCVR ZIP</a>
               </article>
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest Standalone</b><small>Meta Quest headset / Beat Saber 1.40.8</small></div><span className="download-state">v0.3.14 Alpha | QMOD BUILT</span></div>
+                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest Standalone</b><small>Meta Quest headset / Beat Saber 1.40.8</small></div><span className="download-state">v0.3.15 Alpha | QMOD BUILT</span></div>
                 <p className="download-step-title">Install Quest Standalone</p>
                 <ol className="download-steps">
                   <li>Make sure the headset has standalone Beat Saber 1.40.8 installed.</li>
@@ -1448,7 +1464,7 @@ function App() {
                   <li>Start Beat Saber once to complete the installation.</li>
                 </ol>
                 <p className="download-platform-note">Quest Standalone only · QMOD · Beat Saber 1.40.8</p>
-                <a className="primary-button download-link" href="/downloads/RiftPulse-Quest-0.3.14-Alpha.qmod" download="RiftPulse-Quest-0.3.14-Alpha.qmod"><Download size={15} /> Download Quest QMOD</a>
+                <a className="primary-button download-link" href="/downloads/RiftPulse-Quest-0.3.15-Alpha.qmod" download="RiftPulse-Quest-0.3.15-Alpha.qmod"><Download size={15} /> Download Quest QMOD</a>
               </article>
             </div>
 
@@ -1479,15 +1495,15 @@ function App() {
                   : chatMessages.length === 0 ? <div className="chat-empty"><div className="chat-empty-icon"><MessageCircle size={21} /></div><div><b>No live messages yet</b><p>Provider connectors are not authorized yet, so no real messages are being received.</p></div></div>
                   : <div className="chat-message-list">{chatMessages.slice(-8).map(message => {
                     const provider = providers.find(item => item.key === message.provider);
+                    const eventLabel = message.recordType === "event" ? chatEventLabel(message.eventKind) : "";
                     return <article className={"chat-message-row " + (message.recordType === "event" ? "chat-event-row " : "chat-plain-row ") + (provider?.className ?? "tiktok")} key={message.id}>
                       <div className="chat-message-copy">
-                        <div className="chat-message-meta">
-                          <ProviderGlyph provider={message.provider} />
-                          <b className="chat-sender-name">{message.senderName}</b>
-                          {message.recordType === "event" && <span className="chat-event-kind">{(message.eventKind ?? "event").replace(/_/g, " ")}</span>}
-                          <time>{new Date(message.receivedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
-                        </div>
-                        <p className="chat-message-text">{message.text}</p>
+                        <p className="chat-message-line">
+                          <time>{new Date(message.receivedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}</time>
+                          <b className="chat-sender-name">{message.senderName}:</b>
+                          {eventLabel && <span className="chat-event-kind">{eventLabel}</span>}
+                          <span className="chat-message-text">{message.text}</span>
+                        </p>
                       </div>
                     </article>;
                   })}</div>}
@@ -1596,7 +1612,7 @@ function App() {
               <div className="field-group"><label htmlFor="bsr-cooldown">Requester cooldown (seconds)</label><input id="bsr-cooldown" type="number" min="0" max="3600" step="5" value={requesterCooldownSeconds} onChange={e => setRequesterCooldownSeconds(Math.max(0, Math.min(3600, Number(e.target.value))))} /><small>Set to 0 to disable per-viewer cooldown.</small></div>
               <div className="field-group"><label htmlFor="bsr-queue-limit">Maximum queue size</label><input id="bsr-queue-limit" type="number" min="1" max="50" step="1" value={queueLimit} onChange={e => setQueueLimit(Math.max(1, Math.min(50, Number(e.target.value))))} /><small>Active requests allowed at once (1–50).</small></div>
             </div>
-            <div className="settings-option"><div><b>Reduced motion</b><small>Respect your device's motion preference.</small></div><span className="settings-badge">PCVR v0.3.7 / Quest v0.3.14 Alpha</span></div>
+            <div className="settings-option"><div><b>Reduced motion</b><small>Respect your device's motion preference.</small></div><span className="settings-badge">PCVR v0.3.8 / Quest v0.3.15 Alpha</span></div>
             <button className="primary-button modal-submit" onClick={() => void saveSettings()}>Save settings to account <Check size={15} /></button>
           </>}
           {modal === "help" && <><div className="modal-icon purple-modal"><Headphones size={22} /></div><div className="modal-eyebrow">RIFTPULSE GUIDE</div><h2 id="modal-title">Ready when you are.</h2><p className="modal-copy">RiftPulse connects your livestream community with Beat Saber. V1 is focused on two modules: in-game Chat and BSR Song Request.</p><div className="help-list"><div><MessageCircle size={18} /><span><b>Chat</b><small>Bring supported live messages into your game.</small></span></div><div><Music2 size={18} /><span><b>BSR Song Request</b><small>Queue viewer song requests with configurable commands.</small></span></div><div><Gamepad2 size={18} /><span><b>Pair your game</b><small>Use the in-game five-digit pairing flow once the mod is installed.</small></span></div></div><button className="primary-button modal-submit" onClick={() => { setModal(null); startPairing(); setModal("pair"); }}>Connect a device <ArrowUpRight size={15} /></button></>}

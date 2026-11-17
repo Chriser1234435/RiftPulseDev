@@ -20,7 +20,7 @@ namespace RiftPulse.Pcvr
     {
         private const string ApiBase = "https://app.riftpulse.me/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.3.7";
+        private const string ModVersion = "0.3.8";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 
@@ -659,6 +659,21 @@ namespace RiftPulse.Pcvr
             get => RiftPulsePairingViewController.BsrQueueLimit;
             set => RiftPulsePairingViewController.BsrQueueLimit = value;
         }
+
+        [UIValue("bsr-panel-x")]
+        public float PanelX { get => RiftPulseSongRequestPanel.PanelX; set => RiftPulseSongRequestPanel.PanelX = value; }
+
+        [UIValue("bsr-panel-y")]
+        public float PanelY { get => RiftPulseSongRequestPanel.PanelY; set => RiftPulseSongRequestPanel.PanelY = value; }
+
+        [UIValue("bsr-panel-z")]
+        public float PanelZ { get => RiftPulseSongRequestPanel.PanelZ; set => RiftPulseSongRequestPanel.PanelZ = value; }
+
+        [UIValue("bsr-panel-width")]
+        public float PanelWidth { get => RiftPulseSongRequestPanel.PanelWidth; set => RiftPulseSongRequestPanel.PanelWidth = value; }
+
+        [UIValue("bsr-panel-height")]
+        public float PanelHeight { get => RiftPulseSongRequestPanel.PanelHeight; set => RiftPulseSongRequestPanel.PanelHeight = value; }
 
         [UIAction("save-bsr-settings")]
         public async void SaveClicked()

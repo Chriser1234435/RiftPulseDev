@@ -330,6 +330,9 @@ namespace RiftPulse.Pcvr
                         _panel.ScreenRotation, RiftPulseChatPanelPreferences.CapturedSettingsCameraRotation);
             }
             _panel.ScreenSize = new Vector2(RiftPulseChatPanelPreferences.Width, RiftPulseChatPanelPreferences.Height);
+            var readableScale = Mathf.Clamp(1f / Mathf.Min(RiftPulseChatPanelPreferences.Width / 110f, RiftPulseChatPanelPreferences.Height / 70f), 1f, 1.75f);
+            if (_text != null) { _text.fontSize = 3.0f * readableScale; _text.fontStyle = FontStyles.Bold; }
+            if (_headerText != null) { _headerText.fontSize = 2.8f * readableScale; _headerText.fontStyle = FontStyles.Bold; }
             if (_headerText != null)
             {
                 var headerRect = _headerText.GetComponent<RectTransform>();
@@ -395,7 +398,7 @@ namespace RiftPulse.Pcvr
 
         }
 
-        private static TMP_FontAsset? ResolvePanelFont()
+        internal static TMP_FontAsset? ResolvePanelFont()
         {
             // Prefer a neutral, high-legibility sans-serif when the game has one
             // loaded; fall back to Beat Saber's default TMP asset on every version.
@@ -432,6 +435,7 @@ namespace RiftPulse.Pcvr
             var font = ResolvePanelFont();
             if (font != null) text.font = font;
             text.fontSize = fontSize;
+            text.fontStyle = FontStyles.Bold;
             text.enableWordWrapping = true;
             text.alignment = alignment;
             text.color = new Color(0.91f, 0.93f, 1f, 1f);
@@ -482,6 +486,11 @@ namespace RiftPulse.Pcvr
                     Mathf.Max(18f, RiftPulseChatPanelPreferences.Height - 22f)),
                 3.0f, TextAlignmentOptions.BottomLeft);
             _text.text = "Waiting for live messages...";
+            var readableScale = Mathf.Clamp(1f / Mathf.Min(RiftPulseChatPanelPreferences.Width / 110f, RiftPulseChatPanelPreferences.Height / 70f), 1f, 1.75f);
+            _text.fontSize = 3.0f * readableScale;
+            _text.fontStyle = FontStyles.Bold;
+            _headerText.fontSize = 2.8f * readableScale;
+            _headerText.fontStyle = FontStyles.Bold;
             // Old entries are trimmed before rendering. Keep TMP in its default
             // overflow mode because Masking can hide all text on some VR canvases.
 
@@ -792,35 +801,33 @@ namespace RiftPulse.Pcvr
         }
         private static string ProviderBadge(string provider)
         {
-            if (provider == "twitch") return "<mark=#9146FF><color=#FFFFFF><b> TW </b></color></mark>";
-            if (provider == "youtube") return "<mark=#FF0000><color=#FFFFFF><b> YT </b></color></mark>";
-            if (provider == "tiktok") return "<mark=#FFFFFF><color=#111111><b> TT </b></color></mark>";
-            return "<mark=#64748B><color=#FFFFFF><b> RP </b></color></mark>";
+            var color = provider == "twitch" ? "#9146FF" : provider == "youtube" ? "#FF3333" : provider == "tiktok" ? "#FFFFFF" : "#64748B";
+            return "<size=90%><color=" + color + "><b>■</b></color></size>";
         }
 
-        private static string FormatFeedEntry(string provider, string eventKind, string sender, string message)
+        private static string FormatFeedEntry(string provider, string eventKind, string sender, string message, DateTime messageTime)
         {
             var safeSender = Escape(sender, 28);
-            var safeMessage = Escape(message, 80);
-            var badge = ProviderBadge(provider);
+            var safeMessage = Escape(message, 180);
+            var timeLabel = messageTime.ToLocalTime().ToString("hh:mm tt", CultureInfo.CurrentCulture);
+            var prefix = timeLabel + " " + ProviderBadge(provider) + " ";
+            var nameColor = provider == "twitch" ? "#D7C4FF" : provider == "youtube" ? "#FF8585" : provider == "tiktok" ? "#FFFFFF" : "#E1E8F3";
             if (string.IsNullOrEmpty(eventKind))
-            {
-                var nameColor = provider == "twitch" ? "#C4A1FF" : provider == "youtube" ? "#FF6666" : provider == "tiktok" ? "#FFFFFF" : "#D7E0EF";
-                return badge + " <color=" + nameColor + "><b>" + safeSender + "</b></color>\n" + safeMessage + "\n\n";
-            }
-            var label = eventKind == "follow" ? "* FOLLOW"
-                : eventKind == "subscription" ? "+ SUB / MEMBER"
-                : eventKind == "gift" ? "GIFT"
-                : eventKind == "bits" ? "BITS"
-                : eventKind == "super_chat" ? "$ SUPER CHAT"
-                : eventKind == "donation" ? "$ DONATION"
-                : eventKind == "like" ? "LIKE"
-                : eventKind == "share" ? "SHARE"
-                : eventKind == "raid" ? "RAID"
-                : eventKind == "member_join" ? "+ MEMBER JOIN" : "STREAM EVENT";
-            var accent = provider == "twitch" ? "#9146FF" : provider == "youtube" ? "#FF3333" : provider == "tiktok" ? "#D8D8D8" : "#64748B";
-            var foreground = provider == "tiktok" ? "#111111" : "#FFFFFF";
-            return badge + " <mark=" + accent + "><color=" + foreground + "><b> " + label + " / " + safeSender + " </b></color></mark>\n<color=" + accent + "><b>" + safeMessage + "</b></color>\n\n";
+                return prefix + "<color=" + nameColor + "><b>" + safeSender + ":</b></color> <b>" + safeMessage + "</b>\n";
+
+            var label = eventKind == "follow" ? "Follow"
+                : eventKind == "subscription" ? "Membership"
+                : eventKind == "gift" ? "Gift"
+                : eventKind == "bits" ? "Bits"
+                : eventKind == "super_chat" ? "Super Chat"
+                : eventKind == "donation" ? "Donation"
+                : eventKind == "like" ? "Like"
+                : eventKind == "share" ? "Share"
+                : eventKind == "raid" ? "Raid"
+                : eventKind == "member_join" ? "Member joined" : "Stream event";
+            var accent = provider == "twitch" ? "#B99AFB" : provider == "youtube" ? "#FF7777" : provider == "tiktok" ? "#E6EAF0" : "#AAB7C8";
+            return timeLabel + " " + "<mark=" + accent + "><color=#FFFFFF><b> " + label + " </b></color></mark> "
+                + ProviderBadge(provider) + " <color=" + nameColor + "><b>" + safeSender + ":</b></color> <color=#F4F6FA><b>" + safeMessage + "</b></color>\n";
         }
 
         private void RenderFeed(string json)
@@ -877,16 +884,16 @@ namespace RiftPulse.Pcvr
                         messageTime = DateTime.UtcNow; // display ordering only; never discard chat due to device clock drift
                     var provider = ReadString(item, "provider");
                     var eventKind = ReadString(item, "eventKind");
-                    var entry = FormatFeedEntry(provider, eventKind, sender, message);
+                    var entry = FormatFeedEntry(provider, eventKind, sender, message, messageTime);
                     chatEntries.Add(new KeyValuePair<DateTime, string>(messageTime, entry));
                 }
                 chatEntries.Sort((left, right) => left.Key.CompareTo(right.Key));
                 var charsPerMessageLine = Mathf.Max(24f, RiftPulseChatPanelPreferences.Width * 0.62f);
-                var messageLines = 2f + Mathf.CeilToInt(80f / charsPerMessageLine);
-                var availableLines = Mathf.Max(1f, (RiftPulseChatPanelPreferences.Height - 25f) / 3.2f);
+                var messageLines = 1f + Mathf.CeilToInt(180f / charsPerMessageLine);
+                var availableLines = Mathf.Max(1f, (RiftPulseChatPanelPreferences.Height - 22f) / 3.2f);
                 // Keep a conservative fixed-capacity feed so each refresh removes the
                 // oldest entries before rendering; never let a burst fill the panel.
-                var visibleMessageCapacity = Mathf.Clamp(Mathf.FloorToInt(availableLines / messageLines), 1, 4);
+                var visibleMessageCapacity = Mathf.Clamp(Mathf.FloorToInt(availableLines / messageLines), 1, 5);
                 if (chatEntries.Count > visibleMessageCapacity)
                     chatEntries.RemoveRange(0, chatEntries.Count - visibleMessageCapacity);
                 // Bottom-anchored feed: keep chronological order so newest entries sit at the bottom.

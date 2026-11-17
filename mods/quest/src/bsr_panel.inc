@@ -15,6 +15,9 @@ static BSML::FloatingScreen* worldBsrPanel = nullptr;
 static TMPro::TextMeshProUGUI* worldBsrHeader = nullptr;
 static TMPro::TextMeshProUGUI* worldBsrDetail = nullptr;
 static TMPro::TextMeshProUGUI* worldBsrStatus = nullptr;
+static TMPro::TextMeshProUGUI* worldBsrHandleLabel = nullptr;
+static UnityEngine::RectTransform* worldBsrSurfaceRect = nullptr;
+static UnityEngine::UI::Button* worldBsrRefresh = nullptr;
 static UnityEngine::UI::Button* worldBsrPrevious = nullptr;
 static UnityEngine::UI::Button* worldBsrNext = nullptr;
 static UnityEngine::UI::Button* worldBsrYes = nullptr;
@@ -36,6 +39,8 @@ struct BsrPanelPose {
   float z = 2.35f;
   UnityEngine::Quaternion rotationOffset = UnityEngine::Quaternion(0.0f, 0.0f, 0.0f, 1.0f);
   bool hasRotationOffset = false;
+  float width = 142.0f;
+  float height = 86.0f;
 };
 static BsrPanelPose worldBsrPose;
 static UnityEngine::Vector3 worldBsrLastSavedPosition;
@@ -47,6 +52,27 @@ static std::string BsrPanelPosePath() {
   return dataDir.empty() ? std::string{} : dataDir + "/riftpulse-bsr-panel-pose.dat";
 }
 
+static void WriteBsrPanelPoseToDisk() {
+  const auto path = BsrPanelPosePath();
+  if (path.empty()) return;
+  const auto temporaryPath = path + ".tmp";
+  {
+    std::ofstream output(temporaryPath, std::ios::binary | std::ios::trunc);
+    if (!output) return;
+    output << worldBsrPose.x << " " << worldBsrPose.y << " " << worldBsrPose.z << " "
+        << worldBsrPose.rotationOffset.x << " " << worldBsrPose.rotationOffset.y << " "
+        << worldBsrPose.rotationOffset.z << " " << worldBsrPose.rotationOffset.w << " "
+        << (worldBsrPose.hasRotationOffset ? 1 : 0) << " "
+        << worldBsrPose.width << " " << worldBsrPose.height << std::endl;
+    output.flush();
+    if (!output.good()) { unlink(temporaryPath.c_str()); return; }
+  }
+  chmod(temporaryPath.c_str(), S_IRUSR | S_IWUSR);
+  if (rename(temporaryPath.c_str(), path.c_str()) == 0)
+    chmod(path.c_str(), S_IRUSR | S_IWUSR);
+  else unlink(temporaryPath.c_str());
+}
+
 static void LoadBsrPanelPose() {
   const auto path = BsrPanelPosePath();
   if (path.empty()) return;
@@ -54,16 +80,21 @@ static void LoadBsrPanelPose() {
   float x = 0.0f, y = 0.0f, z = 2.35f;
   float qx = 0.0f, qy = 0.0f, qz = 0.0f, qw = 1.0f;
   int hasRotation = 0;
+  float width = 142.0f;
+  float height = 86.0f;
   if (!(input >> x >> y >> z >> qx >> qy >> qz >> qw >> hasRotation)) return;
+  if (!(input >> width >> height)) { width = 142.0f; height = 86.0f; }
   worldBsrPose.x = std::clamp(x, -2.5f, 2.5f);
   worldBsrPose.y = std::clamp(y, -2.0f, 2.0f);
   worldBsrPose.z = std::clamp(z, 0.8f, 4.5f);
   worldBsrPose.rotationOffset = UnityEngine::Quaternion(qx, qy, qz, qw);
   worldBsrPose.hasRotationOffset = hasRotation != 0;
+  worldBsrPose.width = std::clamp(width, 104.0f, 180.0f);
+  worldBsrPose.height = std::clamp(height, 68.0f, 120.0f);
 }
 
 static void SaveBsrPanelPose() {
-  if (!worldBsrPanel) return;
+  if (!worldBsrPanel) { WriteBsrPanelPoseToDisk(); return; }
   const auto position = worldBsrPanel->get_ScreenPosition();
   const auto rotation = worldBsrPanel->get_ScreenRotation();
   if (!worldBsrHasSavedPose) {
@@ -107,7 +138,8 @@ static void SaveBsrPanelPose() {
       output << worldBsrPose.x << " " << worldBsrPose.y << " " << worldBsrPose.z << " "
           << worldBsrPose.rotationOffset.x << " " << worldBsrPose.rotationOffset.y << " "
           << worldBsrPose.rotationOffset.z << " " << worldBsrPose.rotationOffset.w << " "
-          << (worldBsrPose.hasRotationOffset ? 1 : 0) << std::endl;
+          << (worldBsrPose.hasRotationOffset ? 1 : 0) << " "
+          << worldBsrPose.width << " " << worldBsrPose.height << std::endl;
       output.flush();
       if (output.good()) {
         chmod(temporaryPath.c_str(), S_IRUSR | S_IWUSR);
@@ -130,6 +162,12 @@ static void SetBsrPanelStatus(const std::string& value) {
       [](unsigned char ch) { return ch == '\r' || ch == '\n'; }), compact.end());
   if (compact.size() > 110) compact = compact.substr(0, 107) + "...";
   worldBsrStatus->set_text(StringW(compact));
+}
+
+static float BsrPanelTextScale() {
+  const float scaleX = worldBsrPose.width / 142.0f;
+  const float scaleY = worldBsrPose.height / 86.0f;
+  return std::clamp(1.0f / std::min(scaleX, scaleY), 1.0f, 1.65f);
 }
 
 static TMPro::TextMeshProUGUI* CreateBsrPanelText(
@@ -159,10 +197,11 @@ static TMPro::TextMeshProUGUI* CreateBsrPanelText(
   if (font) label->set_font(font);
   label->set_enabled(true);
   label->set_text(StringW(text));
-  label->set_fontSize(fontSize);
+  label->set_fontStyle(TMPro::FontStyles::Bold);
+  label->set_fontSize(fontSize * BsrPanelTextScale());
   label->set_enableWordWrapping(true);
   label->set_alignment(alignment);
-  label->set_richText(false);
+  label->set_richText(true);
   label->set_raycastTarget(false);
   label->set_color(UnityEngine::Color(0.92f, 0.95f, 1.0f, 1.0f));
   object->SetActive(true);
@@ -178,7 +217,7 @@ static UnityEngine::UI::Button* CreateBsrPanelButton(
       position, size, std::move(onClick));
   if (button) {
     BSML::Lite::ToggleButtonWordWrapping(button, false);
-    BSML::Lite::SetButtonTextSize(button, 2.7f);
+    BSML::Lite::SetButtonTextSize(button, 2.7f * BsrPanelTextScale());
   }
   return button;
 }
@@ -186,6 +225,41 @@ static UnityEngine::UI::Button* CreateBsrPanelButton(
 static void SetBsrPanelActionsEnabled(bool enabled) {
   if (worldBsrYes) worldBsrYes->set_interactable(enabled);
   if (worldBsrNo) worldBsrNo->set_interactable(enabled);
+}
+
+static void ApplyBsrPanelHandleStyle() {
+  if (!worldBsrPanel) return;
+  worldBsrPanel->set_ShowHandle(true);
+  worldBsrPanel->set_HighlightHandle(true);
+  auto* handle = worldBsrPanel->handle;
+  if (handle) {
+    handle->SetActive(true);
+    auto handleTransform = handle->get_transform();
+    if (handleTransform) {
+      handleTransform->set_localPosition(UnityEngine::Vector3(0.0f, -worldBsrPose.height * 0.5f + 2.2f, 0.0f));
+      handleTransform->set_localRotation(UnityEngine::Quaternion::get_identity());
+      handleTransform->set_localScale(UnityEngine::Vector3(1.0f, 1.0f, 1.0f));
+    }
+    auto* renderer = handle->GetComponent<UnityEngine::MeshRenderer*>();
+    if (renderer) {
+      renderer->set_enabled(true);
+      auto material = renderer->get_material();
+      if (material) material->set_color(UnityEngine::Color(1.0f, 1.0f, 1.0f, 1.0f));
+    }
+    auto* collider = handle->GetComponent<UnityEngine::BoxCollider*>();
+    if (!collider) collider = handle->AddComponent<UnityEngine::BoxCollider*>();
+    if (collider) {
+      collider->set_center(UnityEngine::Vector3(0.0f, 0.0f, 0.0f));
+      collider->set_size(UnityEngine::Vector3(std::clamp(worldBsrPose.width * 0.34f, 24.0f, 42.0f), 4.5f, 4.5f));
+    }
+  }
+  if (worldBsrHandleLabel) {
+    auto* rect = worldBsrHandleLabel->GetComponent<UnityEngine::RectTransform*>();
+    if (rect) {
+      rect->set_anchoredPosition(UnityEngine::Vector2(0.0f, -worldBsrPose.height * 0.5f + 2.2f));
+      rect->set_sizeDelta(UnityEngine::Vector2(std::min(42.0f, worldBsrPose.width * 0.45f), 3.5f));
+    }
+  }
 }
 
 static std::string BsrEscapeRichText(std::string value, size_t maxLength) {
@@ -209,7 +283,7 @@ static void RenderBsrQueuePanel() {
   }
   worldBsrRows.clear();
 
-  const int pageSize = 4;
+  const int pageSize = std::clamp(static_cast<int>((worldBsrPose.height - 32.0f) / 12.0f), 2, 4);
   const int maxPage = worldBsrRequests.empty() ? 0 :
       static_cast<int>((worldBsrRequests.size() - 1) / pageSize);
   worldBsrPage = std::clamp(worldBsrPage, 0, maxPage);
@@ -229,12 +303,12 @@ static void RenderBsrQueuePanel() {
         std::to_string(index + 1) + "  " + song +
         (item.status == "playing" ? "  /  READY" : "");
     auto* button = CreateBsrPanelButton(worldBsrPanel->get_transform(), rowText,
-        UnityEngine::Vector2(-35.0f, 23.0f - static_cast<float>(index - start) * 12.0f),
-        UnityEngine::Vector2(70.0f, 10.5f),
+        UnityEngine::Vector2(-worldBsrPose.width * 0.246f, worldBsrPose.height * 0.267f - static_cast<float>(index - start) * worldBsrPose.height * 0.14f),
+        UnityEngine::Vector2(worldBsrPose.width * 0.493f, worldBsrPose.height * 0.122f),
         [index]() {
           if (index < 0 || index >= static_cast<int>(worldBsrRequests.size())) return;
           worldBsrSelectedIndex = index;
-          worldBsrPage = index / 4;
+          worldBsrPage = index / std::clamp(static_cast<int>((worldBsrPose.height - 32.0f) / 12.0f), 2, 4);
           RenderBsrQueuePanel();
         });
     if (button) worldBsrRows.push_back(button);
@@ -272,10 +346,11 @@ static void RenderBsrQueuePanel() {
 }
 
 static void ChangeBsrPanelPage(int delta) {
+  const int pageSize = std::clamp(static_cast<int>((worldBsrPose.height - 32.0f) / 12.0f), 2, 4);
   const int maxPage = worldBsrRequests.empty() ? 0 :
-      static_cast<int>((worldBsrRequests.size() - 1) / 4);
+      static_cast<int>((worldBsrRequests.size() - 1) / pageSize);
   worldBsrPage = std::clamp(worldBsrPage + delta, 0, maxPage);
-  worldBsrSelectedIndex = worldBsrRequests.empty() ? -1 : worldBsrPage * 4;
+  worldBsrSelectedIndex = worldBsrRequests.empty() ? -1 : worldBsrPage * pageSize;
   RenderBsrQueuePanel();
 }
 
@@ -300,7 +375,7 @@ static bool EnsureBsrQueuePanel() {
               cameraPosition.y - position.y, cameraPosition.z - position.z),
           UnityEngine::Vector3(0.0f, 1.0f, 0.0f));
   worldBsrPanel = BSML::FloatingScreen::CreateFloatingScreen(
-      UnityEngine::Vector2(142.0f, 86.0f), true, position, rotation, 0.0f, true);
+      UnityEngine::Vector2(worldBsrPose.width, worldBsrPose.height), true, position, rotation, 0.0f, true);
   if (!worldBsrPanel) return false;
   worldBsrPanel->set_ShowHandle(true);
   worldBsrPanel->set_HighlightHandle(true);
@@ -308,31 +383,85 @@ static bool EnsureBsrQueuePanel() {
   ApplyQuestDarkBackground(worldBsrPanel->get_gameObject(),
       UnityEngine::Color(0.018f, 0.028f, 0.060f, 0.97f));
   auto* bsrSurface = CreateWorldChatLockPart(worldBsrPanel->get_rectTransform(),
-      "RiftPulse Quest BSR Glass Surface", UnityEngine::Vector2(142.0f, 86.0f),
+      "RiftPulse Quest BSR Glass Surface", UnityEngine::Vector2(worldBsrPose.width, worldBsrPose.height),
       UnityEngine::Vector2(0.0f, 0.0f));
-  if (bsrSurface) bsrSurface->set_color(UnityEngine::Color(0.018f, 0.028f, 0.060f, 0.98f));
+  if (bsrSurface) {
+    bsrSurface->set_color(UnityEngine::Color(0.018f, 0.028f, 0.060f, 0.98f));
+    worldBsrSurfaceRect = bsrSurface->GetComponent<UnityEngine::RectTransform*>();
+  }
   auto root = worldBsrPanel->get_transform();
   worldBsrHeader = CreateBsrPanelText(root, "RiftPulse BSR Title", "RIFTPULSE  /  SONG REQUESTS",
-      4.1f, {0.0f, 37.0f}, {130.0f, 7.0f}, TMPro::TextAlignmentOptions::Center);
+      4.1f, {0.0f, worldBsrPose.height * 0.43f}, {worldBsrPose.width - 12.0f, 7.0f}, TMPro::TextAlignmentOptions::Center);
   worldBsrDetail = CreateBsrPanelText(root, "RiftPulse BSR Details", "Select a request to review it.",
-      2.8f, {35.0f, 3.0f}, {60.0f, 47.0f});
+      2.8f, {worldBsrPose.width * 0.246f, worldBsrPose.height * 0.035f}, {worldBsrPose.width * 0.423f, worldBsrPose.height * 0.547f});
   worldBsrStatus = CreateBsrPanelText(root, "RiftPulse BSR Status", "Connecting to your live queue...",
-      2.45f, {0.0f, -39.0f}, {130.0f, 4.5f}, TMPro::TextAlignmentOptions::Center);
+      2.45f, {0.0f, -worldBsrPose.height * 0.5f + 4.5f}, {worldBsrPose.width - 12.0f, 4.5f}, TMPro::TextAlignmentOptions::Center);
+  worldBsrHandleLabel = CreateBsrPanelText(root, "RiftPulse BSR Grab Label", "DRAG TO MOVE",
+      1.65f, {0.0f, -worldBsrPose.height * 0.5f + 2.2f}, {std::min(42.0f, worldBsrPose.width * 0.45f), 3.5f}, TMPro::TextAlignmentOptions::Center);
+  if (worldBsrHandleLabel) worldBsrHandleLabel->set_color(UnityEngine::Color(0.80f, 0.90f, 1.0f, 1.0f));
   worldBsrPrevious = CreateBsrPanelButton(root, "UP / PAGE",
-      {-49.0f, -33.0f}, {27.0f, 7.0f}, []() { ChangeBsrPanelPage(-1); });
+      {-worldBsrPose.width * 0.345f, -worldBsrPose.height * 0.384f}, {worldBsrPose.width * 0.19f, worldBsrPose.height * 0.081f}, []() { ChangeBsrPanelPage(-1); });
   worldBsrNext = CreateBsrPanelButton(root, "DOWN / PAGE",
-      {-20.0f, -33.0f}, {27.0f, 7.0f}, []() { ChangeBsrPanelPage(1); });
-  CreateBsrPanelButton(root, "REFRESH",
-      {9.0f, -33.0f}, {24.0f, 7.0f}, []() { RefreshBsrQueuePanel(); });
+      {-worldBsrPose.width * 0.141f, -worldBsrPose.height * 0.384f}, {worldBsrPose.width * 0.19f, worldBsrPose.height * 0.081f}, []() { ChangeBsrPanelPage(1); });
+  worldBsrRefresh = CreateBsrPanelButton(root, "REFRESH",
+      {worldBsrPose.width * 0.063f, -worldBsrPose.height * 0.384f}, {worldBsrPose.width * 0.17f, worldBsrPose.height * 0.081f}, []() { RefreshBsrQueuePanel(); });
   worldBsrYes = CreateBsrPanelButton(root, "YES  /  DOWNLOAD",
-      {35.0f, -23.0f}, {48.0f, 8.5f}, []() { ApproveBsrPanelRequest(); });
+      {worldBsrPose.width * 0.246f, -worldBsrPose.height * 0.267f}, {worldBsrPose.width * 0.338f, worldBsrPose.height * 0.099f}, []() { ApproveBsrPanelRequest(); });
   worldBsrNo = CreateBsrPanelButton(root, "NO  /  REMOVE",
-      {35.0f, -33.0f}, {48.0f, 8.5f}, []() { RejectBsrPanelRequest(); });
+      {worldBsrPose.width * 0.246f, -worldBsrPose.height * 0.384f}, {worldBsrPose.width * 0.338f, worldBsrPose.height * 0.099f}, []() { RejectBsrPanelRequest(); });
+  ApplyBsrPanelHandleStyle();
   worldBsrLastSavedPosition = worldBsrPanel->get_ScreenPosition();
   worldBsrLastSavedRotation = worldBsrPanel->get_ScreenRotation();
   worldBsrHasSavedPose = true;
   RenderBsrQueuePanel();
   return true;
+}
+
+static float GetBsrPanelSetting(int field) {
+  LoadBsrPanelPose();
+  switch (field) {
+    case 0: return worldBsrPose.x;
+    case 1: return worldBsrPose.y;
+    case 2: return worldBsrPose.z;
+    case 3: return worldBsrPose.width;
+    case 4: return worldBsrPose.height;
+    default: return 0.0f;
+  }
+}
+
+static void SetBsrPanelSetting(int field, float value) {
+  LoadBsrPanelPose();
+  switch (field) {
+    case 0: worldBsrPose.x = std::clamp(value, -2.5f, 2.5f); break;
+    case 1: worldBsrPose.y = std::clamp(value, -2.0f, 2.0f); break;
+    case 2: worldBsrPose.z = std::clamp(value, 0.8f, 4.5f); break;
+    case 3: worldBsrPose.width = std::clamp(value, 104.0f, 180.0f); break;
+    case 4: worldBsrPose.height = std::clamp(value, 68.0f, 120.0f); break;
+    default: return;
+  }
+  WriteBsrPanelPoseToDisk();
+  if (!worldBsrPanel) return;
+  auto previous = worldBsrPanel->get_gameObject();
+  if (previous) UnityEngine::Object::Destroy(previous);
+  worldBsrPanel = nullptr;
+  worldBsrHeader = nullptr;
+  worldBsrDetail = nullptr;
+  worldBsrStatus = nullptr;
+  worldBsrHandleLabel = nullptr;
+  worldBsrSurfaceRect = nullptr;
+  worldBsrPrevious = nullptr;
+  worldBsrNext = nullptr;
+  worldBsrRefresh = nullptr;
+  worldBsrYes = nullptr;
+  worldBsrNo = nullptr;
+  worldBsrRows.clear();
+  worldBsrPage = 0;
+  worldBsrHasSavedPose = false;
+  if (EnsureBsrQueuePanel()) {
+    if (worldBsrPanel && worldBsrPanel->get_gameObject())
+      worldBsrPanel->get_gameObject()->SetActive(true);
+    worldBsrNextPoll = 0.0f;
+  }
 }
 
 static size_t BsrFindJsonArrayEnd(const std::string& json, size_t start) {
@@ -800,9 +929,14 @@ static void ShowBsrQueuePanel() {
 }
 
 static void RecenterBsrQueuePanel() {
+  const float savedWidth = worldBsrPose.width;
+  const float savedHeight = worldBsrPose.height;
   const auto posePath = BsrPanelPosePath();
   if (!posePath.empty()) std::remove(posePath.c_str());
   worldBsrPose = BsrPanelPose{};
+  worldBsrPose.width = savedWidth;
+  worldBsrPose.height = savedHeight;
+  WriteBsrPanelPoseToDisk();
   worldBsrHasSavedPose = false;
   if (worldBsrPanel && worldBsrPanel->get_gameObject())
     UnityEngine::Object::Destroy(worldBsrPanel->get_gameObject());
@@ -810,6 +944,9 @@ static void RecenterBsrQueuePanel() {
   worldBsrHeader = nullptr;
   worldBsrDetail = nullptr;
   worldBsrStatus = nullptr;
+  worldBsrHandleLabel = nullptr;
+  worldBsrSurfaceRect = nullptr;
+  worldBsrRefresh = nullptr;
   worldBsrPrevious = nullptr;
   worldBsrNext = nullptr;
   worldBsrYes = nullptr;

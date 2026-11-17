@@ -33,6 +33,7 @@
 #include "UnityEngine/Object.hpp"
 #include "TMPro/TextMeshPro.hpp"
 #include "TMPro/TMP_Text.hpp"
+#include "TMPro/FontStyles.hpp"
 #include "TMPro/TMP_FontAsset.hpp"
 #include <regex>
 #include "bsml/shared/BSML.hpp"
@@ -67,6 +68,7 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <ctime>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -93,7 +95,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.3.14";
+static constexpr const char* MOD_VERSION = "0.3.15";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -674,6 +676,9 @@ static void RefreshSongRequestQueue();
 static void ShowBsrSettingsModal();
 static void ShowBsrQueuePanel();
 static void SaveBsrSettings();
+static void LoadBsrPanelPose();
+static float GetBsrPanelSetting(int field);
+static void SetBsrPanelSetting(int field, float value);
 
 static void RefreshModuleButtons() {
   if (chatButton) {
@@ -892,6 +897,7 @@ static void SaveBsrSettings() {
 
 static void ShowBsrSettingsModal() {
   if (!mainMenuRoot) return;
+  LoadBsrPanelPose();
   if (bsrSettingsModal) {
     ApplyQuestDarkBackground(bsrSettingsModal->get_gameObject(),
         UnityEngine::Color(0.018f, 0.028f, 0.060f, 0.98f));
@@ -919,6 +925,22 @@ static void ShowBsrSettingsModal() {
   BSML::Lite::CreateSliderSetting(container, "MAXIMUM QUEUE SIZE", 1.0f,
       bsrQueueLimit, 1.0f, 50.0f,
       [](float value) { bsrQueueLimit = std::clamp(value, 1.0f, 50.0f); });
+  BSML::Lite::CreateText(container, "FLOATING BSR PANEL DISPLAY", 2.7f, {0.0f, -8.0f}, {52.0f, 3.0f});
+  BSML::Lite::CreateSliderSetting(container, "LEFT / RIGHT  -  X", 0.05f,
+      GetBsrPanelSetting(0), -2.5f, 2.5f,
+      [](float value) { SetBsrPanelSetting(0, value); });
+  BSML::Lite::CreateSliderSetting(container, "UP / DOWN  -  Y", 0.05f,
+      GetBsrPanelSetting(1), -2.0f, 2.0f,
+      [](float value) { SetBsrPanelSetting(1, value); });
+  BSML::Lite::CreateSliderSetting(container, "VIEWING DISTANCE  -  Z", 0.05f,
+      GetBsrPanelSetting(2), 0.8f, 4.5f,
+      [](float value) { SetBsrPanelSetting(2, value); });
+  BSML::Lite::CreateSliderSetting(container, "PANEL WIDTH", 2.0f,
+      GetBsrPanelSetting(3), 104.0f, 180.0f,
+      [](float value) { SetBsrPanelSetting(3, value); });
+  BSML::Lite::CreateSliderSetting(container, "PANEL HEIGHT", 2.0f,
+      GetBsrPanelSetting(4), 68.0f, 120.0f,
+      [](float value) { SetBsrPanelSetting(4, value); });
   BSML::Lite::CreateUIButton(container->get_transform(), "SAVE BSR SETTINGS", "PracticeButton",
       UnityEngine::Vector2(0.0f, 0.0f), UnityEngine::Vector2(45.0f, 3.6f),
       []() { SaveBsrSettings(); });
@@ -1726,6 +1748,9 @@ static void ApplyWorldChatSettingsToPanel() {
   if (!worldChatPanel) return;
   worldChatPanel->set_ScreenSize(UnityEngine::Vector2(
       worldChatSettings.width, worldChatSettings.height));
+  const float chatReadableScale = std::clamp(1.0f / std::min(
+      worldChatSettings.width / 110.0f, worldChatSettings.height / 70.0f), 1.0f, 1.75f);
+  if (worldChatText) { worldChatText->set_fontStyle(TMPro::FontStyles::Bold); worldChatText->set_fontSize(2.55f * chatReadableScale); }
   if (worldChatSurfaceRect) {
     worldChatSurfaceRect->set_sizeDelta(UnityEngine::Vector2(
         worldChatSettings.width, worldChatSettings.height));
@@ -1944,6 +1969,7 @@ static TMPro::TextMeshProUGUI* CreateWorldChatText(
   // This keeps the floating feed readable at headset distance.
   auto* fontAsset = ResolveWorldChatFont();
   if (fontAsset) text->set_font(fontAsset);
+  text->set_fontStyle(TMPro::FontStyles::Bold);
   text->set_fontSize(fontSize);
   text->set_enableWordWrapping(true);
   // Keep the world-space TMP canvas in its native overflow mode. The feed
@@ -2073,6 +2099,10 @@ static bool CreateWorldChatPanel() {
     DestroyWorldChatPanel(true);
     return false;
   }
+  const float chatReadableScale = std::clamp(1.0f / std::min(
+      worldChatSettings.width / 110.0f, worldChatSettings.height / 70.0f), 1.0f, 1.75f);
+  worldChatText->set_fontStyle(TMPro::FontStyles::Bold);
+  worldChatText->set_fontSize(2.55f * chatReadableScale);
   worldChatText->set_text(StringW("RIFTPULSE  /  LIVE CHAT\nCOMBINED VIEWERS  -\n\nWaiting for your stream messages..."));
   // Keep the base font size; the floating panel scales chat text along with its dimensions.
   worldChatHandleLabel->set_text(StringW("DRAG TO MOVE"));
@@ -2123,32 +2153,45 @@ static size_t FindMatchingJsonObjectEnd(const std::string& json, size_t start) {
   return std::string::npos;
 }
 static std::string WorldChatProviderBadge(const std::string& provider) {
-  if (provider == "twitch") return "<mark=#9146FF><color=#FFFFFF><b> TW </b></color></mark>";
-  if (provider == "youtube") return "<mark=#FF0000><color=#FFFFFF><b> YT </b></color></mark>";
-  if (provider == "tiktok") return "<mark=#FFFFFF><color=#111111><b> TT </b></color></mark>";
-  return "<mark=#64748B><color=#FFFFFF><b> RP </b></color></mark>";
+  const auto color = provider == "twitch" ? "#9146FF" : provider == "youtube" ? "#FF3333" : provider == "tiktok" ? "#FFFFFF" : "#64748B";
+  return "<size=90%><color=" + std::string(color) + "><b>■</b></color></size>";
 }
-static std::string FormatWorldChatEntry(const std::string& provider, const std::string& eventKind, const std::string& sender, const std::string& message) {
+
+static std::string WorldChatTimestamp(const std::string& receivedAt) {
+  int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+  if (std::sscanf(receivedAt.c_str(), "%4d-%2d-%2dT%2d:%2d:%2d", &year, &month, &day, &hour, &minute, &second) < 5)
+    return "--:--";
+  std::tm utc{};
+  utc.tm_year = year - 1900; utc.tm_mon = month - 1; utc.tm_mday = day;
+  utc.tm_hour = hour; utc.tm_min = minute; utc.tm_sec = second;
+  const std::time_t instant = timegm(&utc);
+  std::tm local{};
+  if (!localtime_r(&instant, &local)) return "--:--";
+  char formatted[24]{};
+  if (std::strftime(formatted, sizeof(formatted), "%I:%M %p", &local) == 0) return "--:--";
+  return std::string(formatted);
+}
+
+static std::string FormatWorldChatEntry(const std::string& provider, const std::string& eventKind, const std::string& sender, const std::string& message, const std::string& receivedAt) {
   const auto safeSender = EscapeChatRichText(sender, 28);
-  const auto safeMessage = EscapeChatRichText(message, 80);
-  const auto badge = WorldChatProviderBadge(provider);
-  if (eventKind.empty()) {
-    const auto nameColor = provider == "twitch" ? "#C4A1FF" : provider == "youtube" ? "#FF6666" : provider == "tiktok" ? "#FFFFFF" : "#D7E0EF";
-    return badge + " <color=" + nameColor + "><b>" + safeSender + "</b></color>\n" + safeMessage + "\n\n";
-  }
-  const auto label = eventKind == "follow" ? "* FOLLOW"
-      : eventKind == "subscription" ? "+ SUB / MEMBER"
-      : eventKind == "gift" ? "GIFT"
-      : eventKind == "bits" ? "BITS"
-      : eventKind == "super_chat" ? "$ SUPER CHAT"
-      : eventKind == "donation" ? "$ DONATION"
-      : eventKind == "like" ? "LIKE"
-      : eventKind == "share" ? "SHARE"
-      : eventKind == "raid" ? "RAID"
-      : eventKind == "member_join" ? "+ MEMBER JOIN" : "STREAM EVENT";
-  const auto accent = provider == "twitch" ? "#9146FF" : provider == "youtube" ? "#FF3333" : provider == "tiktok" ? "#D8D8D8" : "#64748B";
-  const auto foreground = provider == "tiktok" ? "#111111" : "#FFFFFF";
-  return badge + " <mark=" + std::string(accent) + "><color=" + foreground + "><b> " + label + " / " + safeSender + " </b></color></mark>\n<color=" + accent + "><b>" + safeMessage + "</b></color>\n\n";
+  const auto safeMessage = EscapeChatRichText(message, 180);
+  const auto prefix = WorldChatTimestamp(receivedAt) + " " + WorldChatProviderBadge(provider) + " ";
+  const auto nameColor = provider == "twitch" ? "#D7C4FF" : provider == "youtube" ? "#FF8585" : provider == "tiktok" ? "#FFFFFF" : "#E1E8F3";
+  if (eventKind.empty())
+    return prefix + "<color=" + nameColor + "><b>" + safeSender + ":</b></color> <b>" + safeMessage + "</b>\n";
+  const auto label = eventKind == "follow" ? "Follow"
+      : eventKind == "subscription" ? "Membership"
+      : eventKind == "gift" ? "Gift"
+      : eventKind == "bits" ? "Bits"
+      : eventKind == "super_chat" ? "Super Chat"
+      : eventKind == "donation" ? "Donation"
+      : eventKind == "like" ? "Like"
+      : eventKind == "share" ? "Share"
+      : eventKind == "raid" ? "Raid"
+      : eventKind == "member_join" ? "Member joined" : "Stream event";
+  const auto accent = provider == "twitch" ? "#B99AFB" : provider == "youtube" ? "#FF7777" : provider == "tiktok" ? "#E6EAF0" : "#AAB7C8";
+  return WorldChatTimestamp(receivedAt) + " <mark=" + std::string(accent) + "><color=#FFFFFF><b> " + label + " </b></color></mark> "
+      + WorldChatProviderBadge(provider) + " <color=" + nameColor + "><b>" + safeSender + ":</b></color> <color=#F4F6FA><b>" + safeMessage + "</b></color>\n";
 }
 static void RenderWorldChatFeed(const std::string& response) {
   const std::regex enabledRegex("\"chatEnabled\"\\s*:\\s*true");
@@ -2196,17 +2239,17 @@ static void RenderWorldChatFeed(const std::string& response) {
       // Do not filter on Quest's local session clock: clock skew against API timestamps
       // can make all incoming messages disappear even while the provider is live.
       if (sender.empty() || message.empty()) continue;
-      chatEntries.push_back({receivedAt, FormatWorldChatEntry(provider, eventKind, sender, message)});
+      chatEntries.push_back({receivedAt, FormatWorldChatEntry(provider, eventKind, sender, message, receivedAt)});
     }
     std::stable_sort(chatEntries.begin(), chatEntries.end(),
         [](const auto& left, const auto& right) { return left.first < right.first; });
     const auto charsPerMessageLine = std::max(28.0f, worldChatSettings.width * 0.70f);
-    const auto messageLines = 2.0f + std::ceil(80.0f / charsPerMessageLine);
+    const auto messageLines = 1.0f + std::ceil(180.0f / charsPerMessageLine);
     const auto availableLines = std::max(1.0f, (worldChatSettings.height - 12.0f) / 2.7f);
     // Keep a conservative fixed-capacity feed so each refresh removes the
     // oldest entries before rendering; never let a burst fill the panel.
     const auto visibleMessageCapacity = static_cast<size_t>(
-        std::clamp(std::floor(availableLines / messageLines), 1.0f, 4.0f));
+        std::clamp(std::floor(availableLines / messageLines), 1.0f, 5.0f));
     if (chatEntries.size() > visibleMessageCapacity) {
       chatEntries.erase(chatEntries.begin(), chatEntries.end() - visibleMessageCapacity);
     }

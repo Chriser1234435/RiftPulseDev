@@ -1,27 +1,18 @@
-RiftPulse PCVR 0.3.7
-Windows / Beat Saber PCVR 1.40.8
+RiftPulse PCVR 0.3.8
 
-INSTALL:
-1. Download RiftPulse.Pcvr-0.3.7.zip.
-2. Extract the ZIP into your Beat Saber PCVR 1.40.8 game folder (the folder containing Beat Saber.exe).
-3. Confirm the file is at Beat Saber game folder\Plugins\RiftPulse.Pcvr.dll.
-4. Do not add a separate manifest.json in Plugins. The BSIPA manifest is embedded in the DLL.
-5. Launch Beat Saber and open RiftPulse from the Mods panel.
-6. Pair the mod to your RiftPulse account using the five-digit code.
+Beat Saber 1.40.8 / PCVR only
 
-BSR SONG REQUESTS:
-- Configure the viewer command, requester cooldown (0–3600 seconds), and queue size (1–50) from Configure Song Requests in the in-game RiftPulse menu.
-- Viewers can send the command plus a BeatSaver map key or BeatSaver map URL in connected Twitch, YouTube, or TikTok chat.
-- Open Request Queue to view the live queue in a separate movable world-space panel. The list scrolls vertically and shows a music-note marker, song title, requester, and provider.
-- Select a request, then choose YES / DOWNLOAD to install it to Beat Saber Custom Levels, or NO / REMOVE to reject it and remove it from the queue.
-- Use Re-center Request Panel to reset its position. Manually moved panel placement is saved on PCVR.
-- After a successful download, open Solo > Custom Levels and select the song. It is not auto-started.
+Install:
+1. Open your Beat Saber PCVR 1.40.8 game folder (the folder containing Beat Saber.exe).
+2. Extract this ZIP into that folder, preserving the Plugins folder structure.
+3. Start Beat Saber once to finish installing the mod.
 
-LIVE CHAT:
-- The movable chat panel remains separate from the BSR request panel.
-- New incoming messages sit at the bottom; older messages leave from the top.
-- Provider marks distinguish Twitch, YouTube, and TikTok.
+In game:
+- Open RiftPulse from the Mods panel.
+- Configure Chat and Song Requests after pairing your device.
+- The Chat and BSR panels are floating world-space panels with white controller grab handles.
+- Use the Chat Display Settings and BSR Configure Song Requests screens to change X/Y/Z position and width/height.
+- BSR request queue: select a song, choose YES to download it to CustomLevels, or NO to remove it.
+- Chat uses timestamp → platform color square → sender → message; stream events retain highlighted event labels.
 
-PCVR only. Do not install this ZIP into Quest Standalone.
-
-Build verification: PCVR release build and package structure are validated. A physical Beat Saber session is still needed to confirm menu rendering, grab behavior, download/import, and custom-level indexing.
+PCVR package only. Do not install this ZIP on Quest Standalone.

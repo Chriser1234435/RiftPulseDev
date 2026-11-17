@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$version = '0.3.7'
+$version = '0.3.8'
 $project = Join-Path $root 'mods\pcvr\RiftPulse.Pcvr.csproj'
 $manifestPath = Join-Path $root 'mods\pcvr\manifest.json'
 $built = Join-Path $root 'mods\pcvr\bin\Release\net472\RiftPulse.Pcvr.dll'
@@ -59,7 +59,7 @@ if ($chatSettingsText -notmatch 'show-buttons="true"' -or $chatSettingsText -not
 }
 $bsrSettingsBsmlPath = Join-Path $root 'mods\pcvr\bsrsettings.bsml'
 $bsrSettingsText = Get-Content $bsrSettingsBsmlPath -Raw
-foreach ($settingValue in @('bsr-command', 'bsr-cooldown', 'bsr-queue-limit')) {
+foreach ($settingValue in @('bsr-command', 'bsr-cooldown', 'bsr-queue-limit', 'bsr-panel-x', 'bsr-panel-y', 'bsr-panel-z', 'bsr-panel-width', 'bsr-panel-height')) {
     if ($bsrSettingsText -notmatch ('value="' + [regex]::Escape($settingValue) + '"')) {
         throw "BSR settings input missing value binding: $settingValue"
     }
