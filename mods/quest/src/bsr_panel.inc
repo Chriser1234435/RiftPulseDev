@@ -305,6 +305,12 @@ static bool EnsureBsrQueuePanel() {
   worldBsrPanel->set_ShowHandle(true);
   worldBsrPanel->set_HighlightHandle(true);
   UnityEngine::Object::DontDestroyOnLoad(worldBsrPanel->get_gameObject());
+  ApplyQuestDarkBackground(worldBsrPanel->get_gameObject(),
+      UnityEngine::Color(0.018f, 0.028f, 0.060f, 0.97f));
+  auto* bsrSurface = CreateWorldChatLockPart(worldBsrPanel->get_rectTransform(),
+      "RiftPulse Quest BSR Glass Surface", UnityEngine::Vector2(142.0f, 86.0f),
+      UnityEngine::Vector2(0.0f, 0.0f));
+  if (bsrSurface) bsrSurface->set_color(UnityEngine::Color(0.018f, 0.028f, 0.060f, 0.98f));
   auto root = worldBsrPanel->get_transform();
   worldBsrHeader = CreateBsrPanelText(root, "RiftPulse BSR Title", "RIFTPULSE  /  SONG REQUESTS",
       4.1f, {0.0f, 37.0f}, {130.0f, 7.0f}, TMPro::TextAlignmentOptions::Center);
