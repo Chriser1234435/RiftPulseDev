@@ -98,10 +98,20 @@ class FakeStatement implements D1PreparedStatement {
     if (q.includes("from integration_health") && q.includes("(select max(received_at)")) {
       return { success: false, results: [] };
     }
+    if (q.includes("from song_requests")) {
+      return { success: true, results: this.db.songRequestRows as T[] };
+    }
+    if (q.includes("from song_requests")) {
+      return { success: true, results: this.db.songRequestRows as T[] };
+    }
     if (q.includes("from chat_messages") && q.includes("from provider_events")) {
       assert.match(q, /order by receivedat desc limit 100/);
       assert.ok(q.includes("union all"));
       assert.ok(q.includes("kind != 'viewer_count'"));
+      assert.ok(q.includes("null as eventkind"), "ordinary chat rows must keep a null event kind");
+      assert.ok(q.includes("kind as eventkind"), "provider events must retain their normalized kind");
+      this.db.lastPanelQuery = this.query;
+      this.db.lastPanelBindings = [...this.values];
       return { success: true, results: this.db.panelFeed as T[] };
     }
     if (q.includes("from integration_health") || q.includes("group by provider")) {
@@ -113,13 +123,17 @@ class FakeStatement implements D1PreparedStatement {
 
 class FakeD1 implements D1Database {
   readonly challenges = new Map<string, ChallengeRow>();
+  lastPanelQuery = "";
+  lastPanelBindings: unknown[] = [];
   readonly panelFeed: Array<{
-    id: string; provider: string; channelName: string; senderName: string; text: string; receivedAt: string;
+    id: string; provider: string; channelName: string; senderName: string; text: string; receivedAt: string; eventKind?: string | null;
   }> = [];
   rootOAuthProvider = "twitch";
   deviceCredentialDigest: string | null = null;
   deviceAccountId = "test-account";
   readonly moduleSettings = new Map<string, { enabled: number; settings_json: string }>();
+  readonly songRequestRows: Array<{ id: string; provider: string; requesterName: string; beatsaverKey: string; songName: string | null; status: string; resultCode: string | null; createdAt: string }> = [];
+  readonly songRequestRows: Array<{ id: string; provider: string; requesterName: string; beatsaverKey: string; songName: string | null; status: string; resultCode: string | null; createdAt: string }> = [];
   prepare(query: string): D1PreparedStatement { return new FakeStatement(this, query); }
   async batch<T>(_statements: D1PreparedStatement[]): Promise<D1Result<T>[]> { return []; }
 }
@@ -337,6 +351,11 @@ test("native chat panel feed requires device auth and reports chat toggle plus v
   assert.equal(response.status, 200, await response.clone().text());
   const payload = await response.json();
   assert.equal(payload.chatEnabled, true);
+  assert.equal(typeof payload.sessionStartedAt, "string");
+  assert.equal(new Date(payload.sessionStartedAt).toISOString(), payload.sessionStartedAt);
+  assert.equal(bindings.DB.lastPanelBindings[1], payload.sessionStartedAt, "the server-issued timestamp must be the SQL cutoff");
+  assert.equal(bindings.DB.lastPanelBindings[3], payload.sessionStartedAt, "chat and events must share the session cutoff");
+  assert.match(bindings.DB.lastPanelQuery, /received_at >= \?/);
   assert.deepEqual(payload.messages, []);
   assert.deepEqual(payload.viewers, {
     total: null,
@@ -358,7 +377,7 @@ test("native chat panel feed matches the newest Events/Chat records", async () =
     },
     {
       id: "youtube:event-1", provider: "youtube", channelName: "Streamer",
-      senderName: "ViewerTwo", text: "sent a Super Chat", receivedAt: "2026-11-14T20:00:01.000Z",
+      senderName: "ViewerTwo", text: "sent a Super Chat", receivedAt: "2026-11-14T20:00:01.000Z", eventKind: "super_chat",
     },
   );
   const response = await call("/api/v1/device/chat/panel", {
@@ -371,6 +390,8 @@ test("native chat panel feed matches the newest Events/Chat records", async () =
   assert.equal(payload.messages[0].text, "Hello from Twitch chat");
   assert.equal(payload.messages[0].displayName, "ViewerOne");
   assert.equal(payload.messages[1].displayName, "ViewerTwo");
+  assert.equal(payload.messages[0].eventKind ?? null, null);
+  assert.equal(payload.messages[1].eventKind, "super_chat");
   assert.ok(payload.messages.some((message: { text: string }) => message.text === "Hello from Twitch chat"));
   assert.ok(payload.messages.some((message: { text: string }) => message.text === "sent a Super Chat"));
   assert.deepEqual(payload.viewers, {
@@ -628,4 +649,43 @@ test("in-game chat feed requires a valid paired-device credential", async () => 
   }, bindings);
   assert.equal(response.status, 200);
   assert.deepEqual((await response.json()).messages, []);
+});
+
+test("paired devices can read the active BSR queue only with a valid device credential", async () => {
+  const denied = await call("/api/v1/device/song-requests");
+  assert.equal(denied.status, 401);
+
+  const bindings = env();
+  const credential = "c".repeat(64);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential));
+  bindings.DB.deviceCredentialDigest = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+  bindings.DB.songRequestRows.push({
+    id: "request-1", provider: "twitch", requesterName: "ViewerOne",
+    beatsaverKey: "abc123", songName: "Example Song", status: "queued",
+    resultCode: null, createdAt: "2026-11-17T15:00:00.000Z",
+  });
+
+  const response = await call("/api/v1/device/song-requests", {
+    headers: { authorization: "Bearer " + credential },
+  }, bindings);
+  assert.equal(response.status, 200, await response.clone().text());
+  const payload = await response.json();
+  assert.equal(payload.enabled, true);
+  assert.equal(payload.requests.length, 1);
+  assert.equal(payload.requests[0].beatsaverKey, "abc123");
+  assert.equal(payload.requests[0].songName, "Example Song");
+});
+
+test("browser BSR queue routes fail closed when account authentication is not configured", async () => {
+  const listing = await call("/api/v1/song-requests");
+  assert.equal(listing.status, 503);
+  assert.equal((await listing.json()).error.code, "auth_not_configured");
+
+  const update = await call("/api/v1/song-requests/550e8400-e29b-41d4-a716-446655440000", {
+    method: "PATCH",
+    headers: { origin: "https://riftpulse.test", "content-type": "application/json" },
+    body: JSON.stringify({ status: "played" }),
+  });
+  assert.equal(update.status, 503);
+  assert.equal((await update.json()).error.code, "auth_not_configured");
 });

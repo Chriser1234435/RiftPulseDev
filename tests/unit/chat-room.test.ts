@@ -16,7 +16,7 @@ class FakeState {
 }
 
 const message = {
-  id: "kick:msg-1", provider: "kick" as const, externalMessageId: "msg-1",
+  id: "twitch:msg-1", provider: "twitch" as const, externalMessageId: "msg-1",
   channelId: "channel-1", channelName: "Channel", senderId: "viewer-1", senderName: "Viewer",
   text: "Nice run", sentAt: "2026-10-29T12:00:00.000Z", receivedAt: "2026-10-29T12:00:01.000Z",
   badges: { moderator: false, subscriber: false, verified: false },
@@ -74,4 +74,27 @@ test("Durable Object rejects malformed or oversized chat event fields", async ()
 
   const missing = await room.fetch(new Request("https://chat-room/unknown"));
   assert.equal(missing.status, 404);
+});
+test("Durable Object validates and broadcasts normalized song-request queue updates", async () => {
+  const state = new FakeState();
+  const room = new ChatRoom(state);
+  const socket = new FakeSocket();
+  state.sockets.push(socket);
+  const request = {
+    id: "request-1", provider: "twitch", requesterName: "ViewerOne",
+    beatsaverKey: "abc123", songName: "Example Song", status: "queued",
+    resultCode: null, createdAt: "2026-11-17T15:00:00.000Z",
+  };
+  const response = await room.fetch(new Request("https://chat-room/publish", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type: "song.request", request }),
+  }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(JSON.parse(socket.sent[0]), { type: "song.request", request });
+
+  const invalid = await room.fetch(new Request("https://chat-room/publish", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type: "song.request", request: { ...request, provider: "kick" } }),
+  }));
+  assert.equal(invalid.status, 400);
 });

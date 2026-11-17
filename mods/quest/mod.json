@@ -5,7 +5,7 @@
     "id":  "riftpulse",
     "modloader":  "Scotland2",
     "author":  "RiftPulseDev",
-    "version":  "0.3.7",
+    "version": "0.3.13",
     "packageId":  "com.beatgames.beatsaber",
     "packageVersion":  "1.40.8_7379",
     "description":  "RiftPulse Quest Standalone client with the Nexus stream-command dashboard matching PCVR; secure pairing; dedicated Chat and Song Request controls; Display Lab for headset-relative floating chat position, size, and facing; Twitch, YouTube, and TikTok display-name colors; movable world-space chat panel for Beat Saber 1.40.8.",

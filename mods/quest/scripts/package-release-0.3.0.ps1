@@ -1,8 +1,8 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 $root = 'C:\Users\chris\Documents\RiftPulse Development\workspace\RiftPulseDev'
 $q = Join-Path $root 'mods\quest'
 $downloads = Join-Path $root 'public\downloads'
-$version = '0.3.0'
+$version = '0.3.13'
 $manifestPath = Join-Path $q 'mod.json'
 $libPath = Join-Path $q 'build\libriftpulse.so'
 $out = Join-Path $downloads "RiftPulse-Quest-$version-Alpha.qmod"

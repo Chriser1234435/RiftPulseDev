@@ -3,7 +3,7 @@
     "id":  "RiftPulse.Pcvr",
     "name":  "RiftPulse",
     "author":  "RiftPulse Team",
-    "version":  "0.3.1",
+    "version":  "0.3.6",
     "gameVersion":  "1.40.8",
     "description":  [
                         "RiftPulse PCVR adapter for Beat Saber with the new Nexus stream-command dashboard.",

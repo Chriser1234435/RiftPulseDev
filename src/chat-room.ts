@@ -10,7 +10,7 @@ interface DurableObjectStateLike {
 type RealtimeChatMessage = {
   type: "chat.message";
   message: {
-    id: string; provider: "twitch" | "youtube" | "kick" | "tiktok";
+    id: string; provider: "twitch" | "youtube" | "tiktok";
     externalMessageId: string; channelId: string; channelName: string;
     senderId: string; senderName: string; text: string;
     sentAt: string; receivedAt: string;
@@ -18,10 +18,17 @@ type RealtimeChatMessage = {
   };
 };
 type RealtimeProviderEvent = { type: "provider.event"; event: NormalizedProviderEvent };
-type RealtimeEvent = RealtimeChatMessage | RealtimeProviderEvent;
+type RealtimeSongRequest = {
+  type: "song.request";
+  request: {
+    id: string; provider: string; requesterName: string; beatsaverKey: string;
+    songName: string | null; status: string; resultCode: string | null; createdAt: string;
+  };
+};
+type RealtimeEvent = RealtimeChatMessage | RealtimeProviderEvent | RealtimeSongRequest;
 
-function validProvider(value: unknown): value is "twitch" | "youtube" | "kick" | "tiktok" {
-  return value === "twitch" || value === "youtube" || value === "kick" || value === "tiktok";
+function validProvider(value: unknown): value is "twitch" | "youtube" | "tiktok" {
+  return value === "twitch" || value === "youtube" || value === "tiktok";
 }
 
 /** One Durable Object per account; the Worker authenticates and selects the object. */
@@ -66,6 +73,17 @@ export class ChatRoom {
           || (item.amount !== null && (typeof item.amount !== "number" || !Number.isFinite(item.amount) || item.amount < 0))
           || (item.quantity !== null && (!Number.isSafeInteger(item.quantity) || item.quantity < 0))) {
           return new Response("Invalid provider event", { status: 400 });
+        }
+      } else if (event?.type === "song.request") {
+        const item = event.request;
+        if (!item || typeof item.id !== "string" || item.id.length < 1 || item.id.length > 64
+          || !validProvider(item.provider) || typeof item.requesterName !== "string" || item.requesterName.length > 80
+          || typeof item.beatsaverKey !== "string" || item.beatsaverKey.length > 16
+          || (item.songName !== null && (typeof item.songName !== "string" || item.songName.length > 180))
+          || !["queued", "playing", "played", "rejected", "failed"].includes(item.status)
+          || (item.resultCode !== null && (typeof item.resultCode !== "string" || item.resultCode.length > 64))
+          || typeof item.createdAt !== "string" || item.createdAt.length > 40) {
+          return new Response("Invalid song-request event", { status: 400 });
         }
       } else {
         return new Response("Invalid realtime event", { status: 400 });

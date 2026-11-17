@@ -1,6 +1,6 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$version = '0.3.1'
+$version = '0.3.6'
 $project = Join-Path $root 'mods\pcvr\RiftPulse.Pcvr.csproj'
 $manifestPath = Join-Path $root 'mods\pcvr\manifest.json'
 $built = Join-Path $root 'mods\pcvr\bin\Release\net472\RiftPulse.Pcvr.dll'
@@ -24,7 +24,7 @@ $bsmlPath = Join-Path $root 'mods\pcvr\pairing.bsml'
 $controllerPath = Join-Path $root 'mods\pcvr\RiftPulseFlowCoordinator.cs'
 $bsmlText = Get-Content $bsmlPath -Raw
 $controllerText = Get-Content $controllerPath -Raw
-foreach ($componentId in @('pairingCodeText', 'statusText', 'connectButton', 'customizeChatPanelButton', 'chatToggleButton', 'bsrToggleButton', 'modulePreviewStatus')) {
+foreach ($componentId in @('pairingCodeText', 'statusText', 'connectButton', 'customizeChatPanelButton', 'chatToggleButton', 'bsrToggleButton', 'bsrQueueText')) {
     if ($bsmlText -notmatch ('id="' + [regex]::Escape($componentId) + '"')) {
         throw "BSML component ID missing: $componentId"
     }
@@ -32,7 +32,7 @@ foreach ($componentId in @('pairingCodeText', 'statusText', 'connectButton', 'cu
         throw "Controller has no UIComponent binding for: $componentId"
     }
 }
-foreach ($actionId in @('connect-click', 'toggle-chat', 'toggle-bsr', 'move-chat-panel', 'open-chat-settings')) {
+foreach ($actionId in @('connect-click', 'toggle-chat', 'toggle-bsr', 'move-chat-panel', 'open-chat-settings', 'refresh-bsr-queue')) {
     if ($bsmlText -notmatch ('on-click="' + [regex]::Escape($actionId) + '"')) {
         throw "BSML click action missing: $actionId"
     }

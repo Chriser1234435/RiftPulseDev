@@ -1,12 +1,12 @@
-RiftPulse PCVR 0.1.44
-# RiftPulse PCVR alpha adapter 0.1.44
+RiftPulse PCVR 0.3.2
+# RiftPulse PCVR alpha adapter 0.3.2
 
 PCVR adapter for Beat Saber 1.40.8. Generates a five-digit pairing code, links the installation to your RiftPulse account, syncs Chat/BSR module preferences, and adds a movable world-space RiftPulse chat panel inside gameplay.
 
 ## World-space chat panel
 
 - A real 3D floating panel in the Beat Saber play space, not a camera HUD or flat screen overlay.
-- Grab and move the panel with the VR controller handle. Headset-relative X/Y/Z and rotation offset are saved locally.
+- Grab and move the panel with the VR controller handle. X/Z follow the headset's level heading and Y is true vertical; headset-relative X/Y/Z and facing offset are saved locally.
 - Changing panel settings preserves its current facing instead of recalculating a reverse rotation.
 - Chat displays platform display names with a blue username marker: Twitch purple, YouTube red, and TikTok white.
 - New incoming messages sit at the bottom; oldest entries are trimmed from the top.

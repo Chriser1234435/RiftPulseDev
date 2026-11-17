@@ -13,6 +13,7 @@ type User = { id: string; name: string; email: string };
 type ReleaseUpdate = { id: string; title: string; category: "website" | "mod" | "both"; version: string | null; summary: string; changes: string[]; publishedAt: string; isRead: boolean };
 type Device = { id: string; platform: "pcvr" | "quest"; gameVersion: string; modVersion: string; label: string | null; createdAt: string; lastSeenAt: string | null };
 type ChatMessage = { id: string; provider: ProviderKey; senderName: string; text: string; receivedAt: string; recordType?: "chat" | "event"; eventKind?: string | null; badges: { moderator: boolean; subscriber: boolean; verified: boolean } };
+type SongRequestItem = { id: string; provider: ProviderKey; requesterName: string; beatsaverKey: string; songName: string | null; status: "queued" | "playing" | "played" | "rejected" | "failed"; resultCode: string | null; createdAt: string };
 type ProviderState = "connected" | "disconnected" | "degraded" | "error" | "unsupported";
 type ProviderHealth = { provider: ProviderKey; state: ProviderState; viewerCount: number | null; detailCode: string | null; observedAt?: string };
 type ProviderConnection = { status: string; displayName: string | null; connectedAt: string | null; configured: boolean; detailCode: string | null };
@@ -108,6 +109,8 @@ function App() {
 
   const [notice, setNotice] = useState("");
   const [command, setCommand] = useState("!bsr");
+  const [requesterCooldownSeconds, setRequesterCooldownSeconds] = useState(30);
+  const [queueLimit, setQueueLimit] = useState(25);
   const [autoSave, setAutoSave] = useState(true);
   const [profileOpen, setProfileOpen] = useState(false);
   const [updatesOpen, setUpdatesOpen] = useState(false);
@@ -127,6 +130,8 @@ function App() {
   const [authSuccessMessage, setAuthSuccessMessage] = useState("");
   const [devices, setDevices] = useState<Device[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [songRequests, setSongRequests] = useState<SongRequestItem[]>([]);
+  const [songQueueLoading, setSongQueueLoading] = useState(true);
   const [chatLoading, setChatLoading] = useState(true);
   const [chatError, setChatError] = useState(false);
   const [providerHealth, setProviderHealth] = useState<ProviderHealth[]>([]);
@@ -146,7 +151,6 @@ function App() {
     twitch: null, youtube: null, tiktok: null,
   });
   const [clockNow, setClockNow] = useState(Date.now());
-  const [reconnectLimitsLoadedFor, setReconnectLimitsLoadedFor] = useState<string | null>(null);
   const checkRunId = useRef(0);
   const [tourOpen, setTourOpen] = useState(false);
   const [tourStep, setTourStep] = useState(0);
@@ -183,6 +187,20 @@ function App() {
     }
     return pollAfterMs;
   }, [providerConnections.youtube.status, providerConnections.youtube.configured]);
+
+
+  const refreshSongRequests = useCallback(async () => {
+    try {
+      const response = await fetch("/api/v1/song-requests", { credentials: "include" });
+      if (!response.ok) throw new Error("Could not load the song-request queue.");
+      const data = await response.json();
+      setSongRequests(Array.isArray(data.requests) ? data.requests as SongRequestItem[] : []);
+    } catch {
+      // Preserve the last confirmed queue when a transient poll fails.
+    } finally {
+      setSongQueueLoading(false);
+    }
+  }, []);
 
   const refreshProviderConnections = useCallback(async () => {
     try {
@@ -357,7 +375,7 @@ function App() {
   }, [globalReconnectCooldownUntil, isProviderConfigured, checkProviderLive, refreshProviderConnections, refreshProviderHealth]);
 
   const reconnectProviderManually = useCallback(async (key: ProviderKey) => {
-    if (!isProviderConfigured(key) || !liveStates[key].checkedAt) return;
+    if (!isProviderConfigured(key)) return;
     const now = Date.now();
     const cooldownUntil = providerReconnectCooldownUntil[key];
     if (cooldownUntil !== null && cooldownUntil > now) return;
@@ -367,7 +385,11 @@ function App() {
       setManualReconnectsRemaining(current => ({ ...current, [key]: 2 }));
       setProviderReconnectCooldownUntil(current => ({ ...current, [key]: null }));
     }
-    if (remaining <= 0) return;
+    if (remaining <= 0) {
+      remaining = 2;
+      setManualReconnectsRemaining(current => ({ ...current, [key]: 2 }));
+      setProviderReconnectCooldownUntil(current => ({ ...current, [key]: null }));
+    }
     remaining -= 1;
     setManualReconnectsRemaining(current => ({ ...current, [key]: remaining }));
     if (remaining === 0) setProviderReconnectCooldownUntil(current => ({ ...current, [key]: now + 5 * 60_000 }));
@@ -378,53 +400,39 @@ function App() {
     if (result === "live") flash(name + " is LIVE.");
     else if (result === "not_live") flash(name + " is connected but not live yet.");
     else flash(name + " reconnect check finished.");
-  }, [checkProviderLive, isProviderConfigured, liveStates, manualReconnectsRemaining, providerReconnectCooldownUntil, refreshProviderConnections, refreshProviderHealth]);
+  }, [checkProviderLive, isProviderConfigured, manualReconnectsRemaining, providerReconnectCooldownUntil, refreshProviderConnections, refreshProviderHealth]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
 
+  // Expired per-provider cooldowns must actively restore the two reconnect attempts.
+  // Keep these controls in page-session state: refreshing the dashboard resets them,
+  // just like the global Connect Live cooldown.
   useEffect(() => {
-    if (!user?.id) {
-      setReconnectLimitsLoadedFor(null);
-      return;
-    }
-    const remaining: Record<ProviderKey, number> = { twitch: 2, youtube: 2, tiktok: 2 };
-    const cooldowns: Record<ProviderKey, number | null> = { twitch: null, youtube: null, tiktok: null };
-    try {
-      const stored = JSON.parse(window.localStorage.getItem("riftpulse-reconnect-limits:" + user.id) ?? "null");
-      const savedRemaining = stored?.remaining ?? stored;
-      if (savedRemaining && typeof savedRemaining === "object") {
-        for (const key of Object.keys(remaining) as ProviderKey[]) {
-          if (Number.isInteger(savedRemaining[key]) && savedRemaining[key] >= 0 && savedRemaining[key] <= 2) remaining[key] = savedRemaining[key];
-        }
-      }
-      if (stored?.cooldownUntil && typeof stored.cooldownUntil === "object") {
-        for (const key of Object.keys(cooldowns) as ProviderKey[]) {
-          const value = stored.cooldownUntil[key];
-          if (typeof value === "number" && Number.isFinite(value)) cooldowns[key] = value;
-        }
-      }
-    } catch {
-      // Malformed or blocked storage falls back to the default two attempts.
-    }
-    setManualReconnectsRemaining(remaining);
-    setProviderReconnectCooldownUntil(cooldowns);
-    setReconnectLimitsLoadedFor(user.id);
-  }, [user?.id]);
+    const expired = providers.filter(provider => {
+      const until = providerReconnectCooldownUntil[provider.key];
+      return until !== null && until <= clockNow;
+    }).map(provider => provider.key);
+    if (!expired.length) return;
+    setProviderReconnectCooldownUntil(current => {
+      const next = { ...current };
+      for (const key of expired) if (next[key] !== null && next[key]! <= clockNow) next[key] = null;
+      return next;
+    });
+    setManualReconnectsRemaining(current => {
+      const next = { ...current };
+      for (const key of expired) next[key] = 2;
+      return next;
+    });
+  }, [clockNow, providerReconnectCooldownUntil]);
 
   useEffect(() => {
-    if (!user?.id || reconnectLimitsLoadedFor !== user.id) return;
-    try {
-      window.localStorage.setItem("riftpulse-reconnect-limits:" + user.id, JSON.stringify({
-        remaining: manualReconnectsRemaining,
-        cooldownUntil: providerReconnectCooldownUntil,
-      }));
-    } catch {
-      // Rate limits still apply for this page session when storage is unavailable.
+    if (globalReconnectCooldownUntil !== null && globalReconnectCooldownUntil <= clockNow) {
+      setGlobalReconnectCooldownUntil(null);
     }
-  }, [user?.id, reconnectLimitsLoadedFor, manualReconnectsRemaining, providerReconnectCooldownUntil]);
+  }, [clockNow, globalReconnectCooldownUntil]);
 
   const refreshDevices = useCallback(async () => {
     const response = await fetch("/api/v1/devices", { credentials: "include" });
@@ -618,15 +626,19 @@ function App() {
             chat: !!data.modules.chat?.enabled,
             "bsr-song-request": !!data.modules["bsr-song-request"]?.enabled,
           });
-          const savedCommand = data.modules["bsr-song-request"]?.settings?.command;
+          const savedSettings = data.modules["bsr-song-request"]?.settings ?? {};
+          const savedCommand = savedSettings.command;
           if (typeof savedCommand === "string" && savedCommand.startsWith("!") && savedCommand.length <= 20) setCommand(savedCommand);
+          if (typeof savedSettings.requesterCooldownSeconds === "number" && Number.isFinite(savedSettings.requesterCooldownSeconds)) setRequesterCooldownSeconds(Math.max(0, Math.min(3600, Math.floor(savedSettings.requesterCooldownSeconds))));
+          if (typeof savedSettings.queueLimit === "number" && Number.isFinite(savedSettings.queueLimit)) setQueueLimit(Math.max(1, Math.min(50, Math.floor(savedSettings.queueLimit))));
         }
       }).catch(() => {});
     refreshDevices().catch(() => {});
     void refreshProviderHealth();
     void refreshProviderConnections();
     void refreshUpdates();
-  }, [user?.id, refreshDevices, refreshProviderHealth, refreshProviderConnections, refreshUpdates]);
+    void refreshSongRequests();
+  }, [user?.id, refreshDevices, refreshProviderHealth, refreshProviderConnections, refreshUpdates, refreshSongRequests]);
 
   // Keep YouTube chat and stream events flowing while the Chat module is enabled.
   // Respect the pollingIntervalMillis-derived delay from YouTube and pause while hidden.
@@ -739,7 +751,7 @@ function App() {
       twitchEventSubAutoAttempted, refreshProviderConnections, refreshProviderHealth]);
 
   useEffect(() => {
-    if (!user?.id || !enabled.chat) return;
+    if (!user?.id || (!enabled.chat && !enabled["bsr-song-request"])) return;
     let disposed = false;
     let socket: WebSocket | null = null;
     let reconnectTimer: number | undefined;
@@ -754,6 +766,18 @@ function App() {
       socket.onmessage = event => {
         try {
           const payload = JSON.parse(String(event.data));
+          if (payload?.type === "song.request") {
+            const item = payload.request as Partial<SongRequestItem> | undefined;
+            if (!item || typeof item.id !== "string" || typeof item.provider !== "string"
+              || !providers.some(provider => provider.key === item.provider)
+              || typeof item.requesterName !== "string" || typeof item.status !== "string") return;
+            setSongRequests(current => {
+              const next = current.filter(request => request.id !== item.id);
+              if (item.status === "queued" || item.status === "playing") next.unshift(item as SongRequestItem);
+              return next.slice(0, 50);
+            });
+            return;
+          }
           const message: ChatMessage | null = payload?.type === "chat.message"
             ? { ...(payload.message as ChatMessage), recordType: "chat" }
             : payload?.type === "provider.event" ? providerEventAsChatMessage(payload.event) : null;
@@ -780,7 +804,7 @@ function App() {
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
       socket?.close();
     };
-  }, [user?.id, enabled.chat]);
+  }, [user?.id, enabled.chat, enabled["bsr-song-request"]]);
 
   // Poll durable chat history as a fallback so messages still appear if realtime delivery is interrupted.
   useEffect(() => {
@@ -814,9 +838,41 @@ function App() {
     return () => { active = false; window.clearInterval(timer); };
   }, [user?.id, enabled.chat]);
 
+
+  useEffect(() => {
+    if (!user?.id) {
+      setSongRequests([]);
+      setSongQueueLoading(false);
+      return;
+    }
+    let active = true;
+    const poll = async () => { if (active) await refreshSongRequests(); };
+    void poll();
+    const timer = window.setInterval(() => { void poll(); }, 8000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [user?.id, refreshSongRequests]);
+
   const flash = (message: string) => {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 3000);
+  };
+
+
+  const updateSongRequestStatus = async (id: string, status: "playing" | "played" | "rejected") => {
+    try {
+      const response = await fetch("/api/v1/song-requests/" + encodeURIComponent(id), {
+        method: "PATCH", credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error?.message ?? "Could not update that song request.");
+      setSongRequests(Array.isArray(data.requests) ? data.requests as SongRequestItem[] : []);
+      flash(status === "playing" ? "Song marked as now playing."
+        : status === "played" ? "Song marked complete." : "Song removed from the queue.");
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Could not update that song request.");
+    }
   };
 
   const startTour = () => {
@@ -1083,15 +1139,23 @@ function App() {
       flash("Use a command starting with ! followed by 1–19 letters, numbers, _ or -.");
       return;
     }
+    const safeCooldown = Math.max(0, Math.min(3600, Math.floor(Number(requesterCooldownSeconds))));
+    const safeQueueLimit = Math.max(1, Math.min(50, Math.floor(Number(queueLimit))));
+    if (!Number.isFinite(safeCooldown) || !Number.isFinite(safeQueueLimit)) {
+      flash("Enter a valid cooldown and queue size.");
+      return;
+    }
     try {
       const response = await fetch("/api/v1/settings/modules/bsr-song-request", {
         method: "PATCH", credentials: "include",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ settings: { command: safeCommand } }),
+        body: JSON.stringify({ settings: { command: safeCommand, requesterCooldownSeconds: safeCooldown, queueLimit: safeQueueLimit } }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error?.message ?? "Could not save settings.");
       setCommand(safeCommand);
+      setRequesterCooldownSeconds(safeCooldown);
+      setQueueLimit(safeQueueLimit);
       setModal(null);
       flash("Settings saved to your account.");
     } catch (error) {
@@ -1325,11 +1389,45 @@ function App() {
             </div>
           </section>
 
+
+          <section className="section-block song-queue-block" id="song-request-queue">
+            <div className="section-heading">
+              <div><div className="section-overline">VIEWER REQUESTS</div><h3>Song queue <span className="subtle-count">{String(songRequests.length).padStart(2, "0")}</span></h3><p>Validated BeatSaver maps from Twitch, YouTube, and TikTok chat.</p></div>
+              <span className={enabled["bsr-song-request"] ? "song-queue-state active" : "song-queue-state"}>{enabled["bsr-song-request"] ? "BSR ENABLED" : "BSR PAUSED"}</span>
+            </div>
+            {songRequests.length === 0 ? (
+              <div className="song-queue-empty">
+                <div className="song-queue-empty-icon"><Music2 size={21} /></div>
+                <div><b>{songQueueLoading ? "Loading song queue…" : "No songs waiting yet"}</b><p>Viewers can type <code>{command} [BeatSaver key or link]</code> in a connected live chat.</p></div>
+              </div>
+            ) : (
+              <div className="song-queue-list">
+                {songRequests.map(item => (
+                  <article className={"song-queue-item " + (item.status === "playing" ? "is-playing" : "")} key={item.id}>
+                    <div className="song-queue-main">
+                      <span className={"song-queue-provider " + item.provider}>{item.provider.toUpperCase()}</span>
+                      <div className="song-queue-copy">
+                        <b>{item.songName || ("BeatSaver map " + item.beatsaverKey)}</b>
+                        <small>{item.requesterName} · {item.provider} · <a href={"https://beatsaver.com/maps/" + encodeURIComponent(item.beatsaverKey)} target="_blank" rel="noreferrer">BSR {item.beatsaverKey}</a></small>
+                      </div>
+                      <span className={"song-queue-status " + item.status}>{item.status === "playing" ? "NOW PLAYING" : "QUEUED"}</span>
+                    </div>
+                    <div className="song-queue-actions">
+                      {item.status === "queued" && <button className="song-queue-action primary" onClick={() => void updateSongRequestStatus(item.id, "playing")}>Start</button>}
+                      {item.status === "playing" && <button className="song-queue-action primary" onClick={() => void updateSongRequestStatus(item.id, "played")}>Complete</button>}
+                      <button className="song-queue-action remove" onClick={() => void updateSongRequestStatus(item.id, "rejected")}>Remove</button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
           <section className="section-block downloads-block" id="downloads" data-tour-target="downloads">
-            <div className="section-heading"><div><div className="section-overline">LATEST MOD BUILDS</div><h3>Beat Saber downloads <span className="subtle-count">02</span></h3><p>Choose your Beat Saber 1.40.8 version and follow the matching install steps.</p></div><span className="settings-badge">PCVR v0.3.2 / Quest v0.3.7 Alpha</span></div>
+            <div className="section-heading"><div><div className="section-overline">LATEST MOD BUILDS</div><h3>Beat Saber downloads <span className="subtle-count">02</span></h3><p>Choose your Beat Saber 1.40.8 version and follow the matching install steps.</p></div><span className="settings-badge">PCVR v0.3.6 / Quest v0.3.13 Alpha</span></div>
             <div className="downloads-grid">
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR</b><small>Windows / Beat Saber 1.40.8 (PCVR)</small></div><span className="download-state">v0.3.2 | ZIP BUILT</span></div>
+                <div className="download-card-head"><div className="download-platform-icon pcvr-download"><Monitor size={20} /></div><div><b>PCVR</b><small>Windows / Beat Saber 1.40.8 (PCVR)</small></div><span className="download-state">v0.3.6 | ZIP BUILT</span></div>
                 <p className="download-step-title">Install PCVR</p>
                 <ol className="download-steps">
                   <li>Download the PCVR ZIP.</li>
@@ -1338,10 +1436,10 @@ function App() {
                   <li>Start Beat Saber once to complete the installation.</li>
                 </ol>
                 <p className="download-platform-note">PCVR only · Windows ZIP · Beat Saber 1.40.8</p>
-                <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr-0.3.2.zip" download><Download size={15} /> Download PCVR ZIP</a>
+                <a className="primary-button download-link" href="/downloads/RiftPulse.Pcvr-0.3.6.zip" download><Download size={15} /> Download PCVR ZIP</a>
               </article>
               <article className="panel-card download-card">
-                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest Standalone</b><small>Meta Quest headset / Beat Saber 1.40.8</small></div><span className="download-state">v0.3.7 Alpha | QMOD BUILT</span></div>
+                <div className="download-card-head"><div className="download-platform-icon quest-download"><Gamepad2 size={20} /></div><div><b>Quest Standalone</b><small>Meta Quest headset / Beat Saber 1.40.8</small></div><span className="download-state">v0.3.13 Alpha | QMOD BUILT</span></div>
                 <p className="download-step-title">Install Quest Standalone</p>
                 <ol className="download-steps">
                   <li>Make sure the headset has standalone Beat Saber 1.40.8 installed.</li>
@@ -1350,7 +1448,7 @@ function App() {
                   <li>Start Beat Saber once to complete the installation.</li>
                 </ol>
                 <p className="download-platform-note">Quest Standalone only · QMOD · Beat Saber 1.40.8</p>
-                <a className="primary-button download-link" href="/downloads/RiftPulse-Quest-0.3.7-Alpha.qmod" download="RiftPulse-Quest-0.3.7-Alpha.qmod"><Download size={15} /> Download Quest QMOD</a>
+                <a className="primary-button download-link" href="/downloads/RiftPulse-Quest-0.3.13-Alpha.qmod" download="RiftPulse-Quest-0.3.13-Alpha.qmod"><Download size={15} /> Download Quest QMOD</a>
               </article>
             </div>
 
@@ -1410,7 +1508,6 @@ function App() {
                     const visualStatus = twitchAccountConnected ? "connected" : configured ? status : "not-connected";
                     const cooldownUntil = providerReconnectCooldownUntil[provider.key];
                     const cooldownActive = cooldownUntil !== null && cooldownUntil > clockNow;
-                    const firstCheckComplete = liveStates[provider.key].checkedAt !== null;
                     const remaining = cooldownUntil !== null && cooldownUntil <= clockNow ? 2 : manualReconnectsRemaining[provider.key];
                     return <div className={"provider-health-row " + visualStatus} key={provider.key}>
                       <ProviderGlyph provider={provider.key} />
@@ -1419,7 +1516,7 @@ function App() {
                         <span className={"provider-live-state " + visualStatus}>{statusLabel}</span>
                         <small>{twitchAccountConnected ? "Twitch EventSub stays connected and can receive chat while you are offline" : !configured ? (provider.key === "tiktok" ? (providerConnections.tiktok.displayName ? "Username saved · press Connect Live to start" : "Save a username to configure TikTok") : "Connect this platform before checking LIVE status") : status === "live" ? "LIVE status confirmed" : status === "connecting" ? "Checking the live channel" : status === "disconnected" ? "Internet or provider connection unavailable" : status === "error" ? "Could not confirm status" : "Channel is not live right now"}</small>
                       </div>
-                      <button className="provider-reconnect-button" onClick={() => void reconnectProviderManually(provider.key)} disabled={!configured || !firstCheckComplete || cooldownActive || checkAllRunning || status === "connecting"}>
+                      <button className="provider-reconnect-button" onClick={() => void reconnectProviderManually(provider.key)} disabled={!configured || cooldownActive || checkAllRunning || status === "connecting"}>
                         <RefreshCw size={13} /> {cooldownActive ? formatCountdown(cooldownUntil! - clockNow) : "Reconnect"} <small>{cooldownActive ? "cooldown" : remaining + " left"}</small>
                       </button>
                     </div>;
@@ -1494,8 +1591,12 @@ function App() {
           </>}
           {modal === "settings" && <><div className="modal-icon purple-modal"><Settings2 size={22} /></div><div className="modal-eyebrow">PREFERENCES</div><h2 id="modal-title">Tune your setup.</h2><p className="modal-copy">Module switches and the BSR command save to your account. Provider OAuth and device preferences remain gated until their integrations are complete.</p>
             <div className="settings-option"><div><b>Automatically save toggles</b><small>Apply module changes immediately.</small></div><button className={`toggle ${autoSave ? "on" : ""}`} role="switch" aria-checked={autoSave} onClick={() => setAutoSave(!autoSave)}><span /></button></div>
-            <div className="field-group"><label htmlFor="command-input">BSR song request command</label><input id="command-input" value={command} maxLength={20} onChange={e => setCommand(e.target.value.replace(/\s/g, ""))} placeholder="!bsr" /><small>Saved to your account when you choose Save. Format: ! followed by letters, numbers, _ or -.</small></div>
-            <div className="settings-option"><div><b>Reduced motion</b><small>Respect your device's motion preference.</small></div><span className="settings-badge">PCVR v0.3.2 / Quest v0.3.7 Alpha</span></div>
+            <div className="field-group"><label htmlFor="command-input">BSR song request command</label><input id="command-input" value={command} maxLength={20} onChange={e => setCommand(e.target.value.replace(/\s/g, ""))} placeholder="!bsr" /><small>Viewers can send a BeatSaver key or map link after this command.</small></div>
+            <div className="bsr-settings-grid">
+              <div className="field-group"><label htmlFor="bsr-cooldown">Requester cooldown (seconds)</label><input id="bsr-cooldown" type="number" min="0" max="3600" step="5" value={requesterCooldownSeconds} onChange={e => setRequesterCooldownSeconds(Math.max(0, Math.min(3600, Number(e.target.value))))} /><small>Set to 0 to disable per-viewer cooldown.</small></div>
+              <div className="field-group"><label htmlFor="bsr-queue-limit">Maximum queue size</label><input id="bsr-queue-limit" type="number" min="1" max="50" step="1" value={queueLimit} onChange={e => setQueueLimit(Math.max(1, Math.min(50, Number(e.target.value))))} /><small>Active requests allowed at once (1–50).</small></div>
+            </div>
+            <div className="settings-option"><div><b>Reduced motion</b><small>Respect your device's motion preference.</small></div><span className="settings-badge">PCVR v0.3.6 / Quest v0.3.13 Alpha</span></div>
             <button className="primary-button modal-submit" onClick={() => void saveSettings()}>Save settings to account <Check size={15} /></button>
           </>}
           {modal === "help" && <><div className="modal-icon purple-modal"><Headphones size={22} /></div><div className="modal-eyebrow">RIFTPULSE GUIDE</div><h2 id="modal-title">Ready when you are.</h2><p className="modal-copy">RiftPulse connects your livestream community with Beat Saber. V1 is focused on two modules: in-game Chat and BSR Song Request.</p><div className="help-list"><div><MessageCircle size={18} /><span><b>Chat</b><small>Bring supported live messages into your game.</small></span></div><div><Music2 size={18} /><span><b>BSR Song Request</b><small>Queue viewer song requests with configurable commands.</small></span></div><div><Gamepad2 size={18} /><span><b>Pair your game</b><small>Use the in-game five-digit pairing flow once the mod is installed.</small></span></div></div><button className="primary-button modal-submit" onClick={() => { setModal(null); startPairing(); setModal("pair"); }}>Connect a device <ArrowUpRight size={15} /></button></>}

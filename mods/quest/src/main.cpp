@@ -33,6 +33,7 @@
 #include "UnityEngine/Object.hpp"
 #include "TMPro/TextMeshPro.hpp"
 #include "TMPro/TMP_Text.hpp"
+#include "TMPro/TMP_FontAsset.hpp"
 #include <regex>
 #include "bsml/shared/BSML.hpp"
 #include "bsml/shared/BSML-Lite.hpp"
@@ -69,7 +70,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <ctime>
 #include <exception>
 #include <fstream>
 #include <functional>
@@ -90,7 +90,7 @@ using RequestCompletion = std::function<void(int64_t, const std::string&)>;
 static modloader::ModInfo modInfo{MOD_ID, VERSION, 0};
 static constexpr const char* API_BASE = "https://app.riftpulse.me/api/v1";
 static constexpr const char* GAME_VERSION = "1.40.8_7379";
-static constexpr const char* MOD_VERSION = "0.3.7";
+static constexpr const char* MOD_VERSION = "0.3.13";
 
 static HMUI::CurvedTextMeshPro* heading = nullptr;
 static HMUI::CurvedTextMeshPro* instructions = nullptr;
@@ -101,6 +101,7 @@ static UnityEngine::UI::Button* codeButton = nullptr;
 static UnityEngine::UI::Button* checkButton = nullptr;
 static UnityEngine::UI::Button* chatButton = nullptr;
 static UnityEngine::UI::Button* bsrButton = nullptr;
+static HMUI::CurvedTextMeshPro* songQueueLabel = nullptr;
 static UnityEngine::Transform* mainMenuRoot = nullptr;
 static BSML::ModalView* worldChatSettingsModal = nullptr;
 static std::vector<UnityEngine::GameObject*> mainMenuObjects;
@@ -654,6 +655,9 @@ static bool JsonModuleEnabled(const std::string& json, const std::string& module
 }
 
 
+
+static void RefreshSongRequestQueue();
+
 static void RefreshModuleButtons() {
   if (chatButton) {
     BSML::Lite::SetButtonText(chatButton,
@@ -685,9 +689,106 @@ static void LoadModuleSettings() {
         bsrEnabled = JsonModuleEnabled(body, "bsr-song-request", true);
         RefreshModuleButtons();
         SetStatus("RIFTPULSE ACCOUNT LINKED\n\nCHAT AND BSR SETTINGS LOADED\n\nUse the module buttons to save changes.");
+        RefreshSongRequestQueue();
       })) {
     requestInFlight = false;
     SetStatus("Account linked, but the HTTPS settings request could not start. " + requestDiagnostic);
+  }
+}
+
+static void RefreshSongRequestQueue() {
+  RecoverStaleHttpRequest();
+  if (!songQueueLabel) return;
+  if (!isPaired || deviceCredential.empty()) {
+    songQueueLabel->set_text(StringW("Pair your headset to view the song queue."));
+    return;
+  }
+  if (requestInFlight) {
+    songQueueLabel->set_text(StringW("Another RiftPulse request is still running. Refresh again shortly."));
+    return;
+  }
+
+  requestInFlight = true;
+  songQueueLabel->set_text(StringW("Loading viewer song requests..."));
+  auto* request = CreateGetRequest(std::string(API_BASE) + "/device/song-requests", deviceCredential);
+  if (!request || !SendAsync(request, [](int64_t status, const std::string& body) {
+        requestInFlight = false;
+        if (status < 200 || status >= 300) {
+          if (songQueueLabel) songQueueLabel->set_text(StringW("Song queue unavailable. Refresh to retry."));
+          return;
+        }
+
+        const auto requestsMarker = body.find("\"requests\"");
+        const auto arrayStart = requestsMarker == std::string::npos
+            ? std::string::npos : body.find('[', requestsMarker);
+        if (arrayStart == std::string::npos) {
+          if (songQueueLabel) songQueueLabel->set_text(StringW("RiftPulse returned an invalid song queue."));
+          return;
+        }
+
+        std::vector<std::string> items;
+        size_t cursor = arrayStart + 1;
+        while (cursor < body.size() && items.size() < 50) {
+          while (cursor < body.size()
+              && (std::isspace(static_cast<unsigned char>(body[cursor])) || body[cursor] == ',')) ++cursor;
+          if (cursor >= body.size() || body[cursor] == ']') break;
+          if (body[cursor] != '{') { ++cursor; continue; }
+
+          const size_t objectStart = cursor;
+          int depth = 0;
+          bool inString = false;
+          bool escaped = false;
+          for (; cursor < body.size(); ++cursor) {
+            const char ch = body[cursor];
+            if (inString) {
+              if (escaped) escaped = false;
+              else if (ch == '\\') escaped = true;
+              else if (ch == '\"') inString = false;
+            } else if (ch == '\"') {
+              inString = true;
+            } else if (ch == '{') {
+              ++depth;
+            } else if (ch == '}') {
+              --depth;
+              if (depth == 0) {
+                ++cursor;
+                items.push_back(body.substr(objectStart, cursor - objectStart));
+                break;
+              }
+            }
+          }
+          if (depth != 0) break;
+        }
+
+        std::string output = "VIEWER SONG QUEUE / " + std::to_string(items.size());
+        if (items.empty()) {
+          output += "\nNo requests yet. Viewers can use your BSR command in live chat.";
+          if (songQueueLabel) songQueueLabel->set_text(StringW(output));
+          return;
+        }
+        output += items.size() == 1 ? " SONG\n" : " SONGS\n";
+        size_t shown = 0;
+        for (const auto& item : items) {
+          if (shown >= 3) break;
+          auto song = JsonString(item, "songName");
+          const auto key = JsonString(item, "beatsaverKey");
+          auto requester = JsonString(item, "requesterName");
+          const auto state = JsonString(item, "status");
+          if (song.empty()) song = "BeatSaver map " + key;
+          if (song.size() > 42) song = song.substr(0, 39) + "...";
+          if (requester.size() > 16) requester = requester.substr(0, 13) + "...";
+          output += state == "playing" ? "NOW PLAYING  " : "NEXT  ";
+          output += song;
+          if (!requester.empty()) output += "  -  " + requester;
+          output += "\n";
+          ++shown;
+        }
+        if (items.size() > shown) output += "+" + std::to_string(items.size() - shown) + " more in queue";
+        while (!output.empty() && (output.back() == '\n' || output.back() == ' ')) output.pop_back();
+        if (songQueueLabel) songQueueLabel->set_text(StringW(output));
+      })) {
+    requestInFlight = false;
+    songQueueLabel->set_text(StringW("Could not start the song-queue refresh."));
   }
 }
 
@@ -989,6 +1090,14 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
   if (!firstActivation) return;
   mainMenuRoot = viewController->get_transform();
   auto root = mainMenuRoot;
+  // Quest's registered BSML page is mounted on the reverse-facing side of
+  // the standalone mod-menu surface. Flip the ViewController root as one unit
+  // so the cards, labels, buttons, and touch targets all face the player.
+  if (root) {
+    const auto menuFaceCorrection = UnityEngine::Quaternion(0.0f, 1.0f, 0.0f, 0.0f);
+    root->set_localRotation(UnityEngine::Quaternion::op_Multiply(
+        root->get_localRotation(), menuFaceCorrection));
+  }
   mainMenuObjects.clear();
   // The BSML main-menu view can include a full-page default white Image. It is
   // not part of RiftPulse's content, so remove that inherited surface.
@@ -1126,22 +1235,10 @@ static void BuildRiftPulseMenu(HMUI::ViewController* viewController,
 }
 
 static std::string worldChatSessionStartedAt;
-static std::string CurrentUtcIsoTimestamp() {
-  const auto now = std::chrono::system_clock::now();
-  const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
-  const auto time = std::chrono::system_clock::to_time_t(now);
-  std::tm utc{};
-  gmtime_r(&time, &utc);
-  char base[32]{};
-  std::strftime(base, sizeof(base), "%Y-%m-%dT%H:%M:%S", &utc);
-  char suffix[8]{};
-  std::snprintf(suffix, sizeof(suffix), ".%03lldZ", static_cast<long long>(millis));
-  return std::string(base) + suffix;
-}
 
 MOD_EXTERN_FUNC void setup(CModInfo *info) noexcept {
   *info = modInfo.to_c();
-  worldChatSessionStartedAt = CurrentUtcIsoTimestamp();
+  worldChatSessionStartedAt.clear(); // initialized from the server on the first successful feed response
 }
 
 DEFINE_TYPE(RiftPulse, ChatPanelDriver);
@@ -1206,13 +1303,23 @@ static void LoadWorldChatSettings() {
     int hasRotation = 0;
     int coordinateFrame = 0;
     if (input >> rx >> ry >> rz >> rw >> hasRotation >> coordinateFrame) {
-      if (coordinateFrame == 2) {
+      if (coordinateFrame == 3) {
         worldChatSettings.rotationOffset = UnityEngine::Quaternion(rx, ry, rz, rw);
         worldChatSettings.hasRotationOffset = hasRotation == 1;
+      } else if (coordinateFrame == 2) {
+        // Frame 2 saved a 180-degree yaw compensation because the previous
+        // build assumed the FloatingScreen rendered its front on the -Z face.
+        // Remove that compensation while migrating so an already-adjusted
+        // panel keeps the exact same visible world rotation after this update.
+        const auto legacyOffset = UnityEngine::Quaternion(rx, ry, rz, rw);
+        const auto oldFaceCorrection = UnityEngine::Quaternion(0.0f, 1.0f, 0.0f, 0.0f);
+        worldChatSettings.rotationOffset = UnityEngine::Quaternion::op_Multiply(
+            legacyOffset, oldFaceCorrection);
+        worldChatSettings.hasRotationOffset = hasRotation == 1;
+        SaveWorldChatSettings();
       } else {
-        // Old rotation offsets were stored relative to pitched headset axes.
-        // Preserve X/Y/Z and dimensions, but let this update initialize a
-        // level, front-facing rotation. All new saves carry coordinate frame 2.
+        // Older offsets used pitched headset axes. Preserve position and size,
+        // but initialize a level, front-facing rotation using the corrected basis.
         worldChatSettings.rotationOffset = UnityEngine::Quaternion(0.0f, 0.0f, 0.0f, 1.0f);
         worldChatSettings.hasRotationOffset = false;
         SaveWorldChatSettings();
@@ -1248,7 +1355,7 @@ static void SaveWorldChatSettings() {
            << worldChatSettings.height << " "
            << worldChatSettings.rotationOffset.x << " " << worldChatSettings.rotationOffset.y << " "
            << worldChatSettings.rotationOffset.z << " " << worldChatSettings.rotationOffset.w << " "
-           << (worldChatSettings.hasRotationOffset ? 1 : 0) << " 2\n";
+           << (worldChatSettings.hasRotationOffset ? 1 : 0) << " 3\n";
     output.flush();
     if (!output.good()) { unlink(temporaryPath.c_str()); return; }
   }
@@ -1307,6 +1414,9 @@ static std::string EscapeChatRichText(std::string value, size_t maxLength) {
 
 static void SaveWorldChatRotationOffset(UnityEngine::Quaternion worldRotation,
                                        UnityEngine::Quaternion cameraRotation) {
+  // Persist the actual visible panel rotation relative to level headset yaw.
+  // Do not add a facing correction: the FloatingScreen canvas faces the
+  // camera-facing LookRotation used by the default placement calculation.
   worldChatSettings.rotationOffset = UnityEngine::Quaternion::op_Multiply(
       UnityEngine::Quaternion::Inverse(cameraRotation), worldRotation);
   worldChatSettings.hasRotationOffset = true;
@@ -1321,6 +1431,8 @@ static UnityEngine::Quaternion GetInitialWorldChatPanelRotation(
         WorldChatHorizontalCameraRotation(cameraTransform), worldChatSettings.rotationOffset);
   }
   const auto cameraPosition = cameraTransform->get_position();
+  // LookRotation points the panel's visible canvas directly back toward the
+  // headset. No extra 180-degree yaw is needed on the Quest FloatingScreen.
   return UnityEngine::Quaternion::LookRotation(
       UnityEngine::Vector3(cameraPosition.x - panelPosition.x,
                            cameraPosition.y - panelPosition.y,
@@ -1689,6 +1801,22 @@ static void ShowChatPanelSettingsModal() {
   worldChatSettingsModal->Show();
 }
 
+static TMPro::TMP_FontAsset* ResolveWorldChatFont() {
+  auto fonts = UnityEngine::Resources::FindObjectsOfTypeAll<TMPro::TMP_FontAsset*>();
+  for (auto* font : fonts) {
+    if (!font) continue;
+    const auto name = static_cast<std::string>(font->get_name());
+    if (name.find("Roboto") != std::string::npos ||
+        name.find("Noto Sans") != std::string::npos ||
+        name.find("Liberation") != std::string::npos ||
+        name.find("Arial") != std::string::npos) {
+      return font;
+    }
+  }
+  if (heading && heading->get_font()) return heading->get_font();
+  return TMPro::TMP_Settings::get_defaultFontAsset();
+}
+
 static TMPro::TextMeshProUGUI* CreateWorldChatText(
     const std::string& objectName, float x, float y, float width, float height,
     float fontSize, TMPro::TextAlignmentOptions alignment) {
@@ -1713,11 +1841,14 @@ static TMPro::TextMeshProUGUI* CreateWorldChatText(
   rect->set_pivot(UnityEngine::Vector2(0.5f, 0.5f));
   rect->set_anchoredPosition(UnityEngine::Vector2(x, y));
   rect->set_sizeDelta(UnityEngine::Vector2(width, height));
-  auto fontAsset = heading ? heading->get_font() : TMPro::TMP_Settings::get_defaultFontAsset();
-  if (!fontAsset) fontAsset = TMPro::TMP_Settings::get_defaultFontAsset();
+  // Prefer TMP's neutral default typeface over the curved headline face.
+  // This keeps the floating feed readable at headset distance.
+  auto* fontAsset = ResolveWorldChatFont();
   if (fontAsset) text->set_font(fontAsset);
   text->set_fontSize(fontSize);
   text->set_enableWordWrapping(true);
+  // Keep the world-space TMP canvas in its native overflow mode. The feed
+  // renderer explicitly trims old entries to the visible capacity.
   text->set_alignment(alignment);
   text->set_richText(true);
   text->set_raycastTarget(false);
@@ -1833,7 +1964,7 @@ static bool CreateWorldChatPanel() {
   worldChatText = CreateWorldChatText(
       "RiftPulse Quest Chat Feed", 1.0f, 0.0f,
       std::max(32.0f, worldChatSettings.width - 8.0f),
-      std::max(24.0f, worldChatSettings.height - 10.0f), 2.25f,
+      std::max(24.0f, worldChatSettings.height - 10.0f), 2.55f,
       TMPro::TextAlignmentOptions::BottomLeft);
   worldChatHandleLabel = CreateWorldChatText(
       "RiftPulse Quest Drag Hint", 0.0f, -worldChatSettings.height * 0.5f + 2.2f,
@@ -1892,6 +2023,34 @@ static size_t FindMatchingJsonObjectEnd(const std::string& json, size_t start) {
   }
   return std::string::npos;
 }
+static std::string WorldChatProviderBadge(const std::string& provider) {
+  if (provider == "twitch") return "<mark=#9146FF><color=#FFFFFF><b> TW </b></color></mark>";
+  if (provider == "youtube") return "<mark=#FF0000><color=#FFFFFF><b> YT </b></color></mark>";
+  if (provider == "tiktok") return "<mark=#FFFFFF><color=#111111><b> TT </b></color></mark>";
+  return "<mark=#64748B><color=#FFFFFF><b> RP </b></color></mark>";
+}
+static std::string FormatWorldChatEntry(const std::string& provider, const std::string& eventKind, const std::string& sender, const std::string& message) {
+  const auto safeSender = EscapeChatRichText(sender, 28);
+  const auto safeMessage = EscapeChatRichText(message, 80);
+  const auto badge = WorldChatProviderBadge(provider);
+  if (eventKind.empty()) {
+    const auto nameColor = provider == "twitch" ? "#C4A1FF" : provider == "youtube" ? "#FF6666" : provider == "tiktok" ? "#FFFFFF" : "#D7E0EF";
+    return badge + " <color=" + nameColor + "><b>" + safeSender + "</b></color>\n" + safeMessage + "\n\n";
+  }
+  const auto label = eventKind == "follow" ? "* FOLLOW"
+      : eventKind == "subscription" ? "+ SUB / MEMBER"
+      : eventKind == "gift" ? "GIFT"
+      : eventKind == "bits" ? "BITS"
+      : eventKind == "super_chat" ? "$ SUPER CHAT"
+      : eventKind == "donation" ? "$ DONATION"
+      : eventKind == "like" ? "LIKE"
+      : eventKind == "share" ? "SHARE"
+      : eventKind == "raid" ? "RAID"
+      : eventKind == "member_join" ? "+ MEMBER JOIN" : "STREAM EVENT";
+  const auto accent = provider == "twitch" ? "#9146FF" : provider == "youtube" ? "#FF3333" : provider == "tiktok" ? "#D8D8D8" : "#64748B";
+  const auto foreground = provider == "tiktok" ? "#111111" : "#FFFFFF";
+  return badge + " <mark=" + std::string(accent) + "><color=" + foreground + "><b> " + label + " / " + safeSender + " </b></color></mark>\n<color=" + accent + "><b>" + safeMessage + "</b></color>\n\n";
+}
 static void RenderWorldChatFeed(const std::string& response) {
   const std::regex enabledRegex("\"chatEnabled\"\\s*:\\s*true");
   const bool enabled = std::regex_search(response, enabledRegex);
@@ -1929,6 +2088,7 @@ static void RenderWorldChatFeed(const std::string& response) {
       const auto object = response.substr(objectStart, objectEnd - objectStart + 1);
       cursor = objectEnd + 1;
       const auto provider = ReadJsonStringField(object, "provider");
+      const auto eventKind = ReadJsonStringField(object, "eventKind");
       auto sender = ReadJsonStringField(object, "displayName");
       if (sender.empty()) sender = ReadJsonStringField(object, "senderName");
       const auto message = ReadJsonStringField(object, "text");
@@ -1937,21 +2097,17 @@ static void RenderWorldChatFeed(const std::string& response) {
       // Do not filter on Quest's local session clock: clock skew against API timestamps
       // can make all incoming messages disappear even while the provider is live.
       if (sender.empty() || message.empty()) continue;
-      const auto senderColor = provider == "twitch" ? "#9146FF"
-          : provider == "youtube" ? "#FF0000"
-          : provider == "tiktok" ? "#FFFFFF"
-          : "#B8C4D8";
-      chatEntries.push_back({receivedAt, std::string("<color=#3B82F6>\xE2\x96\x8C</color> <color=") + senderColor + ">" +
-                            EscapeChatRichText(sender, 28) + "</color>\n" +
-                            EscapeChatRichText(message, 115) + "\n\n"});
+      chatEntries.push_back({receivedAt, FormatWorldChatEntry(provider, eventKind, sender, message)});
     }
     std::stable_sort(chatEntries.begin(), chatEntries.end(),
         [](const auto& left, const auto& right) { return left.first < right.first; });
     const auto charsPerMessageLine = std::max(28.0f, worldChatSettings.width * 0.70f);
-    const auto messageLines = 2.0f + std::ceil(115.0f / charsPerMessageLine);
+    const auto messageLines = 2.0f + std::ceil(80.0f / charsPerMessageLine);
     const auto availableLines = std::max(1.0f, (worldChatSettings.height - 12.0f) / 2.7f);
+    // Keep a conservative fixed-capacity feed so each refresh removes the
+    // oldest entries before rendering; never let a burst fill the panel.
     const auto visibleMessageCapacity = static_cast<size_t>(
-        std::clamp(std::floor(availableLines / messageLines), 1.0f, 12.0f));
+        std::clamp(std::floor(availableLines / messageLines), 1.0f, 4.0f));
     if (chatEntries.size() > visibleMessageCapacity) {
       chatEntries.erase(chatEntries.begin(), chatEntries.end() - visibleMessageCapacity);
     }
@@ -1966,12 +2122,15 @@ static void RenderWorldChatFeed(const std::string& response) {
 static void PollWorldChatPanel() {
   if (!isPaired || worldChatRequestInFlight || !EnsureHttpClient()) return;
   worldChatRequestInFlight = true;
-  // Restrict this game/mod session's feed to messages received after startup;
-  // the dashboard/API history must not repopulate the panel with stale chat.
-  auto* request = CreateGetRequest(std::string(API_BASE) + "/device/chat/panel?sessionStartedAt=" + worldChatSessionStartedAt, deviceCredential);
+  // Use the API-issued session cutoff; never derive this from the headset clock.
+  std::string feedUrl = std::string(API_BASE) + "/device/chat/panel";
+  if (!worldChatSessionStartedAt.empty()) feedUrl += "?sessionStartedAt=" + worldChatSessionStartedAt;
+  auto* request = CreateGetRequest(feedUrl, deviceCredential);
   if (!request || !SendAsync(request, [](int64_t status, const std::string& body) {
         worldChatRequestInFlight = false;
         if (status >= 200 && status < 300) {
+          const auto serverSessionStart = ReadJsonStringField(body, "sessionStartedAt");
+          if (!serverSessionStart.empty()) worldChatSessionStartedAt = serverSessionStart;
           RenderWorldChatFeed(body);
         } else if (status == 401) {
           isPaired = false;

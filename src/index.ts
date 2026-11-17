@@ -4,6 +4,7 @@ import type { NormalizedProviderEvent, ProviderHealthSnapshot } from "../package
 import { aggregateViewerCounts, emptyProviderHealth, normalizePlatformProviderEvent, normalizeTikTokChatMessage, normalizeTikTokProviderEvent, normalizeTwitchChatMessage, normalizeYouTubeChatMessage, normalizeYouTubeProviderEvent } from "../packages/shared/src/chat.ts";
 import { persistNormalizedChatMessage } from "../packages/shared/src/chat-persistence.ts";
 import { persistNormalizedProviderEvent } from "../packages/shared/src/provider-event-persistence.ts";
+import { beatSaverSongName, parseSongRequestCommand } from "../packages/shared/src/song-requests.ts";
 import { verifyTikTokConnectorSignature } from "../packages/shared/src/tiktok-connector-signature.ts";
 import { verifyTwitchEventSubSignature } from "../packages/shared/src/twitch-eventsub.ts";
 import { createOAuthState, createPkceChallenge, createPkceVerifier, digestOAuthState } from "../packages/shared/src/oauth-state.ts";
@@ -112,6 +113,165 @@ async function publishProviderEvent(env: Env, accountId: string, event: Normaliz
       body: JSON.stringify({ type: "provider.event", event }),
     }));
   } catch { /* Event history remains durable; realtime delivery is best-effort. */ }
+}
+
+
+
+type IncomingSongRequestChat = {
+  provider: "twitch" | "youtube" | "tiktok";
+  senderId: string;
+  senderName: string;
+  text: string;
+  receivedAt: string;
+};
+type SongRequestQueueRow = {
+  id: string;
+  provider: string;
+  requesterName: string;
+  beatsaverKey: string;
+  songName: string | null;
+  status: "queued" | "playing" | "played" | "rejected" | "failed";
+  resultCode: string | null;
+  createdAt: string;
+};
+
+async function publishSongRequest(env: Env, accountId: string, request: SongRequestQueueRow): Promise<void> {
+  if (!env.CHAT_ROOM) return;
+  try {
+    const room = env.CHAT_ROOM.get(env.CHAT_ROOM.idFromName(accountId));
+    await room.fetch(new Request("https://chat-room/publish", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "song.request", request }),
+    }));
+  } catch {
+    // The queue is durable in D1; realtime delivery is best-effort.
+  }
+}
+
+async function listSongRequestQueue(db: NonNullable<Env["DB"]>, accountId: string) {
+  return db.prepare(
+    "SELECT id, provider, requester_name AS requesterName, beatsaver_key AS beatsaverKey, song_name AS songName, status, result_code AS resultCode, requested_at AS createdAt FROM song_requests WHERE account_id = ? AND status IN ('queued', 'playing') ORDER BY CASE WHEN status = 'playing' THEN 0 ELSE 1 END, requested_at ASC LIMIT 50",
+  ).bind(accountId).all<SongRequestQueueRow>();
+}
+
+/** Convert a newly persisted viewer chat message into a validated BeatSaver queue entry. */
+async function processSongRequestChatMessage(
+  env: Env,
+  accountId: string,
+  message: IncomingSongRequestChat,
+): Promise<void> {
+  const db = env.DB;
+  if (!db || (message.provider !== "twitch" && message.provider !== "youtube" && message.provider !== "tiktok")) return;
+
+  try {
+    const setting = await db.prepare(
+      "SELECT enabled, settings_json AS settingsJson FROM module_settings WHERE account_id = ? AND module_key = 'bsr-song-request' LIMIT 1",
+    ).bind(accountId).first<{ enabled: number; settingsJson: string }>();
+    if (setting && setting.enabled !== 1) return;
+
+    let settings: Record<string, unknown> = {};
+    try {
+      const parsed = setting?.settingsJson ? JSON.parse(setting.settingsJson) as unknown : {};
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) settings = parsed as Record<string, unknown>;
+    } catch { settings = {}; }
+    const configuredCommand = typeof settings.command === "string"
+      && /^![a-z0-9_-]{1,19}$/i.test(settings.command.trim()) ? settings.command.trim() : "!bsr";
+    const parsed = parseSongRequestCommand(message.text, configuredCommand);
+    if (!parsed.matched) return;
+
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const requesterId = (message.provider + ":" + message.senderId).slice(0, 128);
+    const requesterName = (message.senderName || "Viewer").trim().slice(0, 80) || "Viewer";
+    const rawInput = parsed.rawInput.slice(0, 300);
+    let status: SongRequestQueueRow["status"] = "queued";
+    let resultCode: string | null = null;
+    let beatsaverKey: string | null = parsed.mapKey;
+    let songName: string | null = null;
+
+    if (parsed.error) {
+      status = "rejected";
+      resultCode = parsed.error;
+    } else {
+      const cooldownSeconds = typeof settings.requesterCooldownSeconds === "number"
+        && Number.isFinite(settings.requesterCooldownSeconds)
+        ? Math.max(0, Math.min(3600, Math.floor(settings.requesterCooldownSeconds))) : 30;
+      if (cooldownSeconds > 0) {
+        const cutoff = new Date(Date.now() - cooldownSeconds * 1000).toISOString();
+        const recent = await db.prepare(
+          "SELECT id FROM song_requests WHERE account_id = ? AND requester_id = ? AND requested_at >= ? AND status IN ('queued', 'playing', 'played') ORDER BY requested_at DESC LIMIT 1",
+        ).bind(accountId, requesterId, cutoff).first<{ id: string }>();
+        if (recent) {
+          status = "rejected";
+          resultCode = "requester_cooldown";
+        }
+      }
+
+      if (status === "queued") {
+        const duplicate = await db.prepare(
+          "SELECT id FROM song_requests WHERE account_id = ? AND beatsaver_key = ? AND status IN ('queued', 'playing') LIMIT 1",
+        ).bind(accountId, beatsaverKey).first<{ id: string }>();
+        if (duplicate) {
+          status = "rejected";
+          resultCode = "already_queued";
+        }
+      }
+
+      if (status === "queued") {
+        const queue = await db.prepare(
+          "SELECT COUNT(*) AS total FROM song_requests WHERE account_id = ? AND status IN ('queued', 'playing')",
+        ).bind(accountId).first<{ total: number }>();
+        const queueLimit = typeof settings.queueLimit === "number" && Number.isFinite(settings.queueLimit)
+          ? Math.max(1, Math.min(50, Math.floor(settings.queueLimit))) : 25;
+        if ((queue?.total ?? 0) >= queueLimit) {
+          status = "rejected";
+          resultCode = "queue_full";
+        }
+      }
+
+      if (status === "queued" && beatsaverKey) {
+        try {
+          const response = await fetch("https://api.beatsaver.com/maps/id/" + encodeURIComponent(beatsaverKey), {
+            headers: { accept: "application/json", "user-agent": "RiftPulse/1.0 song-requests" },
+          });
+          if (response.status === 404) {
+            status = "rejected";
+            resultCode = "map_not_found";
+          } else if (!response.ok) {
+            status = "failed";
+            resultCode = "beatsaver_unavailable";
+          } else {
+            const payload: unknown = await response.json();
+            songName = beatSaverSongName(payload);
+            if (!songName) {
+              status = "failed";
+              resultCode = "invalid_beatsaver_response";
+            }
+          }
+        } catch {
+          status = "failed";
+          resultCode = "beatsaver_unavailable";
+        }
+      }
+    }
+
+    const inserted = await db.prepare(
+      "INSERT INTO song_requests (id, account_id, device_id, provider, requester_id, requester_name, raw_input, beatsaver_key, song_name, status, result_code, requested_at, updated_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).bind(id, accountId, message.provider, requesterId, requesterName, rawInput, beatsaverKey,
+      songName, status, resultCode, message.receivedAt || now, now).run();
+    if (!inserted.success) {
+      // A concurrent request for the same active map can hit the partial unique index.
+      if (beatsaverKey && status === "queued") console.info("song_request_duplicate_race");
+      return;
+    }
+    await publishSongRequest(env, accountId, {
+      id, provider: message.provider, requesterName, beatsaverKey: beatsaverKey ?? "",
+      songName, status, resultCode, createdAt: message.receivedAt || now,
+    });
+  } catch {
+    // Song-request failures must never interrupt the existing cross-platform chat pipeline.
+    console.warn("song_request_processing_failed");
+  }
 }
 
 function isTrustedMutationOrigin(request: Request, env: Env): boolean {
@@ -478,6 +638,23 @@ export default {
       return Response.json({ moduleKey, enabled: enabled === 1, settings, updatedAt: now }, { headers: JSON_HEADERS });
     }
 
+
+    if (url.pathname === "/api/v1/device/song-requests" && request.method === "GET") {
+      const authContext = await getDeviceAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Song-request storage is not configured.", requestId);
+      const [setting, queue] = await Promise.all([
+        env.DB.prepare("SELECT enabled FROM module_settings WHERE account_id = ? AND module_key = 'bsr-song-request' LIMIT 1")
+          .bind(authContext.userId).first<{ enabled: number }>(),
+        listSongRequestQueue(env.DB, authContext.userId),
+      ]);
+      if (!queue.success) return jsonError(503, "song_request_store_unavailable", "Could not load the song-request queue.", requestId);
+      return Response.json({
+        enabled: setting ? setting.enabled === 1 : true,
+        requests: queue.results ?? [],
+      }, { headers: JSON_HEADERS });
+    }
+
     // Device-authenticated feed for the native PCVR and Quest world-space chat panel.
     // The browser route remains account-session authenticated; game builds never need
     // a browser cookie or an account secret to read their own feed.
@@ -488,17 +665,17 @@ export default {
       // Show ordinary chat first, then supported stream events. Rank the two
       // sources independently so bursts of follows/gifts/likes cannot push all
       // actual chat messages out of the small floating panel.
+      // The first poll establishes a server-clock session boundary. Never trust a
+      // headset/PC clock for this cutoff: clock skew can either replay old history
+      // or filter out every new message. Clients reuse this server-issued timestamp.
       const requestedSessionStart = url.searchParams.get("sessionStartedAt");
       const parsedSessionStart = requestedSessionStart ? Date.parse(requestedSessionStart) : Number.NaN;
       const sessionStart = Number.isFinite(parsedSessionStart)
-        ? new Date(parsedSessionStart).toISOString() : null;
-      const feedSql = sessionStart
-        ? "SELECT * FROM (SELECT id, provider, channel_name AS channelName, sender_name AS senderName, text, received_at AS receivedAt FROM chat_messages WHERE account_id = ? AND received_at >= ? UNION ALL SELECT id, provider, channel_name AS channelName, COALESCE(actor_name, 'Stream event') AS senderName, CASE kind WHEN 'follow' THEN 'followed the channel' WHEN 'subscription' THEN 'subscribed' WHEN 'gift' THEN 'sent ' || COALESCE(CASE WHEN quantity IS NOT NULL THEN CAST(quantity AS TEXT) || ' x ' ELSE '' END, '') || COALESCE(item_name, 'a gift') WHEN 'bits' THEN 'cheered ' || COALESCE(CAST(amount AS TEXT), '') || ' Bits' WHEN 'super_chat' THEN 'sent a Super Chat' WHEN 'donation' THEN 'donated ' || COALESCE(currency, '') || COALESCE(CAST(amount AS TEXT), '') WHEN 'like' THEN 'liked the stream' WHEN 'share' THEN 'shared the stream' WHEN 'member_join' THEN 'joined the stream' WHEN 'viewer_count' THEN 'Viewer count: ' || COALESCE(CAST(quantity AS TEXT), 'unknown') ELSE kind END || CASE WHEN message IS NOT NULL THEN ': ' || message ELSE '' END AS text, received_at AS receivedAt FROM provider_events WHERE account_id = ? AND kind != 'viewer_count' AND received_at >= ?) ORDER BY receivedAt DESC LIMIT 100"
-        : "SELECT * FROM (SELECT id, provider, channel_name AS channelName, sender_name AS senderName, text, received_at AS receivedAt FROM chat_messages WHERE account_id = ? UNION ALL SELECT id, provider, channel_name AS channelName, COALESCE(actor_name, 'Stream event') AS senderName, CASE kind WHEN 'follow' THEN 'followed the channel' WHEN 'subscription' THEN 'subscribed' WHEN 'gift' THEN 'sent ' || COALESCE(CASE WHEN quantity IS NOT NULL THEN CAST(quantity AS TEXT) || ' x ' ELSE '' END, '') || COALESCE(item_name, 'a gift') WHEN 'bits' THEN 'cheered ' || COALESCE(CAST(amount AS TEXT), '') || ' Bits' WHEN 'super_chat' THEN 'sent a Super Chat' WHEN 'donation' THEN 'donated ' || COALESCE(currency, '') || COALESCE(CAST(amount AS TEXT), '') WHEN 'like' THEN 'liked the stream' WHEN 'share' THEN 'shared the stream' WHEN 'member_join' THEN 'joined the stream' WHEN 'viewer_count' THEN 'Viewer count: ' || COALESCE(CAST(quantity AS TEXT), 'unknown') ELSE kind END || CASE WHEN message IS NOT NULL THEN ': ' || message ELSE '' END AS text, received_at AS receivedAt FROM provider_events WHERE account_id = ? AND kind != 'viewer_count') ORDER BY receivedAt DESC LIMIT 100";
-      const feed = await env.DB.prepare(feedSql).bind(...(sessionStart
-        ? [authContext.userId, sessionStart, authContext.userId, sessionStart]
-        : [authContext.userId, authContext.userId])).all<{
-        id: string; provider: string; channelName: string; senderName: string; text: string; receivedAt: string;
+        ? new Date(parsedSessionStart).toISOString() : new Date().toISOString();
+      const feedSql = "SELECT * FROM (SELECT id, provider, channel_name AS channelName, sender_name AS senderName, text, received_at AS receivedAt, NULL AS eventKind FROM chat_messages WHERE account_id = ? AND received_at >= ? UNION ALL SELECT id, provider, channel_name AS channelName, COALESCE(actor_name, 'Stream event') AS senderName, CASE kind WHEN 'follow' THEN 'followed the channel' WHEN 'subscription' THEN 'subscribed' WHEN 'gift' THEN 'sent ' || COALESCE(CASE WHEN quantity IS NOT NULL THEN CAST(quantity AS TEXT) || ' x ' ELSE '' END, '') || COALESCE(item_name, 'a gift') WHEN 'bits' THEN 'cheered ' || COALESCE(CAST(amount AS TEXT), '') || ' Bits' WHEN 'super_chat' THEN 'sent a Super Chat' WHEN 'donation' THEN 'donated ' || COALESCE(currency, '') || COALESCE(CAST(amount AS TEXT), '') WHEN 'like' THEN 'liked the stream' WHEN 'share' THEN 'shared the stream' WHEN 'member_join' THEN 'joined the stream' WHEN 'viewer_count' THEN 'Viewer count: ' || COALESCE(CAST(quantity AS TEXT), 'unknown') ELSE kind END || CASE WHEN message IS NOT NULL THEN ': ' || message ELSE '' END AS text, received_at AS receivedAt, kind AS eventKind FROM provider_events WHERE account_id = ? AND kind != 'viewer_count' AND received_at >= ?) ORDER BY receivedAt DESC LIMIT 100";
+      const feed = await env.DB.prepare(feedSql)
+        .bind(authContext.userId, sessionStart, authContext.userId, sessionStart).all<{
+        id: string; provider: string; channelName: string; senderName: string; text: string; receivedAt: string; eventKind: string | null;
       }>();
       if (!feed.success) return jsonError(503, "chat_store_unavailable", "Could not load the in-game chat feed.", requestId);
 
@@ -533,10 +710,11 @@ export default {
       // preserve that order so actual chat remains visible at the top of the panel.
       const messages = chatEnabled ? (feed.results ?? []).map(row => ({ ...row, displayName: row.senderName })) : [];
       if (url.pathname === "/api/v1/device/chat/messages") {
-        return Response.json({ messages }, { headers: JSON_HEADERS });
+        return Response.json({ sessionStartedAt: sessionStart, messages }, { headers: JSON_HEADERS });
       }
       return Response.json({
         chatEnabled,
+        sessionStartedAt: sessionStart,
         messages,
         viewers: aggregateViewerCounts(providerHealth, now),
         providers: providerHealth.map(item => ({ provider: item.provider, state: item.state })),
@@ -776,7 +954,10 @@ export default {
         const stored = await persistNormalizedChatMessage(env.DB, body.accountId, message);
         if (!stored.ok) return jsonError(503, "chat_store_unavailable", "Could not store TikTok chat.", requestId);
         inserted = stored.inserted;
-        if (inserted) await publishChatMessage(env, body.accountId, message);
+        if (inserted) {
+          await publishChatMessage(env, body.accountId, message);
+          await processSongRequestChatMessage(env, body.accountId, message);
+        }
       } else if (body.kind === "viewers") {
         const event = normalizeTikTokProviderEvent("roomUser", body.payload, body.channelId, body.channelName, now);
         if (!event || event.kind !== "viewer_count") return jsonError(400, "invalid_tiktok_viewers", "TikTok viewer statistics are invalid.", requestId);
@@ -1383,6 +1564,7 @@ export default {
         if (persisted.inserted) {
           insertedMessages++;
           await publishChatMessage(env, connection.account_id, message);
+          await processSongRequestChatMessage(env, connection.account_id, message);
         }
         const health = await env.DB.prepare(
           "INSERT INTO integration_health (id, account_id, provider, status, viewer_count, observed_at, detail_code, viewer_count_observed_at) VALUES (?, ?, 'twitch', 'healthy', NULL, ?, NULL, NULL) ON CONFLICT(account_id, provider) DO UPDATE SET status = 'healthy', observed_at = excluded.observed_at, detail_code = NULL",
@@ -1528,7 +1710,11 @@ export default {
           if (message) {
             const stored = await persistNormalizedChatMessage(env.DB, authContext.userId, message);
             if (!stored.ok) return jsonError(503, "youtube_chat_store_failed", "Could not store YouTube live chat.", requestId);
-            if (stored.inserted) { insertedMessages++; await publishChatMessage(env, authContext.userId, message); }
+            if (stored.inserted) {
+              insertedMessages++;
+              await publishChatMessage(env, authContext.userId, message);
+              await processSongRequestChatMessage(env, authContext.userId, message);
+            }
             continue;
           }
           const event = normalizeYouTubeProviderEvent(item, current.externalAccountId, channelName, receivedAt);
@@ -1551,6 +1737,60 @@ export default {
       } catch {
         return jsonError(502, "youtube_poll_failed", "YouTube live-chat polling failed.", requestId);
       }
+    }
+
+
+    if (url.pathname === "/api/v1/song-requests" && request.method === "GET") {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Song-request storage is not configured.", requestId);
+      const queue = await listSongRequestQueue(env.DB, authContext.userId);
+      if (!queue.success) return jsonError(503, "song_request_store_unavailable", "Could not load the song-request queue.", requestId);
+      return Response.json({ requests: queue.results ?? [] }, { headers: JSON_HEADERS });
+    }
+
+    const songRequestStatusMatch = url.pathname.match(/^\/api\/v1\/song-requests\/([0-9a-f-]{36})$/i);
+    if (songRequestStatusMatch && request.method === "PATCH") {
+      const authContext = await getAuthContext(request, env);
+      if (!authContext.ok) return jsonError(authContext.status, authContext.code, authContext.message, requestId);
+      if (!isTrustedMutationOrigin(request, env)) return jsonError(403, "untrusted_origin", "Request origin is not trusted.", requestId);
+      if (!env.DB) return jsonError(503, "database_unavailable", "Song-request storage is not configured.", requestId);
+      if (!isJson(request)) return jsonError(415, "content_type_required", "Send a JSON request body.", requestId);
+      let body: unknown;
+      try { body = await readJson(request); }
+      catch { return jsonError(400, "invalid_json", "Request body must be valid JSON.", requestId); }
+      if (!body || typeof body !== "object" || Array.isArray(body)
+        || Object.keys(body).length !== 1
+        || !["queued", "playing", "played", "rejected"].includes(String((body as Record<string, unknown>).status))) {
+        return jsonError(400, "invalid_song_request_status", "Choose queued, playing, played, or rejected.", requestId);
+      }
+      const status = (body as { status: "queued" | "playing" | "played" | "rejected" }).status;
+      const id = songRequestStatusMatch[1];
+      const existing = await env.DB.prepare(
+        "SELECT id FROM song_requests WHERE id = ? AND account_id = ? AND status IN ('queued', 'playing') LIMIT 1",
+      ).bind(id, authContext.userId).first<{ id: string }>();
+      if (!existing) return jsonError(404, "song_request_not_found", "That song request is no longer in the active queue.", requestId);
+
+      const now = new Date().toISOString();
+      if (status === "playing") {
+        const finishedPrevious = await env.DB.prepare(
+          "UPDATE song_requests SET status = 'played', updated_at = ? WHERE account_id = ? AND status = 'playing' AND id <> ?",
+        ).bind(now, authContext.userId, id).run();
+        if (!finishedPrevious.success) return jsonError(503, "song_request_store_unavailable", "Could not advance the active song.", requestId);
+      }
+      const updated = await env.DB.prepare(
+        "UPDATE song_requests SET status = ?, updated_at = ? WHERE id = ? AND account_id = ? AND status IN ('queued', 'playing')",
+      ).bind(status, now, id, authContext.userId).run();
+      if (!updated.success || (updated.meta?.changes ?? 0) !== 1) {
+        return jsonError(503, "song_request_update_failed", "Could not update that song request.", requestId);
+      }
+      const row = await env.DB.prepare(
+        "SELECT id, provider, requester_name AS requesterName, beatsaver_key AS beatsaverKey, song_name AS songName, status, result_code AS resultCode, requested_at AS createdAt FROM song_requests WHERE id = ? AND account_id = ? LIMIT 1",
+      ).bind(id, authContext.userId).first<SongRequestQueueRow>();
+      if (row) await publishSongRequest(env, authContext.userId, row);
+      const queue = await listSongRequestQueue(env.DB, authContext.userId);
+      if (!queue.success) return jsonError(503, "song_request_store_unavailable", "The request changed, but the queue could not be refreshed.", requestId);
+      return Response.json({ request: row, requests: queue.results ?? [] }, { headers: JSON_HEADERS });
     }
 
     if (url.pathname === "/api/v1/chat/messages" && request.method === "GET") {

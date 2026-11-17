@@ -138,7 +138,18 @@ static UnityEngine::UI::Button* CreateQuestLayoutButton(
   if (!button) return nullptr;
   ConfigureQuestLayoutElement(button->get_gameObject(), width, height);
   BSML::Lite::ToggleButtonWordWrapping(button, false);
-  BSML::Lite::SetButtonTextSize(button, 2.35f);
+  BSML::Lite::SetButtonTextSize(button, 2.75f);
+  if (auto* label = button->GetComponentInChildren<HMUI::CurvedTextMeshPro*>()) {
+    label->set_alignment(TMPro::TextAlignmentOptions::Center);
+    if (auto* labelRect = label->GetComponent<UnityEngine::RectTransform*>()) {
+      labelRect->set_anchorMin(UnityEngine::Vector2(0.0f, 0.0f));
+      labelRect->set_anchorMax(UnityEngine::Vector2(1.0f, 1.0f));
+      labelRect->set_pivot(UnityEngine::Vector2(0.5f, 0.5f));
+      labelRect->set_offsetMin(UnityEngine::Vector2(1.2f, 0.0f));
+      labelRect->set_offsetMax(UnityEngine::Vector2(-1.2f, 0.0f));
+      labelRect->set_anchoredPosition(UnityEngine::Vector2(0.0f, 0.0f));
+    }
+  }
   TrackMainMenuObject(button->get_gameObject());
   return button;
 }
@@ -213,10 +224,10 @@ static void BuildRiftPulseMenuPcvrLayout(UnityEngine::Transform* root) {
             2.05f, 36.5f, 2.2f,
             TMPro::TextAlignmentOptions::Center);
         codeButton = CreateQuestLayoutButton(
-            deviceCard, "GENERATE CODE", 36.2f, 2.9f,
+            deviceCard, "GENERATE CODE", 36.2f, 3.2f,
             []() { GeneratePairingCode(); });
         checkButton = CreateQuestLayoutButton(
-            deviceCard, "CHECK LINK STATUS", 36.2f, 2.9f,
+            deviceCard, "CHECK LINK STATUS", 36.2f, 3.2f,
             []() { CheckPairingStatus(); });
         CreateQuestLayoutText(
             deviceCard, "Enter your five-digit code at app.riftpulse.me.",
@@ -234,17 +245,17 @@ static void BuildRiftPulseMenuPcvrLayout(UnityEngine::Transform* root) {
             spatialCard, "Move and resize your floating chat panel.",
             2.0f, 36.5f, 2.4f);
         CreateQuestLayoutButton(
-            spatialCard, "DISPLAY SETTINGS", 36.2f, 2.8f,
+            spatialCard, "DISPLAY SETTINGS", 36.2f, 3.1f,
             []() { ShowChatPanelSettingsModal(); });
         CreateQuestLayoutButton(
-            spatialCard, "RE-CENTER PANEL", 36.2f, 2.8f,
+            spatialCard, "RE-CENTER PANEL", 36.2f, 3.1f,
             []() { ShowWorldChatPanel(); });
       }
     }
 
     if (rightColumn) {
       auto* chatCard = CreateQuestVerticalLayout(
-          rightColumn, "02 Live Chat Card", 38.5f, 22.8f,
+          rightColumn, "02 Live Chat Card", 38.5f, 20.8f,
           0.6f, surface, true, 1);
       if (chatCard) {
         CreateQuestLayoutText(
@@ -253,12 +264,12 @@ static void BuildRiftPulseMenuPcvrLayout(UnityEngine::Transform* root) {
             chatCard, "Messages and supported stream events from your connected platforms.",
             2.1f, 36.5f, 4.0f);
         chatButton = CreateQuestLayoutButton(
-            chatCard, "CHAT MODULE: LOCKED", 36.2f, 3.0f,
+            chatCard, "CHAT MODULE: LOCKED", 36.2f, 3.3f,
             []() { ToggleChat(); });
       }
 
       auto* songCard = CreateQuestVerticalLayout(
-          rightColumn, "03 Song Requests Card", 38.5f, 22.8f,
+          rightColumn, "03 Song Requests Card", 38.5f, 26.4f,
           0.6f, surface, true, 1);
       if (songCard) {
         CreateQuestLayoutText(
@@ -267,8 +278,14 @@ static void BuildRiftPulseMenuPcvrLayout(UnityEngine::Transform* root) {
             songCard, "Let viewers request songs through connected chat.",
             2.1f, 36.5f, 4.0f);
         bsrButton = CreateQuestLayoutButton(
-            songCard, "SONG REQUESTS: LOCKED", 36.2f, 3.0f,
+            songCard, "SONG REQUESTS: LOCKED", 36.2f, 3.3f,
             []() { ToggleBsr(); });
+        songQueueLabel = CreateQuestLayoutText(
+            songCard, "Pair your headset to view the song queue.",
+            1.75f, 35.5f, 4.3f);
+        CreateQuestLayoutButton(
+            songCard, "REFRESH SONG QUEUE", 36.2f, 2.7f,
+            []() { RefreshSongRequestQueue(); });
       }
     }
   }

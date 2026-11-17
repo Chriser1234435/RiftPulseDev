@@ -16,7 +16,7 @@
           <text text="01  /  DEVICE LINK" font-size="4.1" align="Left"/>
           <text text="PAIRING CODE" font-size="2.8" align="Center"/>
           <text id="pairingCodeText" text="-----" font-size="8" align="Center"/>
-          <text id="statusText" text="Generate a code to connect this installation to your RiftPulse account." font-size="2.7" align="Center"/>
+          <text id="statusText" text="Generate a code to connect this installation to your RiftPulse account." font-size="2.2" align="Center"/>
           <button id="connectButton" text="GENERATE SECURE CODE" on-click="connect-click"/>
           <text text="Enter the five-digit code at app.riftpulse.me." font-size="2.5" align="Center"/>
         </vertical>
@@ -37,9 +37,10 @@
           <text text="03  /  SONG REQUESTS" font-size="3.8" align="Left"/>
           <text text="Let viewers request songs through connected chats." font-size="2.6" align="Left"/>
           <button id="bsrToggleButton" text="SONG REQUESTS: OFF" on-click="toggle-bsr"/>
+          <text id="bsrQueueText" text="Pair your device to view the queue." font-size="2.2" align="Left"/>
+          <button text="REFRESH SONG QUEUE" on-click="refresh-bsr-queue"/>
         </vertical>
       </vertical>
     </horizontal>
-    <text id="modulePreviewStatus" text="Pair this device to sync modules and display preferences." font-size="2.5" align="Center"/>
   </vertical>
 </bg>

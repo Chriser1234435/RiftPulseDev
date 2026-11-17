@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -20,7 +20,7 @@ namespace RiftPulse.Pcvr
     {
         private const string ApiBase = "https://app.riftpulse.me/api/v1";
         private const string GameVersion = "1.40.8_7379";
-        private const string ModVersion = "0.3.1";
+        private const string ModVersion = "0.3.6";
         private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
         private bool _connecting;
 
@@ -28,7 +28,7 @@ namespace RiftPulse.Pcvr
         public string StatusText { get; private set; } = "Connect your Beat Saber installation to your RiftPulse account.";
         public string ChatToggleLabel { get; private set; } = "CHAT MODULE: OFF (UI PREVIEW)";
         public string BsrToggleLabel { get; private set; } = "BSR MODULE: OFF (UI PREVIEW)";
-        public string ModulePreviewStatus { get; private set; } = "Pair this installation to sync its module settings.";
+        public string ModulePreviewStatus { get; private set; } = "";
 
         // BSML does not interpolate {property} placeholders in ordinary text/button
         // attributes. Bind concrete components and update their text after parsing.
@@ -50,8 +50,8 @@ namespace RiftPulse.Pcvr
         [UIComponent("bsrToggleButton")]
         private Button _bsrToggleButton = null!;
 
-        [UIComponent("modulePreviewStatus")]
-        private TextMeshProUGUI _modulePreviewStatus = null!;
+        [UIComponent("bsrQueueText")]
+        private TextMeshProUGUI _bsrQueueText = null!;
 
         private TextMeshProUGUI? _connectButtonText;
         private TextMeshProUGUI? _customizeChatPanelButtonText;
@@ -90,7 +90,7 @@ namespace RiftPulse.Pcvr
 
             if (_connectButton == null || _pairingCodeText == null || _statusText == null ||
                 _connectButtonText == null || _customizeChatPanelButtonText == null ||
-                _chatToggleButtonText == null || _bsrToggleButtonText == null || _modulePreviewStatus == null)
+                _chatToggleButtonText == null || _bsrToggleButtonText == null)
             {
                 StatusText = "A RiftPulse menu control could not initialize. Reinstall the PCVR package and check the BSML dependency.";
             }
@@ -132,6 +132,13 @@ namespace RiftPulse.Pcvr
             await LoadAccountModuleSettings();
         }
 
+        private static string CompactStatus(string value, int maxLength)
+        {
+            var compact = Regex.Replace(value ?? string.Empty, @"\s+", " ").Trim();
+            if (compact.Length <= maxLength) return compact;
+            return compact.Substring(0, Math.Max(0, maxLength - 3)).TrimEnd() + "...";
+        }
+
         private void RefreshUi()
         {
             if (_pairingCodeText != null) _pairingCodeText.text = PairingCode;
@@ -139,10 +146,11 @@ namespace RiftPulse.Pcvr
                 _connectButtonText.text = _connecting ? "GENERATING CODE..." :
                     (_hasPairedThisSession ? "GENERATE NEW CODE" : "GENERATE SECURE CODE");
             if (_customizeChatPanelButtonText != null) _customizeChatPanelButtonText.text = "OPEN DISPLAY LAB";
-            if (_statusText != null) _statusText.text = StatusText;
+            var visibleStatus = string.IsNullOrWhiteSpace(ModulePreviewStatus)
+                ? StatusText : ModulePreviewStatus;
+            if (_statusText != null) _statusText.text = CompactStatus(visibleStatus, 38);
             if (_chatToggleButtonText != null) _chatToggleButtonText.text = ChatToggleLabel;
             if (_bsrToggleButtonText != null) _bsrToggleButtonText.text = BsrToggleLabel;
-            if (_modulePreviewStatus != null) _modulePreviewStatus.text = ModulePreviewStatus;
         }
 
         private bool _hasPairedThisSession;
@@ -229,6 +237,49 @@ namespace RiftPulse.Pcvr
             await SaveModuleSetting("bsr-song-request", _bsrPreviewEnabled);
         }
 
+        [UIAction("refresh-bsr-queue")]
+        public async void RefreshBsrQueueClicked() { await RefreshSongRequestQueue(); }
+
+        private static string ReadSongRequestJsonString(string json, string key)
+        {
+            var match = Regex.Match(json, "\\\"" + Regex.Escape(key) + "\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"");
+            return match.Success ? match.Groups[1].Value.Replace("\\\\n", " ") : string.Empty;
+        }
+
+        private async Task RefreshSongRequestQueue()
+        {
+            if (_bsrQueueText != null) _bsrQueueText.text = "Loading song queue...";
+            if (!_hasPairedThisSession) { if (_bsrQueueText != null) _bsrQueueText.text = "Pair this device to view your song queue."; return; }
+            try
+            {
+                using (var request = new HttpRequestMessage(HttpMethod.Get, ApiBase + "/device/song-requests"))
+                {
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", LoadOrCreateDeviceCredential());
+                    using (var response = await Http.SendAsync(request))
+                    {
+                        if (!response.IsSuccessStatusCode) { if (_bsrQueueText != null) _bsrQueueText.text = "Queue unavailable (HTTP " + (int)response.StatusCode + ")."; return; }
+                        var payload = await response.Content.ReadAsStringAsync();
+                        var requestsMatch = Regex.Match(payload, "\\\"requests\\\"\\s*:\\s*\\[(.*?)\\]", RegexOptions.Singleline);
+                        if (!requestsMatch.Success) { if (_bsrQueueText != null) _bsrQueueText.text = "Could not read the song queue."; return; }
+                        var items = Regex.Matches(requestsMatch.Groups[1].Value, "\\{[^{}]*\\}");
+                        if (items.Count == 0) { if (_bsrQueueText != null) _bsrQueueText.text = "No songs waiting. Viewers: !bsr [BeatSaver key]"; return; }
+                        var lines = new System.Collections.Generic.List<string>();
+                        for (var index = 0; index < items.Count && index < 3; index++)
+                        {
+                            var item = items[index].Value;
+                            var song = ReadSongRequestJsonString(item, "songName");
+                            var requester = ReadSongRequestJsonString(item, "requesterName");
+                            var status = ReadSongRequestJsonString(item, "status");
+                            if (string.IsNullOrWhiteSpace(song)) song = "BeatSaver map " + ReadSongRequestJsonString(item, "beatsaverKey");
+                            lines.Add((status == "playing" ? "PLAYING: " : "NEXT: ") + song + " - " + requester);
+                        }
+                        if (items.Count > 3) lines.Add("+" + (items.Count - 3) + " more in queue");
+                        if (_bsrQueueText != null) _bsrQueueText.text = string.Join("\n", lines.ToArray());
+                    }
+                }
+            }
+            catch (Exception) { if (_bsrQueueText != null) _bsrQueueText.text = "Could not reach the RiftPulse song queue."; }
+        }
         private async Task SaveModuleSetting(string moduleKey, bool enabled)
         {
             try
@@ -289,8 +340,9 @@ namespace RiftPulse.Pcvr
                         if (bsrMatch.Success) _bsrPreviewEnabled = bsrMatch.Groups[1].Value == "true";
                         ChatToggleLabel = _chatPreviewEnabled ? "CHAT MODULE: ON (ACCOUNT SYNCED)" : "CHAT MODULE: OFF (ACCOUNT SYNCED)";
                         BsrToggleLabel = _bsrPreviewEnabled ? "BSR MODULE: ON (ACCOUNT SYNCED)" : "BSR MODULE: OFF (ACCOUNT SYNCED)";
-                        ModulePreviewStatus = "Module settings synced. Service controls are still in preview.";
+                        ModulePreviewStatus = "Module settings synced. Song requests are ready when BSR is enabled.";
                         RefreshUi();
+                        await RefreshSongRequestQueue();
                     }
                 }
             }
@@ -302,7 +354,8 @@ namespace RiftPulse.Pcvr
         {
             if (_connecting) return;
             _connecting = true;
-            PairingCode = "•••••";
+            ModulePreviewStatus = string.Empty;
+            PairingCode = "�����";
             StatusText = "Generating a secure pairing code...";
             RefreshUi();
 
